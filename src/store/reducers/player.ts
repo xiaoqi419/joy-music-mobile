@@ -34,6 +34,12 @@ export default function playerReducer(
         currentTrack: action.payload.length > 0 ? action.payload[0] : null,
       }
 
+    case 'PLAYER_SET_CURRENT_TRACK':
+      return {
+        ...state,
+        currentTrack: action.payload,
+      }
+
     case 'PLAYER_PLAY':
       return {
         ...state,

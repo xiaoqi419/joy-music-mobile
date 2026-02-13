@@ -4,7 +4,7 @@
  */
 
 import { Alert } from 'react-native'
-import { MusicSourceAPI, Quality } from './source'
+import { MusicSourceAPI, Quality } from '../source'
 
 const API_URL = 'https://c.wwwweb.top'
 const API_KEY = 'KAWANG_2544c96a-DEABFNVMBU4C0RAF'
@@ -23,6 +23,8 @@ interface IkunMusicInfo {
   songmid?: string
   name: string
   singer: string
+  source?: string
+  picUrl?: string
 }
 
 interface IkunResponse {
