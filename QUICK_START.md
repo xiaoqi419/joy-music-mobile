@@ -1,172 +1,246 @@
-# Joy Music Mobile Expo 快速开始指南
+# 🎵 Joy Music Mobile - 音源系统快速开始指南
 
-## 📋 前置要求
+## ✨ 你已经拥有什么
 
-确保您的电脑已安装以下软件：
+基于 lx-music-mobile 架构，你现在拥有一套完整的 iOS 音乐播放系统：
 
-- **Node.js** >= 18.0.0 ([下载](https://nodejs.org/))
-- **npm** >= 8.5.2 (Node.js 自带)
-- **Expo CLI** (通过 npm 安装)
-
-**注意**: 使用 Expo，您无需 Xcode 或 macOS！
-
-## 🚀 快速开始 (3 步)
-
-### 1️⃣ 克隆或进入项目
-
-```bash
-cd "e:\project\Joy Music\JoyMusicMobile"
-# 或在您的终端中导航到项目目录
-```
-
-### 2️⃣ 安装依赖
-
-```bash
-# 安装 npm 依赖
-npm install
-
-# 全局安装 Expo CLI（如果还未安装）
-npm install -g expo-cli
-```
-
-### 3️⃣ 运行应用
-
-```bash
-# 启动 Expo 开发服务器
-npm start
-
-# 然后按照屏幕提示：
-# - 按 'i' 在 iOS 模拟器中打开 (需要 macOS)
-# - 按 'a' 在 Android 模拟器中打开
-# - 按 'w' 在网页浏览器中打开
-# - 使用 Expo Go 应用扫描二维码在真实设备上运行
-```
-
-## 📱 在真实 iOS 设备上运行（推荐！）
-
-### 最简单方法: 使用 Expo Go 应用
-
-1. 在您的 iPhone 上从 App Store 安装 **Expo Go**
-2. 运行 `npm start`
-3. 用 iPhone 的相机扫描终端中显示的二维码
-4. 应用将在 Expo Go 中自动启动！
-
-### 使用 Tunnel（不在同一网络）
-
-```bash
-npm run tunnel
-```
-
-然后用 iPhone 扫描二维码即可运行。
-
-## 📁 项目文件夹说明
-
-| 文件夹 | 说明 |
-|--------|------|
-| `src/` | 源代码目录 (JavaScript/TypeScript) |
-| `assets/` | 图标和启动屏幕资源 |
-| `node_modules/` | 依赖包（自动生成）|
-| `.git/` | Git 仓库 |
-
-## 🛠️ 常用命令
-
-```bash
-# 启动开发服务器
-npm start
-
-# 在网页浏览器中运行
-npm run web
-
-# 代码检查
-npm run lint
-
-# 自动修复代码格式问题
-npm run lint:fix
-
-# 运行测试
-npm test
-```
-
-## 🎯 为什么选择 Expo？
-
-✅ **无需 Xcode/macOS** - 在 Windows 上完全可用
-✅ **Expo Go 应用** - 直接在真实 iPhone 上测试
-✅ **热重载** - 修改代码立即在设备上看到变化
-✅ **内置工具** - 无需复杂的原生配置
-✅ **云构建** - 可以通过云生成 IPA（上传到 App Store）
-✅ **跨平台** - 代码在 iOS、Android 和 Web 上共享
-
-## 🔍 调试
-
-### 查看日志
-
-```bash
-# Expo 会在终端显示所有日志
-npm start
-```
-
-### 在真实设备上使用开发菜单
-
-摇动您的 iPhone 两次以打开开发菜单，您可以：
-- 看到性能统计
-- 启用/禁用远程调试
-- 拍摄屏幕截图
-- 使用 Redux DevTools
-
-## ⚠️ 常见问题
-
-### 问题：连接失败
-**解决**:
-```bash
-# 确保您的电脑和 iPhone 在同一 WiFi 网络上
-# 或使用 Tunnel：
-npm run tunnel
-```
-
-### 问题：模块找不到
-**解决**:
-```bash
-# 清除依赖并重新安装
-rm -rf node_modules package-lock.json
-npm install
-```
-
-### 问题：黑屏启动
-**解决**:
-```bash
-# 使用清除缓存的方式启动
-npm start --clear
-```
-
-## 📚 学习资源
-
-- [Expo 官方文档](https://docs.expo.dev/)
-- [项目结构详解](./STRUCTURE.md)
-- [Redux 官方文档](https://redux.js.org/)
-
-## ✅ 验证安装
-
-```bash
-# 检查 Node.js 版本
-node -v        # 应该 >= 18.0.0
-
-# 检查 npm 版本
-npm -v         # 应该 >= 8.5.2
-
-# 检查 Expo CLI
-npm install -g expo-cli
-expo --version # 应该显示版本号
-```
-
-## 🎉 下一步
-
-1. 运行 `npm install`
-2. 运行 `npm start`
-3. 在手机上安装 Expo Go
-4. 扫描二维码运行应用！
+✅ **音源管理系统** - 支持多个音源，使用 ikun-music-source 适配器
+✅ **iOS 播放器** - 基于 Expo-AV，支持后台播放和响铃模式播放
+✅ **缓存系统** - AsyncStorage 多层缓存，减少网络请求
+✅ **质量自适应** - 自动选择最高可用质量，支持回源
+✅ **Redux 集成** - 完整的状态管理
+✅ **测试 UI** - PlayerTest 组件供快速验证
 
 ---
 
-祝您编码愉快！🎵🚀
+## 🚀 快速开始
 
-**Expo 让 React Native 开发变得超级简单！**
+### 1. 基本播放 - 3 行代码
+
+```typescript
+import { playerController } from './core/player'
+
+// 初始化
+await playerController.initialize()
+
+// 播放音乐
+await playerController.playTrack({
+  id: '123',
+  title: '歌曲名',
+  artist: '艺术家',
+  duration: 180000,
+  url: '',
+  source: 'kw',
+  songmid: 'xxx',
+  hash: 'xxx',
+})
+```
+
+### 2. 测试播放器
+
+```typescript
+import PlayerTestComponent from './screens/PlayerTest'
+
+// 在你的 App.tsx 中
+export default function App() {
+  return <PlayerTestComponent />
+}
+```
+
+就这样！你可以立即开始播放歌曲。
+
+---
+
+## 📚 完整 API 参考
+
+### 初始化和基本控制
+
+```typescript
+import { playerController } from './core/player'
+
+// 初始化播放器
+await playerController.initialize()
+
+// 播放单个歌曲
+await playerController.playTrack(track, {
+  quality: '320k',           // 可选：指定质量
+  autoPlay: true,            // 可选：自动播放
+  statusCallback: (status) => {} // 可选：状态回调
+})
+
+// 暂停
+await playerController.pause()
+
+// 继续
+await playerController.resume()
+
+// 停止
+await playerController.stop()
+```
+
+### 播放列表操作
+
+```typescript
+// 设置播放列表
+playerController.setPlaylist([track1, track2, track3])
+
+// 从列表中播放指定位置
+await playerController.playFromPlaylist(playlist, 0)
+
+// 下一首
+await playerController.playNext()
+
+// 上一首
+await playerController.playPrevious()
+```
+
+### 进度和音量控制
+
+```typescript
+// 跳转到指定位置 (毫秒)
+await playerController.seek(30000) // 30秒
+
+// 设置音量 (0-1)
+await playerController.setVolume(0.8)
+
+// 设置播放速率 (0.5-2.0)
+await playerController.setRate(1.5)
+```
+
+### 状态监听
+
+```typescript
+// 订阅播放状态更新
+const unsubscribe = playerController.onStatusUpdate((status) => {
+  console.log(`位置: ${status.positionMillis}ms`)
+  console.log(`总长: ${status.durationMillis}ms`)
+  console.log(`播放中: ${status.isPlaying}`)
+  console.log(`速率: ${status.rate}x`)
+  console.log(`音量: ${status.volume}`)
+})
+
+// 取消订阅
+unsubscribe()
+```
+
+### 音源管理
+
+```typescript
+// 获取所有可用源
+const sources = playerController.getAvailableSources()
+// 返回: [{ id: 'ikun', name: 'Ikun Music', enabled: true, ... }]
+
+// 获取当前源
+const currentSource = playerController.getCurrentSource()
+// 返回: 'ikun'
+
+// 切换源
+playerController.changeSource('ikun')
+
+// 设置偏好质量
+playerController.setPreferredQuality('flac')
+```
+
+---
+
+## 📊 性能优化建议
+
+### 1. 缓存优先
+
+首次播放时会缓存 URL，后续播放相同歌曲时直接使用缓存（秒级响应）
+
+### 2. 质量选择
+
+- 如果网络好，使用 'flac' 或 'flac24bit'
+- 日常使用推荐 '320k'
+- 低流量推荐 '128k'
+
+### 3. 列表预加载
+
+```typescript
+// 预先设置列表，避免频繁变动
+playerController.setPlaylist(bigPlaylist)
+
+// 随后只需播放即可
+await playerController.playFromPlaylist(bigPlaylist, index)
+```
+
+---
+
+## 🎨 UI 集成示例
+
+### 简单播放器界面
+
+```typescript
+import { View, Text, TouchableOpacity } from 'react-native'
+import { playerController } from './core/player'
+
+export function SimplePlayer({ track }) {
+  const [isPlaying, setIsPlaying] = useState(false)
+
+  const handlePlay = async() => {
+    try {
+      setIsPlaying(true)
+      await playerController.playTrack(track)
+    } catch (err) {
+      setIsPlaying(false)
+    }
+  }
+
+  return (
+    <View>
+      <Text>{track.title}</Text>
+      <TouchableOpacity onPress={handlePlay}>
+        <Text>{isPlaying ? '⏸' : '▶'}</Text>
+      </TouchableOpacity>
+    </View>
+  )
+}
+```
+
+---
+
+## ❓ 常见问题
+
+**Q: 如何添加新的音源？**
+
+A: 在 `src/core/music/sources/` 中创建新文件，实现 `MusicSourceAPI` 接口，然后在 `index.ts` 中注册。
+
+**Q: 播放出错怎么办？**
+
+A: 查看 console 日志找出错误信息，通常是 API key 过期或网络问题。
+
+**Q: 如何修改 API 配置？**
+
+A: 在 `src/core/music/sources/ikun.ts` 中修改 `API_URL` 和 `API_KEY`。
+
+**Q: 支持 Android 吗？**
+
+A: 目前专注于 iOS。Expo-AV 支持 Android，但需要额外的 Android 特定配置。
+
+**Q: 歌词显示如何实现？**
+
+A: `getLyricInfo()` 方法已预留，可通过 `ikunMusicSource` 实现。
+
+---
+
+## 📖 更多资源
+
+- 📄 **完整文档**: `MUSIC_SOURCE_IMPLEMENTATION.md`
+- 📄 **架构分析**: `LX_MUSIC_AUDIO_SOURCE_HANDLING.md`
+- 🧪 **测试组件**: `src/screens/PlayerTest.tsx`
+
+---
+
+## ✅ 总结
+
+你现在拥有：
+- ✓ 完整的音源系统
+- ✓ iOS 音频播放
+- ✓ 自动缓存
+- ✓ 错误恢复
+- ✓ 轻量级 API
+
+只需 3 行代码即可开始播放音乐！🎵
+
+Happy coding! 🚀
