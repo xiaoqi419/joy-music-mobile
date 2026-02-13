@@ -1,9 +1,31 @@
 /**
  * Music data management module
- * Handles local music data, library management, and sync
+ * Handles music sources, URL fetching, and library management
+ * Based on lx-music-mobile architecture
  */
 
 import { Track, Playlist } from '../../types/music'
+import { musicSourceManager, Quality } from './source'
+import { ikunMusicSource } from './sources/ikun'
+import { getMusicUrl, getMusicUrlWithRetry, MusicUrlRequest } from './url'
+import { musicUrlCache, clearAllCache } from './cache'
+
+// Initialize music sources on module load
+const initializeMusicSources = () => {
+  musicSourceManager.registerSource(ikunMusicSource, {
+    id: 'ikun',
+    name: 'Ikun Music',
+    enabled: true,
+    supportedQualities: ['128k', '320k', 'flac', 'flac24bit', 'hires'],
+  })
+
+  // Set default source
+  musicSourceManager.setCurrentSource('ikun')
+  console.log('[Music] Music sources initialized')
+}
+
+// Initialize sources when module is loaded
+initializeMusicSources()
 
 class MusicManager {
   private localLibrary: Track[] = []
@@ -11,6 +33,7 @@ class MusicManager {
 
   async initializeLibrary(): Promise<void> {
     // Load local music library from storage
+    console.log('[MusicManager] Library initialized')
   }
 
   async getLocalTracks(): Promise<Track[]> {
@@ -64,6 +87,57 @@ class MusicManager {
       playlist.updatedAt = Date.now()
     }
   }
+
+  /**
+   * Get music URL for playback
+   * Handles source selection, caching, and fallback
+   */
+  async getMusicPlayUrl(
+    musicInfo: any,
+    quality?: Quality,
+    isRefresh?: boolean
+  ): Promise<string> {
+    return getMusicUrlWithRetry({
+      musicId: musicInfo.id || musicInfo.songmid || musicInfo.hash,
+      musicInfo,
+      quality: quality || '320k',
+      isRefresh,
+    }).then(response => response.url)
+  }
+
+  /**
+   * Change music source
+   */
+  changeSource(sourceId: string): boolean {
+    const success = musicSourceManager.setCurrentSource(sourceId)
+    if (success) {
+      console.log(`[MusicManager] Source changed to: ${sourceId}`)
+    }
+    return success
+  }
+
+  /**
+   * Get all available sources
+   */
+  getAvailableSources() {
+    return musicSourceManager.getAllSources()
+  }
+
+  /**
+   * Get current source
+   */
+  getCurrentSource() {
+    return musicSourceManager.getCurrentSourceId()
+  }
+
+  /**
+   * Clear all cache
+   */
+  async clearCache(): Promise<void> {
+    await clearAllCache()
+  }
 }
 
 export default new MusicManager()
+export { musicSourceManager, getMusicUrl, getMusicUrlWithRetry }
+export type { Quality, MusicSourceInfo, MusicSourceAPI } from './source'

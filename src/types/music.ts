@@ -10,6 +10,11 @@ export interface Track {
   duration: number
   url: string
   coverUrl?: string
+  // ikun music source specific fields
+  source?: string
+  songmid?: string
+  hash?: string
+  picUrl?: string
 }
 
 export interface Playlist {
