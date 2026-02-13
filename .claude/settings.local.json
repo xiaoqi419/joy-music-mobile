@@ -1,7 +1,8 @@
 {
   "permissions": {
     "allow": [
-      "Bash(npm ci)"
+      "Bash(cd:*)",
+      "Bash(npx tsc:*)"
     ]
   }
 }
