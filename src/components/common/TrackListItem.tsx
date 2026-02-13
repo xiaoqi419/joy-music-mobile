@@ -1,0 +1,136 @@
+/**
+ * Single track list item component
+ */
+
+import React from 'react'
+import { View, Text, TouchableOpacity, StyleSheet, Image } from 'react-native'
+import { Ionicons } from '@expo/vector-icons'
+import { useTheme, spacing, fontSize, borderRadius, TRACK_ITEM_HEIGHT } from '../../theme'
+import { Track } from '../../types/music'
+
+interface TrackListItemProps {
+  track: Track
+  index?: number
+  isPlaying?: boolean
+  isCurrentTrack?: boolean
+  showIndex?: boolean
+  onPress?: (track: Track) => void
+}
+
+export default function TrackListItem({
+  track,
+  index,
+  isPlaying = false,
+  isCurrentTrack = false,
+  showIndex = true,
+  onPress,
+}: TrackListItemProps) {
+  const { colors } = useTheme()
+
+  return (
+    <TouchableOpacity
+      style={[styles.container, { height: TRACK_ITEM_HEIGHT }]}
+      onPress={() => onPress?.(track)}
+      activeOpacity={0.6}
+    >
+      {/* Left: Index or playing indicator */}
+      {showIndex && (
+        <View style={styles.indexContainer}>
+          {isCurrentTrack ? (
+            <Ionicons
+              name={isPlaying ? 'volume-high' : 'pause'}
+              size={16}
+              color={colors.accent}
+            />
+          ) : (
+            <Text style={[styles.index, { color: colors.textTertiary }]}>
+              {(index ?? 0) + 1}
+            </Text>
+          )}
+        </View>
+      )}
+
+      {/* Cover art (shown when index is hidden) */}
+      {!showIndex && (
+        <View style={[styles.cover, { backgroundColor: colors.surfaceElevated }]}>
+          {track.coverUrl ? (
+            <Image source={{ uri: track.coverUrl }} style={styles.coverImage} />
+          ) : (
+            <Ionicons name="musical-note" size={16} color={colors.textTertiary} />
+          )}
+        </View>
+      )}
+
+      {/* Track info */}
+      <View style={styles.info}>
+        <Text
+          style={[
+            styles.title,
+            { color: isCurrentTrack ? colors.accent : colors.text },
+          ]}
+          numberOfLines={1}
+        >
+          {track.title}
+        </Text>
+        <Text style={[styles.artist, { color: colors.textSecondary }]} numberOfLines={1}>
+          {track.artist}
+          {track.album ? ` - ${track.album}` : ''}
+        </Text>
+      </View>
+
+      {/* More button */}
+      <TouchableOpacity style={styles.moreButton} activeOpacity={0.6}>
+        <Ionicons name="ellipsis-horizontal" size={18} color={colors.textTertiary} />
+      </TouchableOpacity>
+    </TouchableOpacity>
+  )
+}
+
+const styles = StyleSheet.create({
+  container: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: spacing.md,
+  },
+  indexContainer: {
+    width: 32,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  index: {
+    fontSize: fontSize.subhead,
+    fontWeight: '500',
+  },
+  cover: {
+    width: 40,
+    height: 40,
+    borderRadius: borderRadius.sm,
+    alignItems: 'center',
+    justifyContent: 'center',
+    overflow: 'hidden',
+    marginRight: spacing.md,
+  },
+  coverImage: {
+    width: 40,
+    height: 40,
+  },
+  info: {
+    flex: 1,
+    justifyContent: 'center',
+    marginLeft: spacing.sm,
+  },
+  title: {
+    fontSize: fontSize.callout,
+    fontWeight: '500',
+  },
+  artist: {
+    fontSize: fontSize.caption1,
+    marginTop: 2,
+  },
+  moreButton: {
+    width: 36,
+    height: 36,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+})
