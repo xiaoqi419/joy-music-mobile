@@ -32,9 +32,10 @@
     },
     "plugins": [
       [
-        "expo-av",
+        "expo-audio",
         {
-          "microphonePermission": "Allow Joy Music to access your microphone."
+          "microphonePermission": "Allow Joy Music to access your microphone.",
+          "recordAudioAndroid": false
         }
       ]
     ]

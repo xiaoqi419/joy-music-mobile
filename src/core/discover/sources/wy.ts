@@ -1,0 +1,201 @@
+import { Track } from '../../../types/music'
+import {
+  LeaderboardBoardList,
+  LeaderboardDetail,
+  SongListDetail,
+  SongListPage,
+  SongListTagInfo,
+} from '../../../types/discover'
+import { httpRequest, withRetry } from '../http'
+import { DiscoverSourceAdapter } from './types'
+
+const SONG_LIMIT = 30
+const DETAIL_LIMIT = 1000
+
+const sortList = [{ id: 'hot', tid: 'hot', name: 'Hot' }]
+
+const TOP_LIST = [
+  { id: 'wy__19723756', name: '飙升榜', bangId: '19723756' },
+  { id: 'wy__3779629', name: '新歌榜', bangId: '3779629' },
+  { id: 'wy__3778678', name: '热歌榜', bangId: '3778678' },
+  { id: 'wy__2884035', name: '原创榜', bangId: '2884035' },
+  { id: 'wy__745956260', name: '韩语榜', bangId: '745956260' },
+]
+
+const toPlayCount = (count: number | string | undefined): string => {
+  const num = Number(count || 0)
+  if (!Number.isFinite(num)) return '0'
+  if (num > 100000000) return `${Math.round(num / 10000000) / 10}亿`
+  if (num > 10000) return `${Math.round(num / 1000) / 10}万`
+  return String(Math.round(num))
+}
+
+const ms = (value: number | undefined | null) => Math.max(0, Number(value || 0))
+
+function mapTrack(item: any): Track {
+  const songmid = String(item.id || '')
+  const source = 'wy'
+  const qualitys: Record<string, boolean> = {}
+  if (item.hr) qualitys.flac24bit = true
+  if (item.sq || item.h) qualitys.flac = true
+  if (item.h) qualitys['320k'] = true
+  if (item.l || item.m) qualitys['128k'] = true
+
+  return {
+    id: `${source}_${songmid}`,
+    title: item.name || '',
+    artist: Array.isArray(item.ar) ? item.ar.map((s: any) => s.name).join(' / ') : '',
+    album: item.al?.name || '',
+    duration: ms(item.dt),
+    url: '',
+    coverUrl: item.al?.picUrl,
+    source,
+    songmid,
+    picUrl: item.al?.picUrl,
+    // @ts-expect-error keep runtime metadata for URL resolver fallback
+    _types: qualitys,
+  }
+}
+
+function parseListId(id: string): string {
+  const match = /id=(\d+)/.exec(id)
+  if (match) return match[1]
+  if (/^\d+$/.test(id)) return id
+  const match2 = /playlist\/(\d+)/.exec(id)
+  if (match2) return match2[1]
+  return id
+}
+
+async function getTags(): Promise<{ tags: SongListTagInfo[]; hotTags: SongListTagInfo[] }> {
+  const catalogue = await withRetry(() =>
+    httpRequest('https://music.163.com/api/playlist/catalogue')
+  )
+  const hot = await withRetry(() =>
+    httpRequest('https://music.163.com/api/playlist/hottags')
+  )
+
+  const tags: SongListTagInfo[] = []
+  const sub = catalogue.data?.sub || []
+  const categories = catalogue.data?.categories || {}
+  for (const item of sub) {
+    tags.push({
+      id: String(item.name),
+      name: String(item.name),
+      parentId: String(item.category),
+      parentName: String(categories[item.category] || ''),
+      source: 'wy',
+    })
+  }
+
+  const hotTags: SongListTagInfo[] = (hot.data?.tags || []).map((item: any) => ({
+    id: String(item.playlistTag?.name || item.name),
+    name: String(item.playlistTag?.name || item.name),
+    source: 'wy',
+  }))
+
+  return { tags, hotTags }
+}
+
+async function getList(sortId: string, tagId: string, page: number): Promise<SongListPage> {
+  const offset = (page - 1) * SONG_LIMIT
+  const resp = await withRetry(() =>
+    httpRequest('https://music.163.com/api/playlist/list', {
+      query: {
+        order: sortId || 'hot',
+        cat: tagId || '全部',
+        limit: SONG_LIMIT,
+        offset,
+      },
+    })
+  )
+
+  const playlists = resp.data?.playlists || []
+  const total = Number(resp.data?.total || playlists.length)
+  return {
+    list: playlists.map((item: any) => ({
+      id: String(item.id),
+      name: item.name || '',
+      author: item.creator?.nickname || '',
+      coverUrl: item.coverImgUrl || '',
+      playCount: toPlayCount(item.playCount),
+      description: item.description || '',
+      total: Number(item.trackCount || 0),
+      source: 'wy',
+    })),
+    total,
+    page,
+    limit: SONG_LIMIT,
+    maxPage: Math.max(1, Math.ceil(total / SONG_LIMIT)),
+    source: 'wy',
+    sortId: sortId || 'hot',
+    tagId: tagId || '',
+  }
+}
+
+async function getListDetail(id: string, page: number): Promise<SongListDetail> {
+  const playlistId = parseListId(id)
+  const resp = await withRetry(() =>
+    httpRequest('https://music.163.com/api/v3/playlist/detail', {
+      query: { id: playlistId, n: DETAIL_LIMIT, s: 8 },
+    })
+  )
+  const playlist = resp.data?.playlist || {}
+  const allTracks = (playlist.tracks || []).map((item: any) => mapTrack(item))
+  const limit = DETAIL_LIMIT
+  const start = (page - 1) * limit
+  const list = allTracks.slice(start, start + limit)
+  const total = Number(playlist.trackCount || allTracks.length)
+
+  return {
+    id: playlistId,
+    source: 'wy',
+    list,
+    total,
+    page,
+    limit,
+    maxPage: Math.max(1, Math.ceil(total / limit)),
+    info: {
+      name: playlist.name || '',
+      coverUrl: playlist.coverImgUrl || '',
+      description: playlist.description || '',
+      author: playlist.creator?.nickname || '',
+      playCount: toPlayCount(playlist.playCount),
+    },
+  }
+}
+
+async function getBoards(): Promise<LeaderboardBoardList> {
+  return {
+    source: 'wy',
+    list: TOP_LIST.map(item => ({ ...item, source: 'wy' as const })),
+  }
+}
+
+async function getBoardList(boardId: string, page: number): Promise<LeaderboardDetail> {
+  const id = boardId.replace(/^wy__/, '')
+  const detail = await getListDetail(id, page)
+  return {
+    id: `wy__${id}`,
+    source: 'wy',
+    list: detail.list,
+    total: detail.total,
+    page,
+    limit: detail.limit,
+    maxPage: detail.maxPage,
+  }
+}
+
+export const wyDiscoverSource: DiscoverSourceAdapter = {
+  id: 'wy',
+  name: 'Netease',
+  songList: {
+    sortList,
+    getTags,
+    getList,
+    getListDetail,
+  },
+  leaderboard: {
+    getBoards,
+    getList: getBoardList,
+  },
+}

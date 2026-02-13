@@ -1,6 +1,6 @@
 /**
  * Music player core module
- * Handles playback control using expo-av
+ * Handles playback control using expo-audio
  * iOS compatible music player with source management
  */
 

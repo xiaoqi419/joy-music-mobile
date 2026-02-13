@@ -1,6 +1,6 @@
 /**
  * High-level player controller
- * Orchestrates music source and expo-av player
+ * Orchestrates music source and expo-audio player
  * Handles playback workflows
  */
 
@@ -26,7 +26,7 @@ class MusicPlayerController {
   private preferredQuality: Quality = '320k'
 
   constructor() {
-    // Set up expo-av player status updates
+    // Set up player status updates
     expoAVPlayer.setStatusCallback(this.handlePlayerStatusUpdate.bind(this))
   }
 
@@ -56,7 +56,7 @@ class MusicPlayerController {
         config?.quality || this.preferredQuality
       )
 
-      // Play through expo-av
+      // Play through player engine
       await expoAVPlayer.play(track, url, {
         shouldPlay: config?.autoPlay ?? true,
         volume: 1.0,

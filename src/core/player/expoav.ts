@@ -1,10 +1,9 @@
 /**
- * Expo-AV based music player implementation
- * Handles playback control using expo-av library
- * iOS compatible
+ * Expo Audio based music player implementation.
+ * Keeps the original public interface to avoid touching controller callers.
  */
 
-import { Audio } from 'expo-av'
+import { AudioPlayer, createAudioPlayer, setAudioModeAsync } from 'expo-audio'
 import { Track } from '../../types/music'
 
 export interface PlayerConfig {
@@ -16,266 +15,132 @@ export interface PlayerConfig {
 export interface PlaybackStatus {
   isLoaded: boolean
   isPlaying: boolean
-  isDonePlay: boolean
+  didJustFinish: boolean
   durationMillis: number
   positionMillis: number
   rate: number
   volume: number
 }
 
-/**
- * Music player using expo-av
- * Handles all audio playback operations
- */
-class ExpoAVPlayer {
-  private sound: Audio.Sound | null = null
-  private isInitialized: boolean = false
+class ExpoAudioPlayerWrapper {
+  private player: AudioPlayer | null = null
+  private isInitialized = false
   private currentTrack: Track | null = null
   private statusUpdateCallback: ((status: PlaybackStatus) => void) | null = null
+  private statusSubscription: { remove: () => void } | null = null
 
-  /**
-   * Initialize audio session (iOS requires this)
-   */
   async initialize(): Promise<void> {
-    try {
-      if (this.isInitialized) {
-        return
-      }
-
-      // Set audio mode for iOS
-      await Audio.setAudioModeAsync({
-        playsInSilentModeIOS: true,
-        staysActiveInBackground: true,
-        interruptionHandlingIOS: Audio.INTERRUPTION_MODE_IOS_DUCK_OTHERS,
-      })
-
-      this.isInitialized = true
-      console.log('[ExpoAVPlayer] Initialized')
-    } catch (error) {
-      console.error('[ExpoAVPlayer] Initialization failed:', error)
-      throw error
-    }
+    if (this.isInitialized) return
+    await setAudioModeAsync({
+      playsInSilentMode: true,
+      shouldPlayInBackground: true,
+      interruptionMode: 'duckOthers',
+    })
+    this.isInitialized = true
+    console.log('[ExpoAudioPlayer] Initialized')
   }
 
-  /**
-   * Load and play a track
-   */
   async play(track: Track, url: string, config?: PlayerConfig): Promise<void> {
-    try {
-      // Initialize if needed
-      if (!this.isInitialized) {
-        await this.initialize()
-      }
+    if (!this.isInitialized) await this.initialize()
 
-      // Unload previous sound
-      if (this.sound) {
-        try {
-          await this.sound.unloadAsync()
-        } catch (error) {
-          console.warn('[ExpoAVPlayer] Error unloading previous sound:', error)
-        }
-      }
-
-      console.log(`[ExpoAVPlayer] Loading track: ${track.title}`)
-
-      // Create new sound object
-      const sound = new Audio.Sound()
-
-      // Set up status update callback
-      sound.setOnPlaybackStatusUpdate(this.handlePlaybackStatusUpdate.bind(this))
-
-      // Load audio file
-      await sound.loadAsync(
+    if (!this.player) {
+      this.player = createAudioPlayer(
         { uri: url },
-        {
-          volume: config?.volume ?? 1.0,
-          rate: config?.playbackRate ?? 1.0,
-          shouldPlay: false,
-        }
+        { updateInterval: 250, keepAudioSessionActive: true }
       )
+      this.statusSubscription = this.player.addListener('playbackStatusUpdate', (status) => {
+        this.handlePlaybackStatusUpdate(status)
+      })
+    } else {
+      this.player.replace({ uri: url })
+    }
 
-      this.sound = sound
-      this.currentTrack = track
+    this.player.volume = Math.max(0, Math.min(1, config?.volume ?? 1))
+    this.player.setPlaybackRate(config?.playbackRate ?? 1, 'high')
+    this.currentTrack = track
 
-      // Start playback if requested
-      if (config?.shouldPlay ?? true) {
-        await sound.playAsync()
-        console.log(`[ExpoAVPlayer] Playing: ${track.title}`)
-      }
-    } catch (error) {
-      console.error('[ExpoAVPlayer] Error playing track:', error)
-      throw error
+    if (config?.shouldPlay ?? true) {
+      this.player.play()
     }
   }
 
-  /**
-   * Pause playback
-   */
   async pause(): Promise<void> {
-    try {
-      if (this.sound) {
-        await this.sound.pauseAsync()
-        console.log('[ExpoAVPlayer] Paused')
-      }
-    } catch (error) {
-      console.error('[ExpoAVPlayer] Error pausing:', error)
-      throw error
-    }
+    if (!this.player) return
+    this.player.pause()
   }
 
-  /**
-   * Resume playback
-   */
   async resume(): Promise<void> {
-    try {
-      if (this.sound) {
-        await this.sound.playAsync()
-        console.log('[ExpoAVPlayer] Resumed')
-      }
-    } catch (error) {
-      console.error('[ExpoAVPlayer] Error resuming:', error)
-      throw error
-    }
+    if (!this.player) return
+    this.player.play()
   }
 
-  /**
-   * Stop playback and unload
-   */
   async stop(): Promise<void> {
+    if (!this.player) return
     try {
-      if (this.sound) {
-        await this.sound.stopAsync()
-        await this.sound.unloadAsync()
-        this.sound = null
-        this.currentTrack = null
-        console.log('[ExpoAVPlayer] Stopped')
-      }
-    } catch (error) {
-      console.error('[ExpoAVPlayer] Error stopping:', error)
-      throw error
+      this.player.pause()
+      await this.player.seekTo(0)
+    } finally {
+      this.statusSubscription?.remove()
+      this.statusSubscription = null
+      this.player.remove()
+      this.player = null
+      this.currentTrack = null
     }
   }
 
-  /**
-   * Seek to specific time
-   */
   async seek(positionMillis: number): Promise<void> {
-    try {
-      if (this.sound) {
-        await this.sound.setPositionAsync(positionMillis)
-        console.log(`[ExpoAVPlayer] Seeked to ${positionMillis}ms`)
-      }
-    } catch (error) {
-      console.error('[ExpoAVPlayer] Error seeking:', error)
-      throw error
-    }
+    if (!this.player) return
+    await this.player.seekTo(Math.max(0, positionMillis) / 1000)
   }
 
-  /**
-   * Set volume (0 to 1)
-   */
   async setVolume(volume: number): Promise<void> {
-    try {
-      const normalizedVolume = Math.max(0, Math.min(1, volume))
-      if (this.sound) {
-        await this.sound.setVolumeAsync(normalizedVolume)
-        console.log(`[ExpoAVPlayer] Volume set to ${normalizedVolume}`)
-      }
-    } catch (error) {
-      console.error('[ExpoAVPlayer] Error setting volume:', error)
-      throw error
-    }
+    if (!this.player) return
+    this.player.volume = Math.max(0, Math.min(1, volume))
   }
 
-  /**
-   * Set playback rate
-   */
   async setRate(rate: number): Promise<void> {
-    try {
-      if (this.sound) {
-        await this.sound.setRateAsync(rate, true)
-        console.log(`[ExpoAVPlayer] Rate set to ${rate}`)
-      }
-    } catch (error) {
-      console.error('[ExpoAVPlayer] Error setting rate:', error)
-      throw error
-    }
+    if (!this.player) return
+    this.player.setPlaybackRate(rate, 'high')
   }
 
-  /**
-   * Get current playback status
-   */
   async getStatus(): Promise<PlaybackStatus | null> {
-    try {
-      if (!this.sound) {
-        return null
-      }
-
-      const status = await this.sound.getStatusAsync()
-
-      if (!status.isLoaded) {
-        return null
-      }
-
-      return {
-        isLoaded: status.isLoaded,
-        isPlaying: status.isPlaying,
-        isDonePlay: status.isDonePlay,
-        durationMillis: status.durationMillis ?? 0,
-        positionMillis: status.positionMillis ?? 0,
-        rate: status.rate ?? 1.0,
-        volume: status.volume ?? 1.0,
-      }
-    } catch (error) {
-      console.error('[ExpoAVPlayer] Error getting status:', error)
-      return null
+    if (!this.player) return null
+    const s = this.player.currentStatus
+    return {
+      isLoaded: s.isLoaded,
+      isPlaying: s.playing,
+      didJustFinish: s.didJustFinish ?? false,
+      durationMillis: Math.max(0, Math.round((s.duration || 0) * 1000)),
+      positionMillis: Math.max(0, Math.round((s.currentTime || 0) * 1000)),
+      rate: s.playbackRate ?? 1,
+      volume: this.player.volume ?? 1,
     }
   }
 
-  /**
-   * Set status update callback
-   */
   setStatusCallback(callback: (status: PlaybackStatus) => void): void {
     this.statusUpdateCallback = callback
   }
 
-  /**
-   * Get current track
-   */
   getCurrentTrack(): Track | null {
     return this.currentTrack
   }
 
-  /**
-   * Internal: Handle playback status updates
-   */
   private handlePlaybackStatusUpdate(status: any): void {
-    if (!status.isLoaded) {
-      return
+    const payload: PlaybackStatus = {
+      isLoaded: !!status?.isLoaded,
+      isPlaying: !!status?.playing,
+      didJustFinish: !!status?.didJustFinish,
+      durationMillis: Math.max(0, Math.round((status?.duration || 0) * 1000)),
+      positionMillis: Math.max(0, Math.round((status?.currentTime || 0) * 1000)),
+      rate: status?.playbackRate ?? 1,
+      volume: this.player?.volume ?? 1,
     }
-
-    const playbackStatus: PlaybackStatus = {
-      isLoaded: status.isLoaded,
-      isPlaying: status.isPlaying,
-      isDonePlay: status.isDonePlay,
-      durationMillis: status.durationMillis ?? 0,
-      positionMillis: status.positionMillis ?? 0,
-      rate: status.rate ?? 1.0,
-      volume: status.volume ?? 1.0,
-    }
-
-    // Call callback if set
-    if (this.statusUpdateCallback) {
-      this.statusUpdateCallback(playbackStatus)
-    }
+    this.statusUpdateCallback?.(payload)
   }
 
-  /**
-   * Check if player has a sound loaded
-   */
   isLoaded(): boolean {
-    return this.sound !== null && this.isInitialized
+    return !!this.player && !!this.player.isLoaded
   }
 }
 
-export const expoAVPlayer = new ExpoAVPlayer()
+export const expoAVPlayer = new ExpoAudioPlayerWrapper()
