@@ -1,29 +1,17 @@
 import { DiscoverSourceId } from '../../../types/discover'
+import { kgDiscoverSource } from './kg'
 import { kwDiscoverSource } from './kw'
+import { mgDiscoverSource } from './mg'
+import { txDiscoverSource } from './tx'
 import { wyDiscoverSource } from './wy'
 import { DiscoverSourceAdapter } from './types'
-
-const fallbackAdapter = (id: DiscoverSourceId, name: string): DiscoverSourceAdapter => ({
-  id,
-  name,
-  songList: {
-    sortList: kwDiscoverSource.songList.sortList,
-    getTags: kwDiscoverSource.songList.getTags,
-    getList: kwDiscoverSource.songList.getList,
-    getListDetail: kwDiscoverSource.songList.getListDetail,
-  },
-  leaderboard: {
-    getBoards: wyDiscoverSource.leaderboard.getBoards,
-    getList: wyDiscoverSource.leaderboard.getList,
-  },
-})
 
 export const discoverSources: Record<DiscoverSourceId, DiscoverSourceAdapter> = {
   kw: kwDiscoverSource,
   wy: wyDiscoverSource,
-  tx: fallbackAdapter('tx', 'QQ Music'),
-  kg: fallbackAdapter('kg', 'Kugou'),
-  mg: fallbackAdapter('mg', 'Migu'),
+  tx: txDiscoverSource,
+  kg: kgDiscoverSource,
+  mg: mgDiscoverSource,
 }
 
 export const discoverSourceList: Array<{ id: DiscoverSourceId; name: string }> = [
