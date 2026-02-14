@@ -7,6 +7,9 @@ import {
 const songListPageCache = new Map<string, SongListPage>()
 const songListDetailCache = new Map<string, SongListDetail>()
 const leaderboardDetailCache = new Map<string, LeaderboardDetail>()
+const latestSongListPageBySource = new Map<string, SongListPage>()
+const latestSongListDetailBySource = new Map<string, SongListDetail>()
+const latestLeaderboardDetailBySource = new Map<string, LeaderboardDetail>()
 
 const key = (...parts: Array<string | number>) => parts.join('__')
 
@@ -27,6 +30,7 @@ export function setSongListPageCache(
   data: SongListPage
 ): void {
   songListPageCache.set(key('slist', source, sortId, tagId, page), data)
+  latestSongListPageBySource.set(source, data)
 }
 
 export function getSongListDetailCache(
@@ -44,6 +48,7 @@ export function setSongListDetailCache(
   data: SongListDetail
 ): void {
   songListDetailCache.set(key('sdetail', source, id, page), data)
+  latestSongListDetailBySource.set(source, data)
 }
 
 export function getLeaderboardDetailCache(
@@ -61,10 +66,28 @@ export function setLeaderboardDetailCache(
   data: LeaderboardDetail
 ): void {
   leaderboardDetailCache.set(key('top', source, boardId, page), data)
+  latestLeaderboardDetailBySource.set(source, data)
+}
+
+export function getFallbackSongListPageCache(source: string): SongListPage | null {
+  return latestSongListPageBySource.get(source) ?? null
+}
+
+export function getFallbackSongListDetailCache(source: string): SongListDetail | null {
+  return latestSongListDetailBySource.get(source) ?? null
+}
+
+export function getFallbackLeaderboardDetailCache(
+  source: string
+): LeaderboardDetail | null {
+  return latestLeaderboardDetailBySource.get(source) ?? null
 }
 
 export function clearDiscoverCache(): void {
   songListPageCache.clear()
   songListDetailCache.clear()
   leaderboardDetailCache.clear()
+  latestSongListPageBySource.clear()
+  latestSongListDetailBySource.clear()
+  latestLeaderboardDetailBySource.clear()
 }

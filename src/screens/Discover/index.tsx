@@ -119,7 +119,7 @@ export default function DiscoverScreen({
       })
     } catch (error) {
       console.error('[Discover] Load leaderboard failed:', error)
-      setTopError('Failed to load charts.')
+      setTopError(`${source.toUpperCase()} 排行榜加载失败，可切换平台重试。`)
       setBoards([])
     } finally {
       setTopLoading(false)
@@ -134,7 +134,7 @@ export default function DiscoverScreen({
       setHotTracks(list)
     } catch (error) {
       console.error('[Discover] Load hot tracks failed:', error)
-      setHotError('Failed to load hot tracks.')
+      setHotError(`${source.toUpperCase()} 热门歌曲加载失败，可切换平台重试。`)
       setHotTracks([])
     } finally {
       setHotLoading(false)
@@ -160,7 +160,7 @@ export default function DiscoverScreen({
         })
       } catch (error) {
         console.error('[Discover] Load playlists failed:', error)
-        setPlaylistError('Failed to load playlists.')
+        setPlaylistError(`${source.toUpperCase()} 歌单加载失败，可切换平台重试。`)
         setPlaylists([])
       } finally {
         setPlaylistLoading(false)

@@ -8,6 +8,9 @@ import {
   SongListTagInfo,
 } from '../../types/discover'
 import {
+  getFallbackLeaderboardDetailCache,
+  getFallbackSongListDetailCache,
+  getFallbackSongListPageCache,
   getLeaderboardDetailCache,
   getSongListDetailCache,
   getSongListPageCache,
@@ -58,9 +61,15 @@ export async function getSongListPage(params: {
     const cached = getSongListPageCache(source, sortId, tagId, page)
     if (cached) return cached
   }
-  const result = await adapter(source).songList.getList(sortId, tagId, page)
-  setSongListPageCache(source, sortId, tagId, page, result)
-  return result
+  try {
+    const result = await adapter(source).songList.getList(sortId, tagId, page)
+    setSongListPageCache(source, sortId, tagId, page, result)
+    return result
+  } catch (error) {
+    const fallback = getFallbackSongListPageCache(source)
+    if (fallback) return fallback
+    throw error
+  }
 }
 
 export async function getSongListDetail(params: {
@@ -74,9 +83,15 @@ export async function getSongListDetail(params: {
     const cached = getSongListDetailCache(source, id, page)
     if (cached) return cached
   }
-  const result = await adapter(source).songList.getListDetail(id, page)
-  setSongListDetailCache(source, id, page, result)
-  return result
+  try {
+    const result = await adapter(source).songList.getListDetail(id, page)
+    setSongListDetailCache(source, id, page, result)
+    return result
+  } catch (error) {
+    const fallback = getFallbackSongListDetailCache(source)
+    if (fallback) return fallback
+    throw error
+  }
 }
 
 export async function getLeaderboardBoards(
@@ -97,21 +112,35 @@ export async function getLeaderboardDetail(params: {
     const cached = getLeaderboardDetailCache(source, boardId, page)
     if (cached) return cached
   }
-  const result = await adapter(source).leaderboard.getList(boardId, page)
-  setLeaderboardDetailCache(source, boardId, page, result)
-  return result
+  try {
+    const result = await adapter(source).leaderboard.getList(boardId, page)
+    setLeaderboardDetailCache(source, boardId, page, result)
+    return result
+  } catch (error) {
+    const fallback = getFallbackLeaderboardDetailCache(source)
+    if (fallback) return fallback
+    throw error
+  }
 }
 
 export async function getHotTracksFromTop(
   source: DiscoverSourceId
 ): Promise<Track[]> {
   const boards = await getLeaderboardBoards(source)
-  const firstBoard = boards[0]
-  if (!firstBoard) return []
-  const detail = await getLeaderboardDetail({
-    source,
-    boardId: firstBoard.id,
-    page: 1,
-  })
-  return detail.list.slice(0, 5)
+  if (!boards.length) return []
+  const targets = boards.slice(0, 3)
+  for (const board of targets) {
+    try {
+      const detail = await getLeaderboardDetail({
+        source,
+        boardId: board.id,
+        page: 1,
+      })
+      if (detail.list.length) return detail.list.slice(0, 5)
+    } catch {
+      // try next board for better resilience
+    }
+  }
+  const fallback = getFallbackLeaderboardDetailCache(source)
+  return fallback?.list.slice(0, 5) ?? []
 }

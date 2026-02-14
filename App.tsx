@@ -4,7 +4,7 @@
  */
 
 import React, { useCallback, useEffect, useState } from 'react'
-import { ActivityIndicator, StatusBar, StyleSheet, Text, View } from 'react-native'
+import { ActivityIndicator, Alert, StatusBar, StyleSheet, Text, View } from 'react-native'
 import { SafeAreaProvider } from 'react-native-safe-area-context'
 import { Provider as ReduxProvider, useDispatch } from 'react-redux'
 import * as SplashScreen from 'expo-splash-screen'
@@ -85,6 +85,10 @@ function AppContent() {
         boardId: board.id,
         page: 1,
       })
+      if (!detail.list.length) {
+        Alert.alert('暂无可播放内容', `${board.source.toUpperCase()} 当前榜单为空，请切换平台重试。`)
+        return
+      }
       setDetailView({
         title: board.name,
         description: `${board.source.toUpperCase()} leaderboard`,
@@ -92,6 +96,7 @@ function AppContent() {
       })
     } catch (error) {
       console.error('Load leaderboard detail error:', error)
+      Alert.alert('加载失败', `${board.source.toUpperCase()} 榜单获取失败，请稍后重试或切换平台。`)
     } finally {
       setDetailLoading(false)
     }
@@ -105,6 +110,10 @@ function AppContent() {
         id: playlist.id,
         page: 1,
       })
+      if (!detail.list.length) {
+        Alert.alert('暂无可播放内容', `${playlist.source.toUpperCase()} 歌单为空，请切换平台重试。`)
+        return
+      }
       setDetailView({
         title: detail.info.name || playlist.name,
         description: detail.info.description || playlist.description,
@@ -113,6 +122,7 @@ function AppContent() {
       })
     } catch (error) {
       console.error('Load playlist detail error:', error)
+      Alert.alert('加载失败', `${playlist.source.toUpperCase()} 歌单获取失败，请稍后重试或切换平台。`)
     } finally {
       setDetailLoading(false)
     }
@@ -179,7 +189,7 @@ function AppContent() {
       {detailLoading && (
         <View style={styles.loadingOverlay}>
           <ActivityIndicator size="large" color={colors.accent} />
-          <Text style={[styles.loadingText, { color: colors.text }]}>Loading...</Text>
+          <Text style={[styles.loadingText, { color: colors.text }]}>加载中...</Text>
         </View>
       )}
 
