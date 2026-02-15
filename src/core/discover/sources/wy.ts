@@ -1,3 +1,8 @@
+/**
+ * WY（网易云音乐）数据源适配器。
+ * 所有 API 请求通过 linuxapi 加密通道发送。
+ */
+
 import { Track } from '../../../types/music'
 import {
   LeaderboardBoardList,
@@ -6,7 +11,8 @@ import {
   SongListPage,
   SongListTagInfo,
 } from '../../../types/discover'
-import { httpRequest, withRetry } from '../http'
+import { withRetry } from '../http'
+import { wyRequest } from '../wyCrypto'
 import { DiscoverSourceAdapter } from './types'
 
 const SONG_LIMIT = 30
@@ -22,6 +28,7 @@ const TOP_LIST = [
   { id: 'wy__745956260', name: '韩语榜', bangId: '745956260' },
 ]
 
+/** 格式化播放量为中文可读字符串 */
 const toPlayCount = (count: number | string | undefined): string => {
   const num = Number(count || 0)
   if (!Number.isFinite(num)) return '0'
@@ -32,6 +39,7 @@ const toPlayCount = (count: number | string | undefined): string => {
 
 const ms = (value: number | undefined | null) => Math.max(0, Number(value || 0))
 
+/** 将 WY 原始歌曲数据映射为 Track */
 function mapTrack(item: any): Track {
   const songmid = String(item.id || '')
   const source = 'wy'
@@ -57,6 +65,7 @@ function mapTrack(item: any): Track {
   }
 }
 
+/** 从 URL 或字符串中解析歌单 ID */
 function parseListId(id: string): string {
   const match = /id=(\d+)/.exec(id)
   if (match) return match[1]
@@ -66,12 +75,13 @@ function parseListId(id: string): string {
   return id
 }
 
+/** 获取歌单标签分类 */
 async function getTags(): Promise<{ tags: SongListTagInfo[]; hotTags: SongListTagInfo[] }> {
   const catalogue = await withRetry(() =>
-    httpRequest('https://music.163.com/api/playlist/catalogue')
+    wyRequest('https://music.163.com/api/playlist/catalogue', {})
   )
   const hot = await withRetry(() =>
-    httpRequest('https://music.163.com/api/playlist/hottags')
+    wyRequest('https://music.163.com/api/playlist/hottags', {})
   )
 
   const tags: SongListTagInfo[] = []
@@ -96,16 +106,16 @@ async function getTags(): Promise<{ tags: SongListTagInfo[]; hotTags: SongListTa
   return { tags, hotTags }
 }
 
+/** 获取歌单列表（加密请求） */
 async function getList(sortId: string, tagId: string, page: number): Promise<SongListPage> {
   const offset = (page - 1) * SONG_LIMIT
   const resp = await withRetry(() =>
-    httpRequest('https://music.163.com/api/playlist/list', {
-      query: {
-        order: sortId || 'hot',
-        cat: tagId || '全部',
-        limit: SONG_LIMIT,
-        offset,
-      },
+    wyRequest('https://music.163.com/api/playlist/list', {
+      order: 'hot',
+      cat: tagId || '全部',
+      limit: SONG_LIMIT,
+      offset,
+      total: true,
     })
   )
 
@@ -132,11 +142,14 @@ async function getList(sortId: string, tagId: string, page: number): Promise<Son
   }
 }
 
+/** 获取歌单详情及歌曲列表（加密请求） */
 async function getListDetail(id: string, page: number): Promise<SongListDetail> {
   const playlistId = parseListId(id)
   const resp = await withRetry(() =>
-    httpRequest('https://music.163.com/api/v3/playlist/detail', {
-      query: { id: playlistId, n: DETAIL_LIMIT, s: 8 },
+    wyRequest('https://music.163.com/api/v3/playlist/detail', {
+      id: playlistId,
+      n: DETAIL_LIMIT,
+      s: 8,
     })
   )
   const playlist = resp.data?.playlist || {}
@@ -164,6 +177,7 @@ async function getListDetail(id: string, page: number): Promise<SongListDetail> 
   }
 }
 
+/** 获取排行榜列表 */
 async function getBoards(): Promise<LeaderboardBoardList> {
   return {
     source: 'wy',
@@ -171,6 +185,7 @@ async function getBoards(): Promise<LeaderboardBoardList> {
   }
 }
 
+/** 获取排行榜歌曲详情 */
 async function getBoardList(boardId: string, page: number): Promise<LeaderboardDetail> {
   const id = boardId.replace(/^wy__/, '')
   const detail = await getListDetail(id, page)

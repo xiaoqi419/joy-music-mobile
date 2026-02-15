@@ -6,6 +6,14 @@ import { txDiscoverSource } from './tx'
 import { wyDiscoverSource } from './wy'
 import { DiscoverSourceAdapter } from './types'
 
+console.log('[DiscoverSources] module loaded, sources:', {
+  kw: !!kwDiscoverSource,
+  wy: !!wyDiscoverSource,
+  tx: !!txDiscoverSource,
+  kg: !!kgDiscoverSource,
+  mg: !!mgDiscoverSource,
+})
+
 export const discoverSources: Record<DiscoverSourceId, DiscoverSourceAdapter> = {
   kw: kwDiscoverSource,
   wy: wyDiscoverSource,

@@ -57,8 +57,8 @@ export default function LeaderboardScreen({
         source,
         boardId: list[0]?.id || '',
       })
-    } catch (error) {
-      console.error('[Leaderboard] Load leaderboard failed:', error)
+    } catch (error: any) {
+      console.error('[Leaderboard] Load leaderboard failed:', error?.message || error, error?.stack)
       setTopError(`${source.toUpperCase()} 排行榜加载失败，可切换平台重试。`)
       setBoards([])
     } finally {
@@ -73,8 +73,8 @@ export default function LeaderboardScreen({
       setHotError(null)
       const list = await getHotTracksFromTop(source)
       setHotTracks(list)
-    } catch (error) {
-      console.error('[Leaderboard] Load hot tracks failed:', error)
+    } catch (error: any) {
+      console.error('[Leaderboard] Load hot tracks failed:', error?.message || error, error?.stack)
       setHotError(`${source.toUpperCase()} 热门歌曲加载失败，可切换平台重试。`)
       setHotTracks([])
     } finally {
