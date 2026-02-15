@@ -65,10 +65,17 @@ function parseQualityTypes(raw: string | undefined) {
   return types
 }
 
+/** 将 KW 封面 URL 升级为高清（120px → 500px） */
+const toHiResCover = (url: string | undefined): string | undefined => {
+  if (!url) return undefined
+  return url.replace('/albumcover/120/', '/albumcover/500/')
+}
+
 function mapTrack(item: any): Track {
   const songmid = String(item.id || item.rid || item.musicrid || '')
   const source = 'kw'
   const qualitys = parseQualityTypes(item.N_MINFO || item.minfo)
+  const cover = toHiResCover(item.pic || item.img || item.albumpic)
   return {
     id: `${source}_${songmid}`,
     title: item.name || item.NAME || '',
@@ -76,10 +83,10 @@ function mapTrack(item: any): Track {
     album: item.album || item.ALBUM || '',
     duration: formatDuration(Number(item.duration || item.DURATION || 0)),
     url: '',
-    coverUrl: item.pic || item.img || undefined,
+    coverUrl: cover,
     source,
     songmid,
-    picUrl: item.pic || item.img || undefined,
+    picUrl: cover,
     hash: item.hash || undefined,
     // @ts-expect-error keep runtime metadata compatible with existing player URL flow
     _types: qualitys,
@@ -199,7 +206,16 @@ async function getSongListDetail(id: string, page: number): Promise<SongListDeta
     })
   )
   const body = resp.data
-  const list = (body?.musiclist || []).map((item: any) => mapTrack(item))
+  const playlistCover = body?.pic || ''
+  const list = (body?.musiclist || []).map((item: any) => {
+    const track = mapTrack(item)
+    // KW 歌单详情 API 的 musiclist 不含歌曲封面，用歌单封面兜底
+    if (!track.coverUrl && playlistCover) {
+      track.coverUrl = playlistCover
+      track.picUrl = playlistCover
+    }
+    return track
+  })
   const total = Number(body?.total || list.length)
   const limit = Number(body?.rn || DETAIL_LIMIT)
   return {

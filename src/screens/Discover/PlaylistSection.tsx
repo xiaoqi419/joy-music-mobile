@@ -27,16 +27,11 @@ interface PlaylistSectionProps {
   onPlaylistPress?: (playlist: SongListItem) => void
 }
 
-function formatPlayCount(count: number): string {
-  if (count >= 10000) {
-    return `${(count / 10000).toFixed(1)}万`
-  }
-  return count.toLocaleString()
-}
-
+/**
+ * 渲染歌单卡片（封面 + 播放量角标 + 名称）。
+ */
 function PlaylistCard({ item, onPress }: { item: SongListItem; onPress?: () => void }) {
   const { colors } = useTheme()
-  const playCount = Number(item.playCount || 0)
 
   return (
     <TouchableOpacity
@@ -48,7 +43,7 @@ function PlaylistCard({ item, onPress }: { item: SongListItem; onPress?: () => v
         <Image source={{ uri: item.coverUrl || 'https://via.placeholder.com/300' }} style={styles.coverImage} />
         <View style={styles.playCountBadge}>
           <Ionicons name="play" size={10} color="#FFFFFF" />
-          <Text style={styles.playCountText}>{formatPlayCount(playCount)}</Text>
+          <Text style={styles.playCountText}>{item.playCount || '0'}</Text>
         </View>
       </View>
       <Text
