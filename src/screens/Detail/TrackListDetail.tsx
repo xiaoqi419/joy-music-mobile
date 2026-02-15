@@ -11,6 +11,7 @@ import {
   FlatList,
   Image,
   Dimensions,
+  Animated,
 } from 'react-native'
 import { LinearGradient } from 'expo-linear-gradient'
 import { useSafeAreaInsets } from 'react-native-safe-area-context'
@@ -18,6 +19,7 @@ import { Ionicons } from '@expo/vector-icons'
 import { useTheme, spacing, fontSize, borderRadius, BOTTOM_INSET } from '../../theme'
 import TrackListItem from '../../components/common/TrackListItem'
 import { usePlayerStatus } from '../../hooks/usePlayerStatus'
+import { useSwipeBack } from '../../hooks/useSwipeBack'
 import { Track } from '../../types/music'
 
 const SCREEN_WIDTH = Dimensions.get('window').width
@@ -47,6 +49,7 @@ export default function TrackListDetail({
   const { colors, isDark } = useTheme()
   const insets = useSafeAreaInsets()
   const { isPlaying, currentTrack } = usePlayerStatus()
+  const { panX, panHandlers } = useSwipeBack(onBack)
 
   const renderHeader = () => (
     <View>
@@ -101,7 +104,16 @@ export default function TrackListDetail({
   )
 
   return (
-    <View style={[styles.container, { backgroundColor: colors.background }]}>
+    <Animated.View
+      style={[
+        styles.container,
+        {
+          backgroundColor: colors.background,
+          transform: [{ translateX: panX }],
+        },
+      ]}
+      {...panHandlers}
+    >
       <FlatList
         data={tracks}
         keyExtractor={(item) => item.id}
@@ -118,7 +130,7 @@ export default function TrackListDetail({
           />
         )}
       />
-    </View>
+    </Animated.View>
   )
 }
 
