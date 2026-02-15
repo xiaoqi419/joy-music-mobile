@@ -243,6 +243,13 @@ class MusicPlayerController {
   }
 
   /**
+   * Get current playback status from the audio engine
+   */
+  async getPlaybackStatus(): Promise<PlaybackStatus | null> {
+    return expoAVPlayer.getStatus()
+  }
+
+  /**
    * Set playlist
    */
   setPlaylist(playlist: Track[]): void {

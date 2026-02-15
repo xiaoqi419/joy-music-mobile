@@ -24,10 +24,21 @@ export function usePlayerStatus(): PlayerStatus {
   })
 
   useEffect(() => {
-    setStatus(prev => ({
-      ...prev,
-      currentTrack: playerController.getCurrentTrack(),
-    }))
+    /** 挂载时立即读取播放器当前状态，避免暂停时初始值为 0 */
+    playerController.getPlaybackStatus().then(playbackStatus => {
+      if (playbackStatus) {
+        const track = playerController.getCurrentTrack()
+        setStatus({
+          currentTrack: track,
+          isPlaying: playbackStatus.isPlaying,
+          position: playbackStatus.positionMillis,
+          duration: playbackStatus.durationMillis,
+          progress: playbackStatus.durationMillis > 0
+            ? playbackStatus.positionMillis / playbackStatus.durationMillis
+            : 0,
+        })
+      }
+    })
 
     const unsubscribe = playerController.onStatusUpdate((playbackStatus) => {
       const track = playerController.getCurrentTrack()
