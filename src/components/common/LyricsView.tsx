@@ -1,7 +1,7 @@
 /**
  * 现代化歌词滚动组件。
  * 自动跟随播放进度滚动到当前行，支持点击行跳转。
- * 当前行高亮放大，远离行渐隐，形成聚光灯效果。
+ * 当前行高亮放大并带有平滑过渡动画，远离行渐隐，形成聚光灯效果。
  */
 
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
@@ -13,6 +13,8 @@ import {
   TouchableOpacity,
   ActivityIndicator,
   LayoutChangeEvent,
+  Animated,
+  Easing,
 } from 'react-native'
 import { useTheme, spacing, fontSize } from '../../theme'
 import { LyricLine, findCurrentLineIndex } from '../../core/lyric'
@@ -32,6 +34,111 @@ interface LyricsViewProps {
 const LINE_HEIGHT = 44
 /** 单行歌词高度（有翻译） */
 const LINE_HEIGHT_WITH_TRANS = 64
+/** 当前行缩放比例 */
+const ACTIVE_SCALE = 1.12
+/** 动画持续时间 */
+const ANIM_DURATION = 350
+
+/* ── 单行歌词组件（带独立动画） ── */
+
+interface LyricLineItemProps {
+  line: LyricLine
+  index: number
+  isCurrent: boolean
+  distance: number
+  lineHeight: number
+  onPress: (time: number) => void
+}
+
+/**
+ * 渲染单行歌词，内含 Animated 过渡动画。
+ * @param line - 歌词行数据
+ * @param isCurrent - 是否为当前播放行
+ * @param distance - 与当前行的距离
+ * @param lineHeight - 行高
+ * @param onPress - 点击回调
+ */
+const LyricLineItem = React.memo(function LyricLineItem({
+  line,
+  isCurrent,
+  distance,
+  lineHeight,
+  onPress,
+}: LyricLineItemProps) {
+  const { colors } = useTheme()
+  const highlightAnim = useRef(new Animated.Value(isCurrent ? 1 : 0)).current
+  const opacityAnim = useRef(
+    new Animated.Value(isCurrent ? 1 : Math.max(0.25, 1 - distance * 0.18))
+  ).current
+
+  /** isCurrent / distance 变化时平滑过渡 */
+  useEffect(() => {
+    const targetOpacity = isCurrent ? 1 : Math.max(0.25, 1 - distance * 0.18)
+    Animated.parallel([
+      Animated.timing(highlightAnim, {
+        toValue: isCurrent ? 1 : 0,
+        duration: ANIM_DURATION,
+        easing: Easing.out(Easing.cubic),
+        useNativeDriver: true,
+      }),
+      Animated.timing(opacityAnim, {
+        toValue: targetOpacity,
+        duration: ANIM_DURATION,
+        easing: Easing.out(Easing.cubic),
+        useNativeDriver: true,
+      }),
+    ]).start()
+  }, [isCurrent, distance, highlightAnim, opacityAnim])
+
+  const scale = highlightAnim.interpolate({
+    inputRange: [0, 1],
+    outputRange: [1, ACTIVE_SCALE],
+  })
+
+  return (
+    <TouchableOpacity
+      activeOpacity={0.7}
+      onPress={() => onPress(line.time)}
+      style={[styles.lineWrap, { height: lineHeight }]}
+    >
+      <Animated.View
+        style={{
+          transform: [{ scale }],
+          opacity: opacityAnim,
+        }}
+      >
+        <Text
+          style={[
+            styles.lineText,
+            {
+              color: isCurrent ? colors.accent : colors.text,
+              fontSize: isCurrent ? fontSize.title2 : fontSize.subhead,
+              fontWeight: isCurrent ? '700' : '400',
+            },
+          ]}
+          numberOfLines={2}
+        >
+          {line.text}
+        </Text>
+        {line.translation && (
+          <Text
+            style={[
+              styles.translationText,
+              {
+                color: isCurrent ? colors.accent : colors.textSecondary,
+              },
+            ]}
+            numberOfLines={1}
+          >
+            {line.translation}
+          </Text>
+        )}
+      </Animated.View>
+    </TouchableOpacity>
+  )
+})
+
+/* ── 歌词滚动主组件 ── */
 
 /**
  * 渲染歌词滚动视图。
@@ -69,9 +176,6 @@ export default function LyricsView({
   /** 当前行变化时自动滚动居中 */
   useEffect(() => {
     if (currentIndex >= 0 && containerHeight > 0) {
-      // 行在 content 中的实际 y = paddingTop + index * lineHeight
-      // 居中 scrollY = 行y + lineHeight/2 - containerHeight/2
-      // 因为 paddingTop = containerHeight/2，简化为：
       const targetY = currentIndex * lineHeight + lineHeight / 2
       scrollRef.current?.scrollTo({
         y: Math.max(0, targetY),
@@ -85,6 +189,7 @@ export default function LyricsView({
     scrollRef.current?.scrollTo({ y: 0, animated: false })
   }, [lyrics])
 
+  /** 点击歌词行跳转 */
   const handleLinePress = useCallback(
     (time: number) => {
       onSeek?.(time)
@@ -126,44 +231,17 @@ export default function LyricsView({
       {lyrics.map((line, index) => {
         const isCurrent = index === currentIndex
         const distance = Math.abs(index - currentIndex)
-        const opacity = isCurrent ? 1 : Math.max(0.25, 1 - distance * 0.18)
 
         return (
-          <TouchableOpacity
+          <LyricLineItem
             key={`${line.time}-${index}`}
-            activeOpacity={0.7}
-            onPress={() => handleLinePress(line.time)}
-            style={[styles.lineWrap, { height: lineHeight }]}
-          >
-            <Text
-              style={[
-                styles.lineText,
-                {
-                  color: isCurrent ? colors.accent : colors.text,
-                  fontSize: isCurrent ? fontSize.title2 : fontSize.subhead,
-                  fontWeight: isCurrent ? '700' : '400',
-                  opacity,
-                },
-              ]}
-              numberOfLines={2}
-            >
-              {line.text}
-            </Text>
-            {line.translation && (
-              <Text
-                style={[
-                  styles.translationText,
-                  {
-                    color: isCurrent ? colors.accent : colors.textSecondary,
-                    opacity: opacity * 0.85,
-                  },
-                ]}
-                numberOfLines={1}
-              >
-                {line.translation}
-              </Text>
-            )}
-          </TouchableOpacity>
+            line={line}
+            index={index}
+            isCurrent={isCurrent}
+            distance={distance}
+            lineHeight={lineHeight}
+            onPress={handleLinePress}
+          />
         )
       })}
     </ScrollView>
