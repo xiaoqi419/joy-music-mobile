@@ -48,7 +48,6 @@ export default function LyricsView({
 }: LyricsViewProps) {
   const { colors } = useTheme()
   const scrollRef = useRef<ScrollView>(null)
-  const lastIndex = useRef(-1)
   const [containerHeight, setContainerHeight] = useState(300)
 
   const hasTranslation = useMemo(
@@ -69,8 +68,7 @@ export default function LyricsView({
 
   /** 当前行变化时自动滚动居中 */
   useEffect(() => {
-    if (currentIndex !== lastIndex.current && currentIndex >= 0) {
-      lastIndex.current = currentIndex
+    if (currentIndex >= 0 && containerHeight > 0) {
       const halfContainer = containerHeight / 2
       const targetY = currentIndex * lineHeight - halfContainer + lineHeight / 2
       scrollRef.current?.scrollTo({
@@ -82,7 +80,6 @@ export default function LyricsView({
 
   /** 切歌时重置滚动位置 */
   useEffect(() => {
-    lastIndex.current = -1
     scrollRef.current?.scrollTo({ y: 0, animated: false })
   }, [lyrics])
 
