@@ -33,7 +33,9 @@ export const borderRadius = {
   full: 9999,
 } as const
 
-export const TABBAR_HEIGHT = 83
+export const TABBAR_HEIGHT = 64
 export const MINI_PLAYER_HEIGHT = 64
 export const TRACK_ITEM_HEIGHT = 56
-export const BOTTOM_INSET = TABBAR_HEIGHT + MINI_PLAYER_HEIGHT + 8
+export const CAPSULE_TAB_HEIGHT = 56
+export const CAPSULE_BOTTOM_MARGIN = 4
+export const BOTTOM_INSET = TABBAR_HEIGHT + MINI_PLAYER_HEIGHT + 16

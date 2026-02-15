@@ -38,6 +38,12 @@ export interface ThemeColors {
   // Search
   searchBackground: string
   searchPlaceholder: string
+
+  // Liquid Glass TabBar
+  tabBarGloss: string
+  tabBarGlossEnd: string
+  tabBarInnerBorder: string
+  tabBarActiveIndicator: string
 }
 
 export const darkColors: ThemeColors = {
@@ -68,6 +74,11 @@ export const darkColors: ThemeColors = {
 
   searchBackground: '#1C1C1E',
   searchPlaceholder: '#8E8E93',
+
+  tabBarGloss: 'rgba(255, 255, 255, 0.12)',
+  tabBarGlossEnd: 'rgba(255, 255, 255, 0.0)',
+  tabBarInnerBorder: 'rgba(255, 255, 255, 0.18)',
+  tabBarActiveIndicator: 'rgba(255, 255, 255, 0.15)',
 }
 
 export const lightColors: ThemeColors = {
@@ -98,4 +109,9 @@ export const lightColors: ThemeColors = {
 
   searchBackground: '#E5E5EA',
   searchPlaceholder: '#8E8E93',
+
+  tabBarGloss: 'rgba(255, 255, 255, 0.7)',
+  tabBarGlossEnd: 'rgba(255, 255, 255, 0.0)',
+  tabBarInnerBorder: 'rgba(255, 255, 255, 0.6)',
+  tabBarActiveIndicator: 'rgba(0, 0, 0, 0.08)',
 }

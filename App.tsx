@@ -5,11 +5,11 @@
 
 import React, { useCallback, useEffect, useState } from 'react'
 import { ActivityIndicator, Alert, StatusBar, StyleSheet, Text, View } from 'react-native'
-import { SafeAreaProvider } from 'react-native-safe-area-context'
+import { SafeAreaProvider, useSafeAreaInsets } from 'react-native-safe-area-context'
 import { Provider as ReduxProvider, useDispatch } from 'react-redux'
 import * as SplashScreen from 'expo-splash-screen'
 import store from './src/store'
-import { useTheme, TABBAR_HEIGHT, MINI_PLAYER_HEIGHT } from './src/theme'
+import { useTheme, CAPSULE_TAB_HEIGHT, CAPSULE_BOTTOM_MARGIN } from './src/theme'
 import TabBar, { TabName } from './src/components/common/TabBar'
 import MiniPlayer from './src/components/common/MiniPlayer'
 import DiscoverScreen from './src/screens/Discover'
@@ -46,6 +46,7 @@ function App() {
 function AppContent() {
   const { colors, isDark } = useTheme()
   const dispatch = useDispatch()
+  const insets = useSafeAreaInsets()
   const [activeTab, setActiveTab] = useState<TabName>('discover')
   const [detailView, setDetailView] = useState<DetailView | null>(null)
   const [showNowPlaying, setShowNowPlaying] = useState(false)
@@ -148,8 +149,9 @@ function AppContent() {
     setDetailView(null)
   }, [])
 
-  // Calculate bottom offset for MiniPlayer positioning (above TabBar)
-  const miniPlayerBottom = TABBAR_HEIGHT
+  // MiniPlayer 悬浮在胶囊 TabBar 上方
+  const miniPlayerBottom =
+    Math.max(insets.bottom, 16) + CAPSULE_BOTTOM_MARGIN + CAPSULE_TAB_HEIGHT + 8
 
   return (
     <View style={[styles.container, { backgroundColor: colors.background }]}>
