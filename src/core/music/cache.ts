@@ -10,6 +10,9 @@ const CACHE_PREFIX = '@joy_music_'
 const URL_CACHE_PREFIX = `${CACHE_PREFIX}url_`
 const LYRIC_CACHE_PREFIX = `${CACHE_PREFIX}lyric_`
 
+/** 播放 URL 缓存有效期（20 分钟），多数平台 URL 有效期在 10~30 分钟 */
+const URL_CACHE_TTL = 20 * 60 * 1000
+
 export interface CachedMusicUrl {
   url: string
   quality: Quality
@@ -46,7 +49,7 @@ class MusicUrlCache {
   }
 
   /**
-   * Get cached music URL
+   * Get cached music URL (returns null if expired)
    */
   async getMusicUrl(musicId: string, quality: Quality): Promise<string | null> {
     try {
@@ -58,6 +61,14 @@ class MusicUrlCache {
       }
 
       const data: CachedMusicUrl = JSON.parse(cached)
+
+      // 检查是否过期
+      if (Date.now() - data.timestamp > URL_CACHE_TTL) {
+        console.log(`[Cache] URL expired for ${musicId} (${quality}), clearing`)
+        await AsyncStorage.removeItem(key)
+        return null
+      }
+
       console.log(`[Cache] Retrieved URL for ${musicId} (${quality})`)
       return data.url
     } catch (error) {
