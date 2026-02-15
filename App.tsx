@@ -9,7 +9,7 @@ import { SafeAreaProvider, useSafeAreaInsets } from 'react-native-safe-area-cont
 import { Provider as ReduxProvider, useDispatch } from 'react-redux'
 import * as SplashScreen from 'expo-splash-screen'
 import store from './src/store'
-import { useTheme, CAPSULE_TAB_HEIGHT, CAPSULE_BOTTOM_MARGIN } from './src/theme'
+import { useTheme, CAPSULE_BOTTOM_MARGIN } from './src/theme'
 import TabBar, { TabName } from './src/components/common/TabBar'
 import MiniPlayer from './src/components/common/MiniPlayer'
 import DiscoverScreen from './src/screens/Discover'
@@ -149,10 +149,6 @@ function AppContent() {
     setDetailView(null)
   }, [])
 
-  // MiniPlayer 悬浮在胶囊 TabBar 上方
-  const miniPlayerBottom =
-    Math.max(insets.bottom, 16) + CAPSULE_BOTTOM_MARGIN + CAPSULE_TAB_HEIGHT + 8
-
   return (
     <View style={[styles.container, { backgroundColor: colors.background }]}>
       <StatusBar barStyle={isDark ? 'light-content' : 'dark-content'} />
@@ -195,8 +191,14 @@ function AppContent() {
         </View>
       )}
 
-      {/* MiniPlayer - positioned above TabBar */}
-      <View style={{ position: 'absolute', left: 0, right: 0, bottom: miniPlayerBottom }}>
+      {/* 悬浮球播放器 - 位于 TabBar 右侧同级 */}
+      <View
+        style={{
+          position: 'absolute',
+          right: 24,
+          bottom: Math.max(insets.bottom, 16) + CAPSULE_BOTTOM_MARGIN,
+        }}
+      >
         <MiniPlayer onOpenPlayer={() => setShowNowPlaying(true)} />
       </View>
 
