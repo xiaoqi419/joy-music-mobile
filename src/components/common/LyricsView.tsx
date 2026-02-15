@@ -69,8 +69,10 @@ export default function LyricsView({
   /** 当前行变化时自动滚动居中 */
   useEffect(() => {
     if (currentIndex >= 0 && containerHeight > 0) {
-      const halfContainer = containerHeight / 2
-      const targetY = currentIndex * lineHeight - halfContainer + lineHeight / 2
+      // 行在 content 中的实际 y = paddingTop + index * lineHeight
+      // 居中 scrollY = 行y + lineHeight/2 - containerHeight/2
+      // 因为 paddingTop = containerHeight/2，简化为：
+      const targetY = currentIndex * lineHeight + lineHeight / 2
       scrollRef.current?.scrollTo({
         y: Math.max(0, targetY),
         animated: true,
@@ -138,7 +140,7 @@ export default function LyricsView({
                 styles.lineText,
                 {
                   color: isCurrent ? colors.accent : colors.text,
-                  fontSize: isCurrent ? fontSize.title3 : fontSize.body,
+                  fontSize: isCurrent ? fontSize.title2 : fontSize.subhead,
                   fontWeight: isCurrent ? '700' : '400',
                   opacity,
                 },
