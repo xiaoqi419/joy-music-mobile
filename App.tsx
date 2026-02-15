@@ -13,6 +13,7 @@ import { useTheme, CAPSULE_BOTTOM_MARGIN } from './src/theme'
 import TabBar, { TabName } from './src/components/common/TabBar'
 import MiniPlayer from './src/components/common/MiniPlayer'
 import DiscoverScreen from './src/screens/Discover'
+import LeaderboardScreen from './src/screens/Leaderboard'
 import SearchScreen from './src/screens/Search'
 import LibraryScreen from './src/screens/Library'
 import TrackListDetail from './src/screens/Detail/TrackListDetail'
@@ -157,8 +158,12 @@ function AppContent() {
       <View style={styles.content}>
         {activeTab === 'discover' && (
           <DiscoverScreen
-            onLeaderboardPress={handleLeaderboardPress}
             onPlaylistPress={handlePlaylistPress}
+          />
+        )}
+        {activeTab === 'leaderboard' && (
+          <LeaderboardScreen
+            onLeaderboardPress={handleLeaderboardPress}
             onTrackPress={handleTrackPress}
           />
         )}

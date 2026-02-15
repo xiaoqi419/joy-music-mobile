@@ -13,7 +13,7 @@ import { Ionicons } from '@expo/vector-icons'
 import { useSafeAreaInsets } from 'react-native-safe-area-context'
 import { useTheme, CAPSULE_TAB_HEIGHT, CAPSULE_BOTTOM_MARGIN, fontSize } from '../../theme'
 
-export type TabName = 'discover' | 'search' | 'library'
+export type TabName = 'discover' | 'leaderboard' | 'search' | 'library'
 
 interface TabBarProps {
   activeTab: TabName
@@ -21,11 +21,11 @@ interface TabBarProps {
 }
 
 /** 胶囊内每个 tab 项的宽度 */
-const TAB_ITEM_WIDTH = 64
+const TAB_ITEM_WIDTH = 58
 /** 胶囊水平内边距 */
 const CAPSULE_H_PADDING = 6
 /** 选中态背景的尺寸 */
-const ACTIVE_INDICATOR_WIDTH = 52
+const ACTIVE_INDICATOR_WIDTH = 46
 const ACTIVE_INDICATOR_HEIGHT = 44
 
 /** 根据 tab 索引计算指示器的水平偏移量 */
@@ -39,6 +39,7 @@ const tabs: {
   iconActive: keyof typeof Ionicons.glyphMap
 }[] = [
   { key: 'discover', label: '发现', icon: 'compass-outline', iconActive: 'compass' },
+  { key: 'leaderboard', label: '排行', icon: 'trophy-outline', iconActive: 'trophy' },
   { key: 'search', label: '搜索', icon: 'search-outline', iconActive: 'search' },
   { key: 'library', label: '我的', icon: 'musical-notes-outline', iconActive: 'musical-notes' },
 ]

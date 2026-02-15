@@ -1,146 +1,44 @@
 /**
- * Discover screen - main discovery page with leaderboards, playlists, and hot tracks
+ * 发现页面 - 展示各平台推荐歌单。
+ * 排行榜已拆分至独立 tab 页。
  */
 
 import React, { useCallback, useEffect, useMemo, useState } from 'react'
-import {
-  View,
-  Text,
-  ScrollView,
-  StyleSheet,
-  TouchableOpacity,
-} from 'react-native'
+import { View, Text, ScrollView, StyleSheet } from 'react-native'
 import { useSafeAreaInsets } from 'react-native-safe-area-context'
-import { useTheme, spacing, fontSize, BOTTOM_INSET, borderRadius } from '../../theme'
+import { useTheme, spacing, fontSize, BOTTOM_INSET } from '../../theme'
 import SectionHeader from '../../components/common/SectionHeader'
-import LeaderboardSection from './LeaderboardSection'
+import SourceChips from '../../components/common/SourceChips'
 import PlaylistSection from './PlaylistSection'
-import HotTracksSection from './HotTracksSection'
-import { Track } from '../../types/music'
+import { DiscoverSourceId, SongListItem } from '../../types/discover'
 import {
-  DiscoverSourceId,
-  LeaderboardBoardItem,
-  SongListItem,
-} from '../../types/discover'
-import {
-  discoverSourceList,
-  getHotTracksFromTop,
-  getLeaderboardBoards,
-  getLeaderboardSetting,
   getSongListPage,
   getSongListSetting,
-  saveLeaderboardSetting,
   saveSongListSetting,
 } from '../../core/discover'
 
 interface DiscoverScreenProps {
-  onLeaderboardPress?: (board: LeaderboardBoardItem) => void
   onPlaylistPress?: (playlist: SongListItem) => void
-  onTrackPress?: (track: Track) => void
 }
 
-function SourceChips({
-  value,
-  onChange,
-}: {
-  value: DiscoverSourceId
-  onChange: (source: DiscoverSourceId) => void
-}) {
-  const { colors } = useTheme()
-  return (
-    <ScrollView
-      horizontal
-      showsHorizontalScrollIndicator={false}
-      contentContainerStyle={styles.chipsWrap}
-    >
-      {discoverSourceList.map(item => {
-        const active = item.id === value
-        return (
-          <TouchableOpacity
-            key={item.id}
-            style={[
-              styles.chip,
-              {
-                backgroundColor: active ? colors.accentLight : colors.surface,
-                borderColor: active ? colors.accent : colors.separator,
-              },
-            ]}
-            onPress={() => onChange(item.id)}
-            activeOpacity={0.7}
-          >
-            <Text
-              style={[
-                styles.chipText,
-                { color: active ? colors.accent : colors.textSecondary },
-              ]}
-            >
-              {item.name}
-            </Text>
-          </TouchableOpacity>
-        )
-      })}
-    </ScrollView>
-  )
-}
-
+/**
+ * 渲染发现页面（推荐歌单）。
+ * @param onPlaylistPress - 点击歌单回调
+ */
 export default function DiscoverScreen({
-  onLeaderboardPress,
   onPlaylistPress,
-  onTrackPress,
 }: DiscoverScreenProps) {
   const { colors } = useTheme()
   const insets = useSafeAreaInsets()
 
-  const [topSource, setTopSource] = useState<DiscoverSourceId>('kw')
   const [songListSource, setSongListSource] = useState<DiscoverSourceId>('kw')
   const [songListSort, setSongListSort] = useState('new')
   const [songListTag, setSongListTag] = useState('')
-
-  const [boards, setBoards] = useState<LeaderboardBoardItem[]>([])
   const [playlists, setPlaylists] = useState<SongListItem[]>([])
-  const [hotTracks, setHotTracks] = useState<Track[]>([])
-
-  const [topLoading, setTopLoading] = useState(false)
   const [playlistLoading, setPlaylistLoading] = useState(false)
-  const [hotLoading, setHotLoading] = useState(false)
-  const [topError, setTopError] = useState<string | null>(null)
   const [playlistError, setPlaylistError] = useState<string | null>(null)
-  const [hotError, setHotError] = useState<string | null>(null)
 
-  const loadLeaderboard = useCallback(async (source: DiscoverSourceId) => {
-    try {
-      setTopLoading(true)
-      setTopError(null)
-      const list = await getLeaderboardBoards(source)
-      setBoards(list)
-      await saveLeaderboardSetting({
-        source,
-        boardId: list[0]?.id || '',
-      })
-    } catch (error) {
-      console.error('[Discover] Load leaderboard failed:', error)
-      setTopError(`${source.toUpperCase()} 排行榜加载失败，可切换平台重试。`)
-      setBoards([])
-    } finally {
-      setTopLoading(false)
-    }
-  }, [])
-
-  const loadHotTracks = useCallback(async (source: DiscoverSourceId) => {
-    try {
-      setHotLoading(true)
-      setHotError(null)
-      const list = await getHotTracksFromTop(source)
-      setHotTracks(list)
-    } catch (error) {
-      console.error('[Discover] Load hot tracks failed:', error)
-      setHotError(`${source.toUpperCase()} 热门歌曲加载失败，可切换平台重试。`)
-      setHotTracks([])
-    } finally {
-      setHotLoading(false)
-    }
-  }, [])
-
+  /** 加载歌单列表 */
   const loadSongList = useCallback(
     async (source: DiscoverSourceId, sortId: string, tagId: string) => {
       try {
@@ -153,11 +51,7 @@ export default function DiscoverScreen({
           page: 1,
         })
         setPlaylists(page.list)
-        await saveSongListSetting({
-          source,
-          sortId,
-          tagId,
-        })
+        await saveSongListSetting({ source, sortId, tagId })
       } catch (error) {
         console.error('[Discover] Load playlists failed:', error)
         setPlaylistError(`${source.toUpperCase()} 歌单加载失败，可切换平台重试。`)
@@ -169,19 +63,16 @@ export default function DiscoverScreen({
     []
   )
 
+  /** 初始化时读取上次保存的歌单设置 */
   useEffect(() => {
     let active = true
-    ;(async() => {
+    ;(async () => {
       try {
-        const [topSetting, songSetting] = await Promise.all([
-          getLeaderboardSetting(),
-          getSongListSetting(),
-        ])
+        const setting = await getSongListSetting()
         if (!active) return
-        setTopSource(topSetting.source)
-        setSongListSource(songSetting.source)
-        setSongListSort(songSetting.sortId || 'new')
-        setSongListTag(songSetting.tagId || '')
+        setSongListSource(setting.source)
+        setSongListSort(setting.sortId || 'new')
+        setSongListTag(setting.tagId || '')
       } catch (error) {
         console.error('[Discover] Load settings failed:', error)
       }
@@ -191,20 +82,12 @@ export default function DiscoverScreen({
     }
   }, [])
 
-  useEffect(() => {
-    void loadLeaderboard(topSource)
-    void loadHotTracks(topSource)
-  }, [topSource, loadLeaderboard, loadHotTracks])
-
+  /** 歌单设置变化时重新加载 */
   useEffect(() => {
     void loadSongList(songListSource, songListSort, songListTag)
   }, [songListSource, songListSort, songListTag, loadSongList])
 
-  const leaderboardHeader = useMemo(
-    () => <SourceChips value={topSource} onChange={setTopSource} />,
-    [topSource]
-  )
-  const songListHeader = useMemo(
+  const sourceChips = useMemo(
     () => <SourceChips value={songListSource} onChange={setSongListSource} />,
     [songListSource]
   )
@@ -219,30 +102,13 @@ export default function DiscoverScreen({
           <Text style={[styles.largeTitle, { color: colors.text }]}>发现音乐</Text>
         </View>
 
-        <SectionHeader title="排行榜" />
-        {leaderboardHeader}
-        <LeaderboardSection
-          boards={boards}
-          loading={topLoading}
-          error={topError}
-          onLeaderboardPress={onLeaderboardPress}
-        />
-
         <SectionHeader title="推荐歌单" showMore onMorePress={() => {}} />
-        {songListHeader}
+        {sourceChips}
         <PlaylistSection
           playlists={playlists}
           loading={playlistLoading}
           error={playlistError}
           onPlaylistPress={onPlaylistPress}
-        />
-
-        <SectionHeader title="热门歌曲" showMore onMorePress={() => {}} />
-        <HotTracksSection
-          tracks={hotTracks}
-          loading={hotLoading}
-          error={hotError}
-          onTrackPress={onTrackPress}
         />
       </ScrollView>
     </View>
@@ -261,20 +127,5 @@ const styles = StyleSheet.create({
     fontSize: fontSize.largeTitle,
     fontWeight: '800',
     letterSpacing: 0.35,
-  },
-  chipsWrap: {
-    paddingHorizontal: spacing.md,
-    paddingBottom: spacing.sm,
-    gap: spacing.xs,
-  },
-  chip: {
-    borderRadius: borderRadius.sm,
-    borderWidth: 1,
-    paddingHorizontal: 10,
-    paddingVertical: 5,
-  },
-  chipText: {
-    fontSize: fontSize.caption1,
-    fontWeight: '600',
   },
 })
