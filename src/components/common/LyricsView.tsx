@@ -99,7 +99,7 @@ const LyricLineItem = React.memo(function LyricLineItem({
     <TouchableOpacity
       activeOpacity={0.7}
       onPress={() => onPress(line.time)}
-      style={[styles.lineWrap, { height: lineHeight }]}
+      style={[styles.lineWrap, { minHeight: lineHeight }]}
     >
       <Animated.View
         style={{
@@ -116,7 +116,7 @@ const LyricLineItem = React.memo(function LyricLineItem({
               fontWeight: isCurrent ? '700' : '400',
             },
           ]}
-          numberOfLines={2}
+          numberOfLines={isCurrent ? undefined : 2}
         >
           {line.text}
         </Text>
@@ -128,7 +128,7 @@ const LyricLineItem = React.memo(function LyricLineItem({
                 color: isCurrent ? colors.accent : colors.textSecondary,
               },
             ]}
-            numberOfLines={1}
+            numberOfLines={isCurrent ? undefined : 1}
           >
             {line.translation}
           </Text>
