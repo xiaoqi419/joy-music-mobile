@@ -68,6 +68,11 @@ function AppContent() {
 
   const handleTrackPress = useCallback(async (track: Track) => {
     try {
+      // 如果点击的是当前正在播放的歌曲，直接打开播放页继续播放
+      if (playerController.currentTrack?.id === track.id) {
+        setShowNowPlaying(true)
+        return
+      }
       dispatch({ type: 'PLAYER_SET_CURRENT_TRACK', payload: track })
       await playerController.playTrack(track, {
         autoPlay: true,
