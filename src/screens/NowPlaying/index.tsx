@@ -61,6 +61,10 @@ export default function NowPlaying({ onClose }: NowPlayingProps) {
   /* ── 视图切换 ── */
   const [activeTab, setActiveTab] = useState<ViewTab>('cover');
 
+  /* ── 进度条拖动状态 ── */
+  const [isDraggingSlider, setIsDraggingSlider] = useState(false);
+  const [draggingProgress, setDraggingProgress] = useState(0);
+
   /* ── 左边缘右滑关闭手势 ── */
   const { panX, panHandlers } = useSwipeBack(onClose);
 
@@ -179,10 +183,20 @@ export default function NowPlaying({ onClose }: NowPlayingProps) {
     return Math.max(0, Math.min(1, position / duration));
   }, [position, duration]);
 
+  /** 显示进度：拖动时用本地状态，否则用实时进度 */
+  const displayProgress = isDraggingSlider ? draggingProgress : progress;
+
   /** 点击歌词行跳转 */
   const handleLyricSeek = useCallback((timeMs: number) => {
     void playerController.seek(timeMs);
   }, []);
+
+  /** 当position更新但用户未拖动时，重置显示进度 */
+  useEffect(() => {
+    if (!isDraggingSlider) {
+      setDraggingProgress(progress);
+    }
+  }, [progress, isDraggingSlider]);
 
   if (!currentTrack) return null;
 
@@ -391,13 +405,18 @@ export default function NowPlaying({ onClose }: NowPlayingProps) {
         {/* ── 进度条 ── */}
         <View style={styles.seekWrap}>
           <Slider
-            value={progress}
+            value={displayProgress}
             minimumValue={0}
             maximumValue={1}
             minimumTrackTintColor={colors.accent}
             maximumTrackTintColor={colors.separator}
             thumbTintColor={colors.accent}
+            onValueChange={value => {
+              setIsDraggingSlider(true);
+              setDraggingProgress(value);
+            }}
             onSlidingComplete={value => {
+              setIsDraggingSlider(false);
               const nextMs = Math.floor((duration || 0) * value);
               void playerController.seek(nextMs);
             }}
