@@ -20,21 +20,52 @@ import {
   Easing,
   Platform,
   Dimensions,
+  ScrollView,
+  Pressable,
+  Alert,
 } from 'react-native';
 import Slider from '@react-native-community/slider';
 import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { useDispatch, useSelector } from 'react-redux';
 import { useTheme, spacing, fontSize, borderRadius } from '../../theme';
 import { usePlayerStatus } from '../../hooks/usePlayerStatus';
 import { useSwipeDownClose } from '../../hooks/useSwipeDownClose';
-import { playerController } from '../../core/player';
+import { playerController, type PlayMode } from '../../core/player';
 import { getLyric, LyricData } from '../../core/lyric';
 import LyricsView from '../../components/common/LyricsView';
+import type { RootState } from '../../store';
 
 const SCREEN_WIDTH = Dimensions.get('window').width;
+const SCREEN_HEIGHT = Dimensions.get('window').height;
 /** 封面视图模式下的封面直径 */
 const COVER_SIZE_LG = Math.min(320, SCREEN_WIDTH - 72);
+const QUEUE_SHEET_HEIGHT = Math.min(560, SCREEN_HEIGHT * 0.66);
+
+function getPlayModeFromState(
+  repeatMode: RootState['player']['repeatMode'],
+  shuffleMode: RootState['player']['shuffleMode'],
+): PlayMode {
+  if (shuffleMode) return 'shuffle'
+  if (repeatMode === 'all') return 'list_loop'
+  if (repeatMode === 'one') return 'single_loop'
+  return 'list_once'
+}
+
+function getPlayModeIcon(mode: PlayMode): keyof typeof Ionicons.glyphMap {
+  switch (mode) {
+    case 'list_loop':
+      return 'repeat'
+    case 'single_loop':
+      return 'repeat'
+    case 'shuffle':
+      return 'shuffle'
+    case 'list_once':
+    default:
+      return 'play-skip-forward-outline'
+  }
+}
 
 type ViewTab = 'cover' | 'lyrics';
 
@@ -59,7 +90,12 @@ function formatMs(ms: number): string {
 export default function NowPlaying({ onClose }: NowPlayingProps) {
   const { colors, isDark } = useTheme();
   const insets = useSafeAreaInsets();
+  const dispatch = useDispatch();
   const { currentTrack, isPlaying, position, duration } = usePlayerStatus();
+  const queue = useSelector((state: RootState) => state.player.playlist);
+  const queueCurrentIndex = useSelector((state: RootState) => state.player.currentIndex);
+  const repeatMode = useSelector((state: RootState) => state.player.repeatMode);
+  const shuffleMode = useSelector((state: RootState) => state.player.shuffleMode);
 
   /* ── 视图切换 ── */
   const [activeTab, setActiveTab] = useState<ViewTab>('cover');
@@ -87,6 +123,12 @@ export default function NowPlaying({ onClose }: NowPlayingProps) {
   const viewSwitchAnim = useRef(new Animated.Value(0)).current;
   const coverBtnAnim = useRef(new Animated.Value(1)).current;
   const lyricsBtnAnim = useRef(new Animated.Value(0)).current;
+  const queueSheetAnim = useRef(new Animated.Value(0)).current;
+  const [queueSheetVisible, setQueueSheetVisible] = useState(false);
+  const currentPlayMode = useMemo(
+    () => getPlayModeFromState(repeatMode, shuffleMode),
+    [repeatMode, shuffleMode],
+  )
 
   /** 播放时启动匀速旋转，暂停时停在当前角度 */
   useEffect(() => {
@@ -192,6 +234,65 @@ export default function NowPlaying({ onClose }: NowPlayingProps) {
     void playerController.seek(timeMs);
   }, []);
 
+  const syncPlayerSnapshotToStore = useCallback(() => {
+    const snapshot = playerController.getPlayerState()
+    dispatch({
+      type: 'PLAYER_SYNC_STATE',
+      payload: {
+        ...snapshot,
+        playlist: playerController.getPlaylist(),
+        currentIndex: playerController.getCurrentIndex(),
+        currentTrack: playerController.getCurrentTrack(),
+      },
+    })
+  }, [dispatch])
+
+  const openQueueSheet = useCallback(() => {
+    if (!queue.length) {
+      Alert.alert('播放列表为空', '当前还没有可播放的歌曲。');
+      return;
+    }
+    setQueueSheetVisible(true);
+    queueSheetAnim.setValue(0);
+    Animated.spring(queueSheetAnim, {
+      toValue: 1,
+      useNativeDriver: true,
+      tension: 230,
+      friction: 24,
+    }).start();
+  }, [queue.length, queueSheetAnim]);
+
+  const closeQueueSheet = useCallback(() => {
+    Animated.timing(queueSheetAnim, {
+      toValue: 0,
+      duration: 200,
+      easing: Easing.out(Easing.cubic),
+      useNativeDriver: true,
+    }).start(() => {
+      setQueueSheetVisible(false);
+    });
+  }, [queueSheetAnim]);
+
+  const handleQueueTrackPress = useCallback(async(index: number) => {
+    if (index < 0 || index >= queue.length) return;
+    try {
+      await playerController.playFromPlaylist(queue, index, {
+        autoPlay: true,
+        quality: '320k',
+      });
+      syncPlayerSnapshotToStore()
+      closeQueueSheet();
+    } catch (error) {
+      console.error('Play queue item error:', error);
+      Alert.alert('播放失败', '切换到该歌曲失败，请稍后重试。');
+    }
+  }, [queue, closeQueueSheet, syncPlayerSnapshotToStore]);
+
+  const handleCyclePlayMode = useCallback(() => {
+    playerController.cyclePlayMode()
+    syncPlayerSnapshotToStore()
+  }, [syncPlayerSnapshotToStore])
+
   const sourceLabel = currentTrack?.source
     ? currentTrack.source.toUpperCase()
     : 'LOCAL';
@@ -228,6 +329,14 @@ export default function NowPlaying({ onClose }: NowPlayingProps) {
   const lyricsScale = viewSwitchAnim.interpolate({
     inputRange: [0, 1],
     outputRange: [0.98, 1],
+  });
+  const queueSheetTranslateY = queueSheetAnim.interpolate({
+    inputRange: [0, 1],
+    outputRange: [QUEUE_SHEET_HEIGHT + 24, 0],
+  });
+  const queueSheetMaskOpacity = queueSheetAnim.interpolate({
+    inputRange: [0, 1],
+    outputRange: [0, 1],
   });
 
   /** 播放进度更新时同步 Slider（仅在非拖动状态） */
@@ -591,8 +700,139 @@ export default function NowPlaying({ onClose }: NowPlayingProps) {
               <Ionicons name="play-skip-forward" size={28} color={colors.text} />
             </TouchableOpacity>
           </View>
+
+          {/* ── 底部操作：歌单 ── */}
+          <View style={styles.bottomActionRow}>
+            <TouchableOpacity
+              style={[
+                styles.bottomIconButton,
+                {
+                  backgroundColor: isDark ? 'rgba(255,255,255,0.08)' : 'rgba(0,0,0,0.06)',
+                  borderColor: colors.separator,
+                },
+              ]}
+              activeOpacity={0.75}
+              onPress={openQueueSheet}
+            >
+              <Ionicons name="list" size={18} color={colors.textSecondary} />
+            </TouchableOpacity>
+            <TouchableOpacity
+              style={[
+                styles.bottomIconButton,
+                {
+                  backgroundColor: isDark ? 'rgba(255,255,255,0.08)' : 'rgba(0,0,0,0.06)',
+                  borderColor: colors.separator,
+                },
+              ]}
+              activeOpacity={0.75}
+              onPress={handleCyclePlayMode}
+            >
+              <Ionicons
+                name={getPlayModeIcon(currentPlayMode)}
+                size={18}
+                color={colors.textSecondary}
+              />
+              {currentPlayMode === 'single_loop' && (
+                <View style={[styles.playModeBadge, { backgroundColor: colors.accent }]}>
+                  <Text style={styles.playModeBadgeText}>1</Text>
+                </View>
+              )}
+            </TouchableOpacity>
+          </View>
         </View>
       </View>
+
+      {queueSheetVisible && (
+        <View style={styles.queueSheetOverlay} pointerEvents="box-none">
+          <Pressable style={StyleSheet.absoluteFill} onPress={closeQueueSheet}>
+            <Animated.View
+              style={[
+                styles.queueSheetMask,
+                {
+                  opacity: queueSheetMaskOpacity,
+                },
+              ]}
+            />
+          </Pressable>
+          <Animated.View
+            style={[
+              styles.queueSheet,
+              {
+                paddingBottom: insets.bottom + spacing.md,
+                backgroundColor: isDark ? '#111317' : '#F8FAFD',
+                borderColor: colors.separator,
+                transform: [{ translateY: queueSheetTranslateY }],
+              },
+            ]}
+          >
+            <View style={styles.queueSheetHeader}>
+              <Text style={[styles.queueSheetTitle, { color: colors.text }]}>
+                当前播放列表
+              </Text>
+              <Text style={[styles.queueSheetCount, { color: colors.textSecondary }]}>
+                共 {queue.length} 首
+              </Text>
+            </View>
+
+            <ScrollView
+              showsVerticalScrollIndicator={false}
+              contentContainerStyle={styles.queueSheetList}
+            >
+              {queue.map((track, index) => {
+                const isCurrent = index === queueCurrentIndex
+                return (
+                  <TouchableOpacity
+                    key={`${track.id}-${index}`}
+                    activeOpacity={0.72}
+                    onPress={() => void handleQueueTrackPress(index)}
+                    style={[
+                      styles.queueItem,
+                      {
+                        borderBottomColor: colors.separator,
+                        backgroundColor: isCurrent
+                          ? (isDark ? 'rgba(10,132,255,0.16)' : 'rgba(0,122,255,0.1)')
+                          : 'transparent',
+                      },
+                    ]}
+                  >
+                    <View style={styles.queueItemIndex}>
+                      <Text
+                        style={[
+                          styles.queueIndexText,
+                          { color: isCurrent ? colors.accent : colors.textTertiary },
+                        ]}
+                      >
+                        {index + 1}
+                      </Text>
+                    </View>
+                    <View style={styles.queueItemInfo}>
+                      <Text
+                        numberOfLines={1}
+                        style={[
+                          styles.queueItemTitle,
+                          { color: isCurrent ? colors.accent : colors.text },
+                        ]}
+                      >
+                        {track.title}
+                      </Text>
+                      <Text numberOfLines={1} style={[styles.queueItemArtist, { color: colors.textSecondary }]}>
+                        {track.artist}
+                      </Text>
+                    </View>
+                    {isCurrent && (
+                      <Ionicons
+                        name={isPlaying ? 'volume-high' : 'pause'}
+                        size={18}
+                        color={colors.accent}
+                      />
+                    )}
+                  </TouchableOpacity>
+                )
+              })}
+            </ScrollView>
+          </Animated.View>
+        </View>
+      )}
     </Animated.View>
   );
 }
@@ -754,6 +994,37 @@ const styles = StyleSheet.create({
     justifyContent: 'space-evenly',
     paddingTop: spacing.xs,
   },
+  bottomActionRow: {
+    alignItems: 'center',
+    justifyContent: 'center',
+    flexDirection: 'row',
+    gap: spacing.md,
+    paddingTop: spacing.xs,
+  },
+  bottomIconButton: {
+    width: 38,
+    height: 38,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderWidth: StyleSheet.hairlineWidth,
+    borderRadius: borderRadius.full,
+  },
+  playModeBadge: {
+    position: 'absolute',
+    right: 3,
+    top: 3,
+    minWidth: 12,
+    height: 12,
+    borderRadius: 6,
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: 2,
+  },
+  playModeBadgeText: {
+    color: '#FFFFFF',
+    fontSize: 8,
+    fontWeight: '600',
+  },
   controlButton: {
     width: 52,
     height: 52,
@@ -767,5 +1038,66 @@ const styles = StyleSheet.create({
     borderRadius: 35,
     alignItems: 'center',
     justifyContent: 'center',
+  },
+  queueSheetOverlay: {
+    ...StyleSheet.absoluteFillObject,
+    justifyContent: 'flex-end',
+    zIndex: 200,
+  },
+  queueSheetMask: {
+    ...StyleSheet.absoluteFillObject,
+    backgroundColor: 'rgba(0,0,0,0.42)',
+  },
+  queueSheet: {
+    maxHeight: QUEUE_SHEET_HEIGHT,
+    borderTopLeftRadius: borderRadius.xl,
+    borderTopRightRadius: borderRadius.xl,
+    borderWidth: StyleSheet.hairlineWidth,
+    paddingTop: spacing.md,
+  },
+  queueSheetHeader: {
+    paddingHorizontal: spacing.md,
+    paddingBottom: spacing.sm,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+  },
+  queueSheetTitle: {
+    fontSize: fontSize.title3,
+    fontWeight: '700',
+  },
+  queueSheetCount: {
+    fontSize: fontSize.footnote,
+  },
+  queueSheetList: {
+    paddingBottom: spacing.sm,
+  },
+  queueItem: {
+    minHeight: 56,
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: spacing.md,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+  },
+  queueItemIndex: {
+    width: 28,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginRight: spacing.sm,
+  },
+  queueIndexText: {
+    fontSize: fontSize.caption1,
+    fontWeight: '600',
+  },
+  queueItemInfo: {
+    flex: 1,
+  },
+  queueItemTitle: {
+    fontSize: fontSize.callout,
+    fontWeight: '600',
+  },
+  queueItemArtist: {
+    fontSize: fontSize.caption1,
+    marginTop: 2,
   },
 });

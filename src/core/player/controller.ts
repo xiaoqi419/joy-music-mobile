@@ -14,6 +14,8 @@ export interface PlaybackConfig {
   statusCallback?: (status: PlaybackStatus) => void
 }
 
+export type PlayMode = 'list_once' | 'list_loop' | 'single_loop' | 'shuffle'
+
 /**
  * Main music player controller
  */
@@ -24,6 +26,9 @@ class MusicPlayerController {
   private currentTrack: Track | null = null
   private currentTimeMillis: number = 0
   private durationMillis: number = 0
+  private repeatMode: PlayerState['repeatMode'] = 'all'
+  private shuffleMode = false
+  private isHandlingTrackFinish = false
   private statusCallbacks: Set<(status: PlaybackStatus) => void> = new Set()
   private preferredQuality: Quality = '320k'
 
@@ -169,8 +174,12 @@ class MusicPlayerController {
         throw new Error('No playlist set')
       }
 
-      // Simple sequential playback
-      this.currentIndex = (this.currentIndex + 1) % this.playlist.length
+      const nextIndex = this.getNextIndex()
+      if (nextIndex === null) {
+        console.log('[PlayerController] Reached end of queue in list_once mode')
+        return
+      }
+      this.currentIndex = nextIndex
 
       await this.playTrack(this.playlist[this.currentIndex])
     } catch (error) {
@@ -188,7 +197,12 @@ class MusicPlayerController {
         throw new Error('No playlist set')
       }
 
-      this.currentIndex = (this.currentIndex - 1 + this.playlist.length) % this.playlist.length
+      const prevIndex = this.getPreviousIndex()
+      if (prevIndex === null) {
+        console.log('[PlayerController] Reached start of queue in list_once mode')
+        return
+      }
+      this.currentIndex = prevIndex
 
       await this.playTrack(this.playlist[this.currentIndex])
     } catch (error) {
@@ -268,8 +282,8 @@ class MusicPlayerController {
       playlist: this.playlist,
       currentIndex: this.currentIndex,
       volume: 1.0,
-      repeatMode: 'off',
-      shuffleMode: false,
+      repeatMode: this.repeatMode,
+      shuffleMode: this.shuffleMode,
     }
   }
 
@@ -278,6 +292,54 @@ class MusicPlayerController {
    */
   getCurrentTrack(): Track | null {
     return this.currentTrack
+  }
+
+  /**
+   * Get current play mode.
+   */
+  getPlayMode(): PlayMode {
+    if (this.shuffleMode) return 'shuffle'
+    if (this.repeatMode === 'all') return 'list_loop'
+    if (this.repeatMode === 'one') return 'single_loop'
+    return 'list_once'
+  }
+
+  /**
+   * Set play mode.
+   */
+  setPlayMode(mode: PlayMode): void {
+    switch (mode) {
+      case 'list_loop':
+        this.repeatMode = 'all'
+        this.shuffleMode = false
+        break
+      case 'single_loop':
+        this.repeatMode = 'one'
+        this.shuffleMode = false
+        break
+      case 'shuffle':
+        this.repeatMode = 'all'
+        this.shuffleMode = true
+        break
+      case 'list_once':
+      default:
+        this.repeatMode = 'off'
+        this.shuffleMode = false
+        break
+    }
+    console.log(`[PlayerController] Play mode set: ${mode}`)
+  }
+
+  /**
+   * Cycle play mode and return next mode.
+   */
+  cyclePlayMode(): PlayMode {
+    const modes: PlayMode[] = ['list_once', 'list_loop', 'single_loop', 'shuffle']
+    const currentMode = this.getPlayMode()
+    const currentIndex = modes.indexOf(currentMode)
+    const nextMode = modes[(currentIndex + 1) % modes.length]
+    this.setPlayMode(nextMode)
+    return nextMode
   }
 
   /**
@@ -330,6 +392,10 @@ class MusicPlayerController {
     this.currentTimeMillis = status.positionMillis
     this.durationMillis = status.durationMillis
 
+    if (status.didJustFinish) {
+      void this.handleTrackDidFinish()
+    }
+
     // Broadcast to all registered callbacks
     for (const callback of this.statusCallbacks) {
       try {
@@ -338,6 +404,79 @@ class MusicPlayerController {
         console.error('[PlayerController] Error in status callback:', error)
       }
     }
+  }
+
+  private async handleTrackDidFinish(): Promise<void> {
+    if (this.isHandlingTrackFinish) return
+    if (!this.playlist.length) return
+
+    this.isHandlingTrackFinish = true
+    try {
+      const nextIndex = this.getNextIndex()
+      if (nextIndex === null) {
+        this.isPlaying = false
+        return
+      }
+      this.currentIndex = nextIndex
+      await this.playTrack(this.playlist[nextIndex], {
+        autoPlay: true,
+        quality: this.preferredQuality,
+      })
+    } catch (error) {
+      console.error('[PlayerController] Error handling track finish:', error)
+    } finally {
+      this.isHandlingTrackFinish = false
+    }
+  }
+
+  private getNextIndex(): number | null {
+    if (!this.playlist.length) return null
+
+    if (this.repeatMode === 'one') {
+      return this.currentIndex >= 0 ? this.currentIndex : 0
+    }
+
+    if (this.shuffleMode) {
+      return this.getRandomQueueIndex(this.currentIndex)
+    }
+
+    if (this.currentIndex < 0) return 0
+    const nextIndex = this.currentIndex + 1
+    if (nextIndex < this.playlist.length) return nextIndex
+
+    if (this.repeatMode === 'all') return 0
+    return null
+  }
+
+  private getPreviousIndex(): number | null {
+    if (!this.playlist.length) return null
+
+    if (this.repeatMode === 'one') {
+      return this.currentIndex >= 0 ? this.currentIndex : 0
+    }
+
+    if (this.shuffleMode) {
+      return this.getRandomQueueIndex(this.currentIndex)
+    }
+
+    if (this.currentIndex < 0) return 0
+    const prevIndex = this.currentIndex - 1
+    if (prevIndex >= 0) return prevIndex
+
+    if (this.repeatMode === 'all') return this.playlist.length - 1
+    return null
+  }
+
+  private getRandomQueueIndex(excludeIndex: number): number {
+    if (this.playlist.length <= 1) {
+      return this.playlist.length === 1 ? 0 : -1
+    }
+
+    let nextIndex = excludeIndex
+    while (nextIndex === excludeIndex) {
+      nextIndex = Math.floor(Math.random() * this.playlist.length)
+    }
+    return nextIndex
   }
 
   /**

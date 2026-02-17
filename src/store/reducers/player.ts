@@ -12,7 +12,7 @@ const initialState: PlayerState = {
   playlist: [],
   currentIndex: -1,
   volume: 1.0,
-  repeatMode: 'off',
+  repeatMode: 'all',
   shuffleMode: false,
 }
 

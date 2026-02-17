@@ -7,3 +7,4 @@
 export { playerController } from './controller'
 export { expoAVPlayer } from './expoav'
 export type { PlaybackStatus, PlayerConfig } from './expoav'
+export type { PlayMode } from './controller'
