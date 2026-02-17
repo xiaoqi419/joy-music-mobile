@@ -18,7 +18,7 @@ import SearchScreen from './src/screens/Search'
 import LibraryScreen from './src/screens/Library'
 import TrackListDetail from './src/screens/Detail/TrackListDetail'
 import NowPlaying from './src/screens/NowPlaying'
-import { playerController } from './src/core/player'
+import { playerController, type PlaybackStatus } from './src/core/player'
 import { Track } from './src/types/music'
 import { LeaderboardBoardItem, SongListItem } from './src/types/discover'
 import { getLeaderboardDetail, getSongListDetail } from './src/core/discover'
@@ -53,36 +53,69 @@ function AppContent() {
   const [showNowPlaying, setShowNowPlaying] = useState(false)
   const [detailLoading, setDetailLoading] = useState(false)
 
+  const syncPlayerStateToStore = useCallback((playbackStatus?: PlaybackStatus | null) => {
+    const snapshot = playerController.getPlayerState()
+    dispatch({
+      type: 'PLAYER_SYNC_STATE',
+      payload: {
+        ...snapshot,
+        playlist: playerController.getPlaylist(),
+        currentIndex: playerController.getCurrentIndex(),
+        currentTrack: playerController.getCurrentTrack(),
+        isPlaying: playbackStatus?.isPlaying ?? snapshot.isPlaying,
+        currentTime: playbackStatus?.positionMillis ?? snapshot.currentTime,
+        duration: playbackStatus?.durationMillis ?? snapshot.duration,
+      },
+    })
+  }, [dispatch])
+
   useEffect(() => {
+    let unsubscribe: (() => void) | undefined
+    let active = true
+
     const init = async () => {
       try {
         await playerController.initialize()
+        const initialStatus = await playerController.getPlaybackStatus()
+        if (active) syncPlayerStateToStore(initialStatus)
+        unsubscribe = playerController.onStatusUpdate((status) => {
+          if (!active) return
+          syncPlayerStateToStore(status)
+        })
       } catch (e) {
         console.error('Player init error:', e)
       } finally {
         SplashScreen.hideAsync()
       }
     }
-    init()
-  }, [])
+    void init()
+
+    return () => {
+      active = false
+      unsubscribe?.()
+    }
+  }, [syncPlayerStateToStore])
 
   const handleTrackPress = useCallback(async (track: Track) => {
     try {
+      const currentTrack = playerController.getCurrentTrack()
       // 如果点击的是当前正在播放的歌曲，直接打开播放页继续播放
-      if (playerController.currentTrack?.id === track.id) {
+      if (currentTrack?.id === track.id) {
         setShowNowPlaying(true)
         return
       }
-      dispatch({ type: 'PLAYER_SET_CURRENT_TRACK', payload: track })
-      await playerController.playTrack(track, {
+
+      await playerController.insertTrackAndPlay(track, {
         autoPlay: true,
         quality: '320k',
       })
+      const playbackStatus = await playerController.getPlaybackStatus()
+      syncPlayerStateToStore(playbackStatus)
       setShowNowPlaying(true)
     } catch (e) {
       console.error('Play error:', e)
     }
-  }, [dispatch])
+  }, [syncPlayerStateToStore])
 
   const handleLeaderboardPress = useCallback(async(board: LeaderboardBoardItem) => {
     try {
@@ -135,21 +168,45 @@ function AppContent() {
     }
   }, [])
 
-  const handlePlayAll = useCallback(async () => {
+  const replaceQueueAndPlayAll = useCallback(async() => {
     if (!detailView || detailView.tracks.length === 0) return
     try {
-      playerController.setPlaylist(detailView.tracks)
-      dispatch({ type: 'PLAYER_SET_PLAYLIST', payload: detailView.tracks })
-      dispatch({ type: 'PLAYER_SET_CURRENT_TRACK', payload: detailView.tracks[0] })
       await playerController.playFromPlaylist(detailView.tracks, 0, {
         autoPlay: true,
         quality: '320k',
       })
+      const playbackStatus = await playerController.getPlaybackStatus()
+      syncPlayerStateToStore(playbackStatus)
       setShowNowPlaying(true)
     } catch (e) {
       console.error('Play all error:', e)
     }
-  }, [detailView, dispatch])
+  }, [detailView, syncPlayerStateToStore])
+
+  const handlePlayAll = useCallback(() => {
+    if (!detailView || detailView.tracks.length === 0) return
+
+    const currentQueue = playerController.getPlaylist()
+    if (!currentQueue.length) {
+      void replaceQueueAndPlayAll()
+      return
+    }
+
+    Alert.alert(
+      '替换当前播放列表？',
+      '播放全部将替换当前播放列表并从第一首开始播放。',
+      [
+        { text: '取消', style: 'cancel' },
+        {
+          text: '替换并播放',
+          style: 'destructive',
+          onPress: () => {
+            void replaceQueueAndPlayAll()
+          },
+        },
+      ],
+    )
+  }, [detailView, replaceQueueAndPlayAll])
 
   const handleDetailBack = useCallback(() => {
     setDetailView(null)

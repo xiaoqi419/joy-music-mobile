@@ -40,6 +40,12 @@ export default function playerReducer(
         currentTrack: action.payload,
       }
 
+    case 'PLAYER_SYNC_STATE':
+      return {
+        ...state,
+        ...action.payload,
+      }
+
     case 'PLAYER_PLAY':
       return {
         ...state,

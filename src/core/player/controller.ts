@@ -22,6 +22,8 @@ class MusicPlayerController {
   private currentIndex: number = -1
   private isPlaying: boolean = false
   private currentTrack: Track | null = null
+  private currentTimeMillis: number = 0
+  private durationMillis: number = 0
   private statusCallbacks: Set<(status: PlaybackStatus) => void> = new Set()
   private preferredQuality: Quality = '320k'
 
@@ -50,6 +52,14 @@ class MusicPlayerController {
     try {
       console.log(`[PlayerController] Playing track: ${track.title}`)
 
+      const existsInQueueIndex = this.playlist.findIndex(t => t.id === track.id)
+      if (existsInQueueIndex >= 0) {
+        this.currentIndex = existsInQueueIndex
+      } else if (this.playlist.length === 0) {
+        this.playlist = [track]
+        this.currentIndex = 0
+      }
+
       // Get playback URL from music manager
       const url = await musicManager.getMusicPlayUrl(
         track,
@@ -63,7 +73,7 @@ class MusicPlayerController {
       })
 
       this.currentTrack = track
-      this.isPlaying = true
+      this.isPlaying = config?.autoPlay ?? true
 
       // Set status callback if provided
       if (config?.statusCallback) {
@@ -84,12 +94,40 @@ class MusicPlayerController {
         throw new Error('Invalid playlist index')
       }
 
-      this.playlist = playlist
+      this.playlist = [...playlist]
       this.currentIndex = index
 
-      await this.playTrack(playlist[index], config)
+      await this.playTrack(this.playlist[index], config)
     } catch (error) {
       console.error('[PlayerController] Error playing from playlist:', error)
+      throw error
+    }
+  }
+
+  /**
+   * Insert a track into the global queue and play it immediately.
+   * If the track already exists in queue, jump to that item instead of duplicating.
+   */
+  async insertTrackAndPlay(track: Track, config?: PlaybackConfig): Promise<void> {
+    try {
+      const existsIndex = this.playlist.findIndex(item => item.id === track.id)
+      if (existsIndex >= 0) {
+        this.currentIndex = existsIndex
+        await this.playTrack(this.playlist[existsIndex], config)
+        return
+      }
+
+      const insertIndex = this.currentIndex >= 0
+        ? Math.min(this.currentIndex + 1, this.playlist.length)
+        : this.playlist.length
+      const nextQueue = [...this.playlist]
+      nextQueue.splice(insertIndex, 0, track)
+
+      this.playlist = nextQueue
+      this.currentIndex = insertIndex
+      await this.playTrack(track, config)
+    } catch (error) {
+      console.error('[PlayerController] Error inserting and playing track:', error)
       throw error
     }
   }
@@ -225,8 +263,8 @@ class MusicPlayerController {
     return {
       currentTrack: this.currentTrack,
       isPlaying: this.isPlaying,
-      currentTime: 0, // Will be updated via status callback
-      duration: 0,
+      currentTime: this.currentTimeMillis,
+      duration: this.durationMillis,
       playlist: this.playlist,
       currentIndex: this.currentIndex,
       volume: 1.0,
@@ -253,9 +291,24 @@ class MusicPlayerController {
    * Set playlist
    */
   setPlaylist(playlist: Track[]): void {
-    this.playlist = playlist
-    this.currentIndex = -1
+    this.playlist = [...playlist]
+    this.currentIndex = playlist.length ? 0 : -1
+    this.currentTrack = playlist.length ? playlist[0] : null
     console.log(`[PlayerController] Playlist set with ${playlist.length} tracks`)
+  }
+
+  /**
+   * Get queue snapshot.
+   */
+  getPlaylist(): Track[] {
+    return [...this.playlist]
+  }
+
+  /**
+   * Get current queue index.
+   */
+  getCurrentIndex(): number {
+    return this.currentIndex
   }
 
   /**
@@ -273,6 +326,10 @@ class MusicPlayerController {
    * Internal: Handle player status updates
    */
   private handlePlayerStatusUpdate(status: PlaybackStatus): void {
+    this.isPlaying = status.isPlaying
+    this.currentTimeMillis = status.positionMillis
+    this.durationMillis = status.durationMillis
+
     // Broadcast to all registered callbacks
     for (const callback of this.statusCallbacks) {
       try {
