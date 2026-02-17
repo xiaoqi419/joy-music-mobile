@@ -19,19 +19,22 @@ import {
   Animated,
   Easing,
   Platform,
+  Dimensions,
 } from 'react-native';
 import Slider from '@react-native-community/slider';
 import { Ionicons } from '@expo/vector-icons';
+import { LinearGradient } from 'expo-linear-gradient';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useTheme, spacing, fontSize, borderRadius } from '../../theme';
 import { usePlayerStatus } from '../../hooks/usePlayerStatus';
-import { useSwipeBack } from '../../hooks/useSwipeBack';
+import { useSwipeDownClose } from '../../hooks/useSwipeDownClose';
 import { playerController } from '../../core/player';
 import { getLyric, LyricData } from '../../core/lyric';
 import LyricsView from '../../components/common/LyricsView';
 
+const SCREEN_WIDTH = Dimensions.get('window').width;
 /** 封面视图模式下的封面直径 */
-const COVER_SIZE_LG = 280;
+const COVER_SIZE_LG = Math.min(320, SCREEN_WIDTH - 72);
 
 type ViewTab = 'cover' | 'lyrics';
 
@@ -54,7 +57,7 @@ function formatMs(ms: number): string {
  * @param onClose - 关闭回调（返回上一页）
  */
 export default function NowPlaying({ onClose }: NowPlayingProps) {
-  const { colors } = useTheme();
+  const { colors, isDark } = useTheme();
   const insets = useSafeAreaInsets();
   const { currentTrack, isPlaying, position, duration } = usePlayerStatus();
 
@@ -65,8 +68,8 @@ export default function NowPlaying({ onClose }: NowPlayingProps) {
   const isDraggingRef = useRef(false);
   const [sliderValue, setSliderValue] = useState(0);
 
-  /* ── 左边缘右滑关闭手势 ── */
-  const { panX, panHandlers } = useSwipeBack(onClose);
+  /* ── 顶部下滑关闭手势 ── */
+  const { panY, panHandlers } = useSwipeDownClose(onClose, insets.top + 120);
 
   /* ── 歌词状态 ── */
   const [lyricData, setLyricData] = useState<LyricData>({
@@ -80,9 +83,9 @@ export default function NowPlaying({ onClose }: NowPlayingProps) {
   const rotateAnim = useRef(new Animated.Value(0)).current;
   const rotateLoop = useRef<Animated.CompositeAnimation | null>(null);
 
-  /* ── 标签页切换动画 ── */
-  const tabSwitchAnim = useRef(new Animated.Value(1)).current;
-  const coverBtnAnim = useRef(new Animated.Value(0)).current;
+  /* ── 封面/歌词切换动画（0=cover, 1=lyrics） ── */
+  const viewSwitchAnim = useRef(new Animated.Value(0)).current;
+  const coverBtnAnim = useRef(new Animated.Value(1)).current;
   const lyricsBtnAnim = useRef(new Animated.Value(0)).current;
 
   /** 播放时启动匀速旋转，暂停时停在当前角度 */
@@ -113,10 +116,9 @@ export default function NowPlaying({ onClose }: NowPlayingProps) {
 
   /** 标签页切换动画 */
   useEffect(() => {
-    tabSwitchAnim.setValue(0);
-    Animated.timing(tabSwitchAnim, {
-      toValue: 1,
-      duration: 300,
+    Animated.timing(viewSwitchAnim, {
+      toValue: activeTab === 'lyrics' ? 1 : 0,
+      duration: 260,
       easing: Easing.out(Easing.cubic),
       useNativeDriver: true,
     }).start();
@@ -149,7 +151,7 @@ export default function NowPlaying({ onClose }: NowPlayingProps) {
         }),
       ]).start();
     }
-  }, [activeTab, tabSwitchAnim, coverBtnAnim, lyricsBtnAnim]);
+  }, [activeTab, viewSwitchAnim, coverBtnAnim, lyricsBtnAnim]);
 
   /* ── 歌曲切换时获取歌词 ── */
   useEffect(() => {
@@ -190,6 +192,44 @@ export default function NowPlaying({ onClose }: NowPlayingProps) {
     void playerController.seek(timeMs);
   }, []);
 
+  const sourceLabel = currentTrack?.source
+    ? currentTrack.source.toUpperCase()
+    : 'LOCAL';
+
+  const subMeta = useMemo(() => {
+    const parts = [currentTrack?.album, sourceLabel].filter(Boolean);
+    return parts.join(' · ');
+  }, [currentTrack?.album, sourceLabel]);
+
+  const dismissScale = panY.interpolate({
+    inputRange: [0, 320],
+    outputRange: [1, 0.975],
+    extrapolate: 'clamp',
+  });
+
+  const dismissOpacity = panY.interpolate({
+    inputRange: [0, 280],
+    outputRange: [1, 0.94],
+    extrapolate: 'clamp',
+  });
+
+  const coverOpacity = viewSwitchAnim.interpolate({
+    inputRange: [0, 1],
+    outputRange: [1, 0],
+  });
+  const lyricsOpacity = viewSwitchAnim.interpolate({
+    inputRange: [0, 1],
+    outputRange: [0, 1],
+  });
+  const coverScale = viewSwitchAnim.interpolate({
+    inputRange: [0, 1],
+    outputRange: [1, 0.96],
+  });
+  const lyricsScale = viewSwitchAnim.interpolate({
+    inputRange: [0, 1],
+    outputRange: [0.98, 1],
+  });
+
   /** 播放进度更新时同步 Slider（仅在非拖动状态） */
   useEffect(() => {
     if (!isDraggingRef.current) {
@@ -204,45 +244,104 @@ export default function NowPlaying({ onClose }: NowPlayingProps) {
       style={[
         styles.overlay,
         {
-          backgroundColor: colors.background,
-          transform: [{ translateX: panX }],
+          opacity: dismissOpacity,
+          transform: [{ translateY: panY }, { scale: dismissScale }],
         },
       ]}
       {...panHandlers}
     >
+      <LinearGradient
+        colors={
+          isDark
+            ? ['#05070D', '#0D182C', '#05070D']
+            : ['#EAF3FF', '#F8FBFF', '#EEF3F8']
+        }
+        start={{ x: 0.1, y: 0 }}
+        end={{ x: 0.9, y: 1 }}
+        style={StyleSheet.absoluteFill}
+      />
+      {currentTrack.coverUrl && (
+        <Image
+          source={{ uri: currentTrack.coverUrl }}
+          style={styles.backdropImage}
+          blurRadius={48}
+        />
+      )}
+      <LinearGradient
+        colors={
+          isDark
+            ? ['rgba(0,0,0,0.35)', 'rgba(0,0,0,0.82)']
+            : ['rgba(255,255,255,0.35)', 'rgba(242,242,247,0.86)']
+        }
+        start={{ x: 0.5, y: 0 }}
+        end={{ x: 0.5, y: 1 }}
+        style={StyleSheet.absoluteFill}
+      />
+
       {/* ── 顶部栏 ── */}
-      <View style={[styles.header, { paddingTop: insets.top + spacing.sm }]}>
-        <TouchableOpacity onPress={onClose} style={styles.headerButton}>
-          <Ionicons name="chevron-down" size={26} color={colors.text} />
-        </TouchableOpacity>
-        <Text style={[styles.headerTitle, { color: colors.textSecondary }]}>
-          Now Playing
-        </Text>
-        <View style={styles.headerButton} />
+      <View style={[styles.headerBlock, { paddingTop: insets.top + spacing.xs }]}>
+        <View
+          style={[
+            styles.dragHandle,
+            { backgroundColor: isDark ? 'rgba(255,255,255,0.28)' : 'rgba(0,0,0,0.2)' },
+          ]}
+        />
+        <View style={styles.header}>
+          <Text style={[styles.headerTitle, { color: colors.textSecondary }]}>
+            正在播放
+          </Text>
+        </View>
       </View>
 
       {/* ── 主体 ── */}
       <View style={styles.body}>
-        {/* ── 内容区（封面 / 歌词） ── */}
-        <Animated.View
+        <View
           style={[
-            styles.contentArea,
+            styles.metaCard,
             {
-              opacity: tabSwitchAnim,
-              transform: [
-                {
-                  scale: tabSwitchAnim.interpolate({
-                    inputRange: [0, 1],
-                    outputRange: [0.95, 1],
-                  }),
-                },
-              ],
+              backgroundColor: isDark ? 'rgba(28,28,30,0.48)' : 'rgba(255,255,255,0.72)',
+              borderColor: colors.separator,
             },
           ]}
         >
-          {activeTab === 'cover' ? (
-            /* 封面视图：大圆形旋转封面 + 歌曲信息 */
+          <Text style={[styles.trackTitle, { color: colors.text }]} numberOfLines={2}>
+            {currentTrack.title}
+          </Text>
+          <Text style={[styles.trackArtist, { color: colors.textSecondary }]} numberOfLines={1}>
+            {currentTrack.artist}
+          </Text>
+          <Text style={[styles.trackMeta, { color: colors.textTertiary }]} numberOfLines={1}>
+            {subMeta}
+          </Text>
+        </View>
+
+        {/* ── 内容区（封面 / 歌词） ── */}
+        <View style={styles.contentArea}>
+          <Animated.View
+            pointerEvents={activeTab === 'cover' ? 'auto' : 'none'}
+            style={[
+              styles.stageLayer,
+              styles.coverStage,
+              {
+                opacity: coverOpacity,
+                transform: [{ scale: coverScale }],
+              },
+            ]}
+          >
+            {/* 封面视图：大圆形旋转封面 */}
             <View style={styles.coverView}>
+              <View
+                style={[
+                  styles.haloOuter,
+                  { borderColor: isDark ? 'rgba(255,255,255,0.08)' : 'rgba(0,0,0,0.08)' },
+                ]}
+              />
+              <View
+                style={[
+                  styles.haloInner,
+                  { borderColor: isDark ? 'rgba(255,255,255,0.16)' : 'rgba(0,0,0,0.12)' },
+                ]}
+              />
               <View
                 style={[
                   styles.coverShadow,
@@ -253,7 +352,7 @@ export default function NowPlaying({ onClose }: NowPlayingProps) {
                       shadowOpacity: 0.3,
                       shadowRadius: 24,
                     },
-                    android: { elevation: 16 },
+                    android: { elevation: 20 },
                   }),
                 ]}
               >
@@ -280,40 +379,48 @@ export default function NowPlaying({ onClose }: NowPlayingProps) {
                   )}
                 </Animated.View>
               </View>
-
-              {/* 歌曲信息（仅在封面页显示） */}
-              <View style={styles.trackInfo}>
-                <Text
-                  style={[styles.trackTitle, { color: colors.text }]}
-                  numberOfLines={2}
-                >
-                  {currentTrack.title}
-                </Text>
-                <Text
-                  style={[styles.trackArtist, { color: colors.textSecondary }]}
-                  numberOfLines={1}
-                >
-                  {currentTrack.artist}
-                </Text>
-              </View>
             </View>
-          ) : (
-            /* 歌词视图 */
-            <LyricsView
-              lyrics={lyricData.lines}
-              position={position}
-              loading={lyricLoading}
-              onSeek={handleLyricSeek}
-            />
-          )}
-        </Animated.View>
+          </Animated.View>
+
+          <Animated.View
+            pointerEvents={activeTab === 'lyrics' ? 'auto' : 'none'}
+            style={[
+              styles.stageLayer,
+              {
+                opacity: lyricsOpacity,
+                transform: [{ scale: lyricsScale }],
+              },
+            ]}
+          >
+            <View
+              style={[
+                styles.lyricsPanel,
+                {
+                  backgroundColor: isDark ? 'rgba(28,28,30,0.46)' : 'rgba(255,255,255,0.72)',
+                  borderColor: colors.separator,
+                },
+              ]}
+            >
+              <LyricsView
+                lyrics={lyricData.lines}
+                position={position}
+                loading={lyricLoading}
+                onSeek={handleLyricSeek}
+                active={activeTab === 'lyrics'}
+              />
+            </View>
+          </Animated.View>
+        </View>
 
         {/* ── 悬浮胶囊切换 ── */}
         <View style={styles.capsuleRow}>
           <View
             style={[
               styles.capsule,
-              { backgroundColor: colors.surfaceElevated },
+              {
+                backgroundColor: isDark ? 'rgba(28,28,30,0.62)' : 'rgba(255,255,255,0.8)',
+                borderColor: colors.separator,
+              },
             ]}
           >
             <Animated.View
@@ -401,72 +508,89 @@ export default function NowPlaying({ onClose }: NowPlayingProps) {
           </View>
         </View>
 
-        {/* ── 进度条 ── */}
-        <View style={styles.seekWrap}>
-          <Slider
-            value={sliderValue}
-            minimumValue={0}
-            maximumValue={1}
-            minimumTrackTintColor={colors.accent}
-            maximumTrackTintColor={colors.separator}
-            thumbTintColor={colors.accent}
-            onSlidingStart={() => {
-              isDraggingRef.current = true;
-            }}
-            onValueChange={value => {
-              setSliderValue(value);
-            }}
-            onSlidingComplete={value => {
-              const nextMs = Math.floor((duration || 0) * value);
-              void playerController.seek(nextMs);
-              setTimeout(() => {
-                isDraggingRef.current = false;
-              }, 300);
-            }}
-          />
-          <View style={styles.timeRow}>
-            <Text style={[styles.timeText, { color: colors.textSecondary }]}>
-              {formatMs(position)}
-            </Text>
-            <Text style={[styles.timeText, { color: colors.textSecondary }]}>
-              {formatMs(duration)}
-            </Text>
-          </View>
-        </View>
-
-        {/* ── 播放控制 ── */}
         <View
           style={[
-            styles.controls,
-            { paddingBottom: insets.bottom + spacing.sm },
+            styles.transportArea,
+            {
+              paddingBottom: insets.bottom + spacing.sm,
+            },
           ]}
         >
-          <TouchableOpacity
-            style={styles.controlButton}
-            onPress={() => void playerController.playPrevious()}
-          >
-            <Ionicons name="play-skip-back" size={28} color={colors.text} />
-          </TouchableOpacity>
-          <TouchableOpacity
-            style={[styles.playButton, { backgroundColor: colors.accent }]}
-            onPress={() =>
-              void (isPlaying
-                ? playerController.pause()
-                : playerController.resume())
-            }
-          >
-            <Ionicons
-              name={isPlaying ? 'pause' : 'play'}
-              size={34}
-              color="#fff"
+          {/* ── 进度条 ── */}
+          <View style={styles.seekWrap}>
+            <Slider
+              value={sliderValue}
+              minimumValue={0}
+              maximumValue={1}
+              minimumTrackTintColor={colors.accent}
+              maximumTrackTintColor={colors.separator}
+              thumbTintColor={colors.accent}
+              onSlidingStart={() => {
+                isDraggingRef.current = true;
+              }}
+              onValueChange={value => {
+                setSliderValue(value);
+              }}
+              onSlidingComplete={value => {
+                const nextMs = Math.floor((duration || 0) * value);
+                void playerController.seek(nextMs);
+                setTimeout(() => {
+                  isDraggingRef.current = false;
+                }, 250);
+              }}
             />
-          </TouchableOpacity>
-          <TouchableOpacity
-            style={styles.controlButton}
-            onPress={() => void playerController.playNext()}
-          >
-            <Ionicons name="play-skip-forward" size={28} color={colors.text} />
-          </TouchableOpacity>
+            <View style={styles.timeRow}>
+              <Text style={[styles.timeText, { color: colors.textSecondary }]}>
+                {formatMs(position)}
+              </Text>
+              <Text style={[styles.timeText, { color: colors.textSecondary }]}>
+                {formatMs(duration)}
+              </Text>
+            </View>
+          </View>
+
+          {/* ── 播放控制 ── */}
+          <View style={styles.controls}>
+            <TouchableOpacity
+              style={styles.controlButton}
+              onPress={() => void playerController.playPrevious()}
+            >
+              <Ionicons name="play-skip-back" size={28} color={colors.text} />
+            </TouchableOpacity>
+
+            <TouchableOpacity
+              onPress={() =>
+                void (isPlaying
+                  ? playerController.pause()
+                  : playerController.resume())
+              }
+              activeOpacity={0.86}
+            >
+              <LinearGradient
+                colors={
+                  isDark
+                    ? ['#32A0FF', '#0A84FF']
+                    : ['#0A84FF', '#0065E0']
+                }
+                start={{ x: 0.2, y: 0 }}
+                end={{ x: 0.8, y: 1 }}
+                style={styles.playButton}
+              >
+                <Ionicons
+                  name={isPlaying ? 'pause' : 'play'}
+                  size={34}
+                  color="#fff"
+                />
+              </LinearGradient>
+            </TouchableOpacity>
+
+            <TouchableOpacity
+              style={styles.controlButton}
+              onPress={() => void playerController.playNext()}
+            >
+              <Ionicons name="play-skip-forward" size={28} color={colors.text} />
+            </TouchableOpacity>
+          </View>
         </View>
       </View>
     </Animated.View>
@@ -478,37 +602,73 @@ const styles = StyleSheet.create({
     ...StyleSheet.absoluteFillObject,
     zIndex: 120,
   },
+  backdropImage: {
+    ...StyleSheet.absoluteFillObject,
+    opacity: 0.32,
+  },
+  headerBlock: {
+    paddingHorizontal: spacing.md,
+    gap: spacing.sm,
+  },
+  dragHandle: {
+    alignSelf: 'center',
+    width: 44,
+    height: 5,
+    borderRadius: 999,
+  },
   header: {
     height: 56,
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    paddingHorizontal: spacing.md,
-  },
-  headerButton: {
-    width: 36,
-    height: 36,
     alignItems: 'center',
     justifyContent: 'center',
   },
   headerTitle: {
     fontSize: fontSize.subhead,
-    fontWeight: '600',
+    fontWeight: '700',
+    letterSpacing: 0.2,
   },
   body: {
     flex: 1,
     paddingHorizontal: spacing.md,
+    paddingBottom: spacing.sm,
+    gap: spacing.sm,
+  },
+  metaCard: {
+    borderRadius: borderRadius.lg,
+    borderWidth: StyleSheet.hairlineWidth,
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.sm + 2,
   },
   /* ── 内容区（封面 / 歌词共享） ── */
   contentArea: {
     flex: 1,
+    minHeight: 260,
+    position: 'relative',
+  },
+  stageLayer: {
+    ...StyleSheet.absoluteFillObject,
+  },
+  coverStage: {
+    justifyContent: 'center',
   },
   /* ── 封面视图 ── */
   coverView: {
     flex: 1,
     alignItems: 'center',
     justifyContent: 'center',
-    gap: spacing.md,
+  },
+  haloOuter: {
+    position: 'absolute',
+    width: COVER_SIZE_LG + 70,
+    height: COVER_SIZE_LG + 70,
+    borderRadius: 999,
+    borderWidth: 1,
+  },
+  haloInner: {
+    position: 'absolute',
+    width: COVER_SIZE_LG + 28,
+    height: COVER_SIZE_LG + 28,
+    borderRadius: 999,
+    borderWidth: 1,
   },
   coverShadow: {
     borderRadius: COVER_SIZE_LG / 2,
@@ -526,28 +686,35 @@ const styles = StyleSheet.create({
     height: COVER_SIZE_LG,
   },
   /* ── 歌曲信息（仅封面页） ── */
-  trackInfo: {
-    alignItems: 'center',
-    gap: spacing.xs,
-    paddingHorizontal: spacing.md,
-    marginTop: spacing.lg,
-  },
   trackTitle: {
     fontSize: fontSize.title2,
     fontWeight: '700',
   },
   trackArtist: {
     fontSize: fontSize.callout,
+    marginTop: 2,
+  },
+  trackMeta: {
+    fontSize: fontSize.caption1,
+    marginTop: 4,
+  },
+  lyricsPanel: {
+    flex: 1,
+    borderRadius: borderRadius.xl,
+    borderWidth: StyleSheet.hairlineWidth,
+    overflow: 'hidden',
   },
   /* ── 胶囊切换 ── */
   capsuleRow: {
     alignItems: 'center',
-    paddingVertical: spacing.sm,
+    paddingTop: spacing.xs,
+    paddingBottom: spacing.xs,
   },
   capsule: {
     flexDirection: 'row',
     borderRadius: borderRadius.full,
     padding: 3,
+    borderWidth: StyleSheet.hairlineWidth,
   },
   capsuleBtn: {
     flexDirection: 'row',
@@ -568,6 +735,11 @@ const styles = StyleSheet.create({
   seekWrap: {
     gap: spacing.xs,
   },
+  transportArea: {
+    paddingHorizontal: spacing.xs,
+    paddingTop: spacing.xs,
+    gap: spacing.md,
+  },
   timeRow: {
     flexDirection: 'row',
     justifyContent: 'space-between',
@@ -580,7 +752,7 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-evenly',
-    paddingTop: spacing.sm,
+    paddingTop: spacing.xs,
   },
   controlButton: {
     width: 52,
@@ -590,9 +762,9 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   playButton: {
-    width: 64,
-    height: 64,
-    borderRadius: 32,
+    width: 70,
+    height: 70,
+    borderRadius: 35,
     alignItems: 'center',
     justifyContent: 'center',
   },

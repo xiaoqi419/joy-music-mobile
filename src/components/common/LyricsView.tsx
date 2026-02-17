@@ -26,6 +26,8 @@ interface LyricsViewProps {
   position: number
   /** 是否正在加载歌词 */
   loading?: boolean
+  /** 当前歌词页是否可见（用于控制自动滚动动画） */
+  active?: boolean
   /** 点击歌词行跳转回调 */
   onSeek?: (timeMs: number) => void
 }
@@ -151,11 +153,13 @@ export default function LyricsView({
   lyrics,
   position,
   loading,
+  active = true,
   onSeek,
 }: LyricsViewProps) {
   const { colors } = useTheme()
   const scrollRef = useRef<ScrollView>(null)
   const [containerHeight, setContainerHeight] = useState(300)
+  const firstPositionSyncRef = useRef(true)
 
   const hasTranslation = useMemo(
     () => lyrics.some((l) => l.translation),
@@ -176,17 +180,19 @@ export default function LyricsView({
   /** 当前行变化时自动滚动居中 */
   useEffect(() => {
     if (currentIndex >= 0 && containerHeight > 0) {
-      const targetY = currentIndex * lineHeight + lineHeight / 2
+      const targetY = Math.max(0, currentIndex * lineHeight + lineHeight / 2)
+      const shouldAnimate = active && !firstPositionSyncRef.current
       scrollRef.current?.scrollTo({
-        y: Math.max(0, targetY),
-        animated: true,
+        y: targetY,
+        animated: shouldAnimate,
       })
+      firstPositionSyncRef.current = false
     }
-  }, [currentIndex, lineHeight, containerHeight])
+  }, [currentIndex, lineHeight, containerHeight, active])
 
-  /** 切歌时重置滚动位置 */
+  /** 切歌后首次定位不做动画，避免“闪回到当前行”的观感 */
   useEffect(() => {
-    scrollRef.current?.scrollTo({ y: 0, animated: false })
+    firstPositionSyncRef.current = true
   }, [lyrics])
 
   /** 点击歌词行跳转 */
