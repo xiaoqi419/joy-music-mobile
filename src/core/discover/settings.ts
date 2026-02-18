@@ -26,7 +26,7 @@ let saveSongListTimer: ReturnType<typeof setTimeout> | null = null
 let saveLeaderboardTimer: ReturnType<typeof setTimeout> | null = null
 
 function safeSource(input: any): DiscoverSourceId {
-  return ['kw', 'wy', 'tx', 'kg', 'mg'].includes(input) ? input : 'kw'
+  return ['kw', 'wy', 'tx', 'kg'].includes(input) ? input : 'kw'
 }
 
 export async function getSongListSetting(): Promise<SongListSetting> {
@@ -38,11 +38,15 @@ export async function getSongListSetting(): Promise<SongListSetting> {
   }
   try {
     const parsed = JSON.parse(raw)
+    const source = safeSource(parsed.source)
+    const sourceChanged = source !== parsed.source
     songListCache = {
-      source: safeSource(parsed.source),
-      sortId: String(parsed.sortId || DEFAULT_SONGLIST_SETTING.sortId),
-      tagId: String(parsed.tagId || ''),
-      tagName: String(parsed.tagName || ''),
+      source,
+      sortId: sourceChanged
+        ? DEFAULT_SONGLIST_SETTING.sortId
+        : String(parsed.sortId || DEFAULT_SONGLIST_SETTING.sortId),
+      tagId: sourceChanged ? '' : String(parsed.tagId || ''),
+      tagName: sourceChanged ? '' : String(parsed.tagName || ''),
     }
     return { ...songListCache }
   } catch {
@@ -75,9 +79,13 @@ export async function getLeaderboardSetting(): Promise<LeaderboardSetting> {
   }
   try {
     const parsed = JSON.parse(raw)
+    const source = safeSource(parsed.source)
+    const sourceChanged = source !== parsed.source
     leaderboardCache = {
-      source: safeSource(parsed.source),
-      boardId: String(parsed.boardId || DEFAULT_LEADERBOARD_SETTING.boardId),
+      source,
+      boardId: sourceChanged
+        ? DEFAULT_LEADERBOARD_SETTING.boardId
+        : String(parsed.boardId || DEFAULT_LEADERBOARD_SETTING.boardId),
     }
     return { ...leaderboardCache }
   } catch {

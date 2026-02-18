@@ -39,7 +39,7 @@ export {
 }
 
 function adapter(source: DiscoverSourceId) {
-  return discoverSources[source] ?? discoverSources.kw
+  return discoverSources[source as keyof typeof discoverSources] ?? discoverSources.kw
 }
 
 export async function getSongListTags(source: DiscoverSourceId): Promise<{
