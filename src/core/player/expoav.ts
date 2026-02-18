@@ -4,6 +4,7 @@
  */
 
 import { AudioPlayer, createAudioPlayer, setAudioModeAsync } from 'expo-audio'
+import { Platform } from 'react-native'
 import { Track } from '../../types/music'
 
 export interface PlayerConfig {
@@ -34,7 +35,8 @@ class ExpoAudioPlayerWrapper {
     await setAudioModeAsync({
       playsInSilentMode: true,
       shouldPlayInBackground: true,
-      interruptionMode: 'duckOthers',
+      interruptionMode: 'doNotMix',
+      shouldRouteThroughEarpiece: false,
     })
     this.isInitialized = true
     console.log('[ExpoAudioPlayer] Initialized')
@@ -58,6 +60,7 @@ class ExpoAudioPlayerWrapper {
     this.player.volume = Math.max(0, Math.min(1, config?.volume ?? 1))
     this.player.setPlaybackRate(config?.playbackRate ?? 1, 'high')
     this.currentTrack = track
+    this.updateLockScreen(track)
 
     if (config?.shouldPlay ?? true) {
       this.player.play()
@@ -79,6 +82,7 @@ class ExpoAudioPlayerWrapper {
     try {
       this.player.pause()
       await this.player.seekTo(0)
+      this.clearLockScreen()
     } finally {
       this.statusSubscription?.remove()
       this.statusSubscription = null
@@ -136,6 +140,36 @@ class ExpoAudioPlayerWrapper {
       volume: this.player?.volume ?? 1,
     }
     this.statusUpdateCallback?.(payload)
+  }
+
+  private updateLockScreen(track: Track): void {
+    if (!this.player || Platform.OS !== 'ios') return
+    try {
+      this.player.setActiveForLockScreen(
+        true,
+        {
+          title: track.title,
+          artist: track.artist,
+          albumTitle: track.album || '',
+          artworkUrl: track.coverUrl || '',
+        },
+        {
+          showSeekBackward: true,
+          showSeekForward: true,
+        }
+      )
+    } catch (error) {
+      console.warn('[ExpoAudioPlayer] Failed to set lock screen metadata:', error)
+    }
+  }
+
+  private clearLockScreen(): void {
+    if (!this.player || Platform.OS !== 'ios') return
+    try {
+      this.player.clearLockScreenControls()
+    } catch (error) {
+      console.warn('[ExpoAudioPlayer] Failed to clear lock screen controls:', error)
+    }
   }
 
   isLoaded(): boolean {
