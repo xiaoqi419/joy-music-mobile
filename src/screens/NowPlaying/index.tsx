@@ -404,25 +404,27 @@ export default function NowPlaying({ onClose }: NowPlayingProps) {
 
       {/* ── 主体 ── */}
       <View style={styles.body}>
-        <View
-          style={[
-            styles.metaCard,
-            {
-              backgroundColor: isDark ? 'rgba(28,28,30,0.48)' : 'rgba(255,255,255,0.72)',
-              borderColor: colors.separator,
-            },
-          ]}
-        >
-          <Text style={[styles.trackTitle, { color: colors.text }]} numberOfLines={2}>
-            {currentTrack.title}
-          </Text>
-          <Text style={[styles.trackArtist, { color: colors.textSecondary }]} numberOfLines={1}>
-            {currentTrack.artist}
-          </Text>
-          <Text style={[styles.trackMeta, { color: colors.textTertiary }]} numberOfLines={1}>
-            {subMeta}
-          </Text>
-        </View>
+        {activeTab === 'cover' && (
+          <View
+            style={[
+              styles.metaCard,
+              {
+                backgroundColor: isDark ? 'rgba(28,28,30,0.48)' : 'rgba(255,255,255,0.72)',
+                borderColor: colors.separator,
+              },
+            ]}
+          >
+            <Text style={[styles.trackTitle, { color: colors.text }]} numberOfLines={2}>
+              {currentTrack.title}
+            </Text>
+            <Text style={[styles.trackArtist, { color: colors.textSecondary }]} numberOfLines={1}>
+              {currentTrack.artist}
+            </Text>
+            <Text style={[styles.trackMeta, { color: colors.textTertiary }]} numberOfLines={1}>
+              {subMeta}
+            </Text>
+          </View>
+        )}
 
         {/* ── 内容区（封面 / 歌词） ── */}
         <View style={styles.contentArea}>
@@ -660,62 +662,51 @@ export default function NowPlaying({ onClose }: NowPlayingProps) {
 
           {/* ── 播放控制 ── */}
           <View style={styles.controls}>
-            <TouchableOpacity
-              style={styles.controlButton}
-              onPress={() => void playerController.playPrevious()}
-            >
-              <Ionicons name="play-skip-back" size={28} color={colors.text} />
-            </TouchableOpacity>
-
-            <TouchableOpacity
-              onPress={() =>
-                void (isPlaying
-                  ? playerController.pause()
-                  : playerController.resume())
-              }
-              activeOpacity={0.86}
-            >
-              <LinearGradient
-                colors={
-                  isDark
-                    ? ['#32A0FF', '#0A84FF']
-                    : ['#0A84FF', '#0065E0']
-                }
-                start={{ x: 0.2, y: 0 }}
-                end={{ x: 0.8, y: 1 }}
-                style={styles.playButton}
+            <View style={styles.transportControls}>
+              <TouchableOpacity
+                style={styles.controlButton}
+                onPress={() => void playerController.playPrevious()}
               >
-                <Ionicons
-                  name={isPlaying ? 'pause' : 'play'}
-                  size={34}
-                  color="#fff"
-                />
-              </LinearGradient>
-            </TouchableOpacity>
+                <Ionicons name="play-skip-back" size={28} color={colors.text} />
+              </TouchableOpacity>
 
-            <TouchableOpacity
-              style={styles.controlButton}
-              onPress={() => void playerController.playNext()}
-            >
-              <Ionicons name="play-skip-forward" size={28} color={colors.text} />
-            </TouchableOpacity>
+              <TouchableOpacity
+                onPress={() =>
+                  void (isPlaying
+                    ? playerController.pause()
+                    : playerController.resume())
+                }
+                activeOpacity={0.86}
+              >
+                <LinearGradient
+                  colors={
+                    isDark
+                      ? ['#32A0FF', '#0A84FF']
+                      : ['#0A84FF', '#0065E0']
+                  }
+                  start={{ x: 0.2, y: 0 }}
+                  end={{ x: 0.8, y: 1 }}
+                  style={styles.playButton}
+                >
+                  <Ionicons
+                    name={isPlaying ? 'pause' : 'play'}
+                    size={34}
+                    color="#fff"
+                  />
+                </LinearGradient>
+              </TouchableOpacity>
+
+              <TouchableOpacity
+                style={styles.controlButton}
+                onPress={() => void playerController.playNext()}
+              >
+                <Ionicons name="play-skip-forward" size={28} color={colors.text} />
+              </TouchableOpacity>
+            </View>
           </View>
 
-          {/* ── 底部操作：歌单 ── */}
+          {/* ── 底部操作：播放模式 + 菜单 ── */}
           <View style={styles.bottomActionRow}>
-            <TouchableOpacity
-              style={[
-                styles.bottomIconButton,
-                {
-                  backgroundColor: isDark ? 'rgba(255,255,255,0.08)' : 'rgba(0,0,0,0.06)',
-                  borderColor: colors.separator,
-                },
-              ]}
-              activeOpacity={0.75}
-              onPress={openQueueSheet}
-            >
-              <Ionicons name="list" size={18} color={colors.textSecondary} />
-            </TouchableOpacity>
             <TouchableOpacity
               style={[
                 styles.bottomIconButton,
@@ -737,6 +728,19 @@ export default function NowPlaying({ onClose }: NowPlayingProps) {
                   <Text style={styles.playModeBadgeText}>1</Text>
                 </View>
               )}
+            </TouchableOpacity>
+            <TouchableOpacity
+              style={[
+                styles.bottomIconButton,
+                {
+                  backgroundColor: isDark ? 'rgba(255,255,255,0.08)' : 'rgba(0,0,0,0.06)',
+                  borderColor: colors.separator,
+                },
+              ]}
+              activeOpacity={0.75}
+              onPress={openQueueSheet}
+            >
+              <Ionicons name="list" size={18} color={colors.textSecondary} />
             </TouchableOpacity>
           </View>
         </View>
@@ -989,10 +993,16 @@ const styles = StyleSheet.create({
   },
   /* ── 播放控制 ── */
   controls: {
+    position: 'relative',
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingTop: spacing.xs,
+  },
+  transportControls: {
     flexDirection: 'row',
     alignItems: 'center',
-    justifyContent: 'space-evenly',
-    paddingTop: spacing.xs,
+    justifyContent: 'center',
+    gap: spacing.md,
   },
   bottomActionRow: {
     alignItems: 'center',
