@@ -25,8 +25,8 @@ const TAB_ITEM_WIDTH = 58
 /** 胶囊水平内边距 */
 const CAPSULE_H_PADDING = 6
 /** 选中态背景的尺寸 */
-const ACTIVE_INDICATOR_WIDTH = 46
-const ACTIVE_INDICATOR_HEIGHT = 44
+const ACTIVE_INDICATOR_WIDTH = 50
+const ACTIVE_INDICATOR_HEIGHT = 46
 
 /** 根据 tab 索引计算指示器的水平偏移量 */
 const getIndicatorOffset = (index: number): number =>
@@ -91,6 +91,10 @@ export default function TabBar({ activeTab, onTabChange }: TabBarProps) {
     onTabChange(tab)
   }, [onTabChange])
 
+  const activeIndicatorColor = isDark
+    ? 'rgba(10, 132, 255, 0.30)'
+    : 'rgba(0, 122, 255, 0.16)'
+
   return (
     <View
       style={[
@@ -101,9 +105,19 @@ export default function TabBar({ activeTab, onTabChange }: TabBarProps) {
       <View style={styles.capsule}>
         {/* 液态玻璃模糊底层 */}
         <BlurView
-          intensity={isDark ? 60 : 80}
+          intensity={isDark ? 72 : 88}
           tint={isDark ? 'dark' : 'light'}
           style={styles.glassLayer}
+        />
+        {/* 胶囊实体层：提升复杂背景下的对比度 */}
+        <View
+          style={[
+            styles.baseLayer,
+            {
+              backgroundColor: colors.tabBar,
+              borderColor: colors.tabBarBorder,
+            },
+          ]}
         />
 
         {/* 顶部高光渐变 - 模拟玻璃折射光泽 */}
@@ -127,7 +141,8 @@ export default function TabBar({ activeTab, onTabChange }: TabBarProps) {
           style={[
             styles.activeIndicator,
             {
-              backgroundColor: colors.tabBarActiveIndicator,
+              backgroundColor: activeIndicatorColor,
+              borderColor: colors.accent,
               transform: [{ translateX: slideAnim }],
             },
           ]}
@@ -152,12 +167,13 @@ export default function TabBar({ activeTab, onTabChange }: TabBarProps) {
                 <Ionicons
                   name={isActive ? tab.iconActive : tab.icon}
                   size={20}
-                  color={isActive ? colors.accent : colors.textTertiary}
+                  color={isActive ? colors.text : colors.textSecondary}
                 />
                 <Text
                   style={[
                     styles.tabLabel,
-                    { color: isActive ? colors.accent : colors.textTertiary },
+                    isActive ? styles.tabLabelActive : styles.tabLabelInactive,
+                    { color: isActive ? colors.text : colors.textSecondary },
                   ]}
                 >
                   {tab.label}
@@ -205,6 +221,12 @@ const styles = StyleSheet.create({
     borderRadius: 9999,
     overflow: 'hidden',
   },
+  /** 胶囊基底层（提高对比） */
+  baseLayer: {
+    ...StyleSheet.absoluteFillObject,
+    borderRadius: 9999,
+    borderWidth: StyleSheet.hairlineWidth,
+  },
   /** 顶部高光渐变层 */
   glossLayer: {
     position: 'absolute',
@@ -229,6 +251,7 @@ const styles = StyleSheet.create({
     width: ACTIVE_INDICATOR_WIDTH,
     height: ACTIVE_INDICATOR_HEIGHT,
     borderRadius: ACTIVE_INDICATOR_HEIGHT / 2,
+    borderWidth: StyleSheet.hairlineWidth,
   },
   /** 单个 Tab 按钮 */
   tabItem: {
@@ -245,7 +268,13 @@ const styles = StyleSheet.create({
   },
   /** 中文标签 */
   tabLabel: {
-    fontSize: fontSize.caption2,
-    fontWeight: '500',
+    fontSize: fontSize.caption1,
+  },
+  tabLabelActive: {
+    fontWeight: '700',
+    letterSpacing: 0.15,
+  },
+  tabLabelInactive: {
+    fontWeight: '600',
   },
 })
