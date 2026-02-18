@@ -1,184 +1,109 @@
 /**
- * 悬浮球播放器。
- * 封面铺满球体 + 环形进度条 + 播放时旋转（唱片效果），点击打开 NowPlaying。
- * 位于胶囊 TabBar 右侧，与其同层悬浮。
+ * 底部 Mini 播放条。
+ * 横向布局：封面 + 歌名/作者 + 中间歌词 + 播放控制，底部可拖动进度条。
  */
 
-import React, { useCallback, useEffect, useRef } from 'react'
-import { View, TouchableOpacity, StyleSheet, Image, Animated, Platform, Easing } from 'react-native'
+import React, { useCallback, useEffect, useRef, useState } from 'react'
+import {
+  View,
+  TouchableOpacity,
+  StyleSheet,
+  Image,
+  Animated,
+  Platform,
+  Text,
+  type LayoutChangeEvent,
+  type GestureResponderEvent,
+} from 'react-native'
 import { Ionicons } from '@expo/vector-icons'
-import { useTheme } from '../../theme'
+import { useTheme, MINI_PLAYER_HEIGHT, fontSize } from '../../theme'
 import { usePlayerStatus } from '../../hooks/usePlayerStatus'
 import { playerController } from '../../core/player'
-
-/** 悬浮球直径 */
-const BALL_SIZE = 56
-/** 环形进度条宽度 */
-const RING_WIDTH = 3
-/** 内圆（封面区域）直径 */
-const INNER_SIZE = BALL_SIZE - RING_WIDTH * 2
+import { getLyric, findCurrentLineIndex, type LyricLine } from '../../core/lyric'
 
 interface MiniPlayerProps {
   onOpenPlayer?: () => void
 }
 
-/**
- * 渲染环形进度指示器。
- * 使用双半圆旋转裁剪技巧在纯 RN 中实现圆环进度，无需 SVG 依赖。
- * 右半容器处理 0%-50%，左半容器处理 50%-100%。
- * @param progress - 0 到 1 的进度值
- * @param color - 进度条颜色
- * @param trackColor - 进度轨道背景色
- */
-function CircularProgress({
-  progress,
-  color,
-  trackColor,
-}: {
-  progress: number
-  color: string
-  trackColor: string
-}) {
-  const p = Math.min(Math.max(progress, 0), 1)
-  // 0%-50%：右半圆从 -180° 旋转到 0°
-  const rightDeg = p <= 0.5 ? -180 + p * 360 : 0
-  // 50%-100%：左半圆从 -180° 旋转到 0°
-  const leftDeg = p <= 0.5 ? -180 : -180 + (p - 0.5) * 360
+const COVER_SIZE = 44
+const CONTROL_SIZE = 36
+const SEEK_TRACK_HEIGHT = 5
+const SEEK_TOUCH_HEIGHT = 24
 
-  return (
-    <View style={ringStyles.container}>
-      {/* 轨道背景环 */}
-      <View style={[ringStyles.track, { borderColor: trackColor }]} />
-
-      {/* 右半裁剪容器（展示右侧 180°） */}
-      <View style={ringStyles.rightClip}>
-        <View
-          style={[
-            ringStyles.halfCircle,
-            {
-              left: -HALF_SIZE,
-              borderColor: color,
-              borderLeftColor: 'transparent',
-              borderBottomColor: 'transparent',
-              transform: [{ rotate: `${rightDeg}deg` }],
-            },
-          ]}
-        />
-      </View>
-
-      {/* 左半裁剪容器（展示左侧 180°） */}
-      <View style={ringStyles.leftClip}>
-        <View
-          style={[
-            ringStyles.halfCircle,
-            {
-              left: 0,
-              borderColor: color,
-              borderRightColor: 'transparent',
-              borderTopColor: 'transparent',
-              transform: [{ rotate: `${leftDeg}deg` }],
-            },
-          ]}
-        />
-      </View>
-    </View>
-  )
-}
-
-const HALF_SIZE = BALL_SIZE / 2
-
-const ringStyles = StyleSheet.create({
-  /** 容器与悬浮球等大 */
-  container: {
-    width: BALL_SIZE,
-    height: BALL_SIZE,
-    position: 'absolute',
-  },
-  /** 进度轨道背景环 */
-  track: {
-    ...StyleSheet.absoluteFillObject,
-    borderRadius: HALF_SIZE,
-    borderWidth: RING_WIDTH,
-  },
-  /** 右半裁剪区域：只展示球体右半部分 */
-  rightClip: {
-    position: 'absolute',
-    left: HALF_SIZE,
-    width: HALF_SIZE,
-    height: BALL_SIZE,
-    overflow: 'hidden',
-  },
-  /** 左半裁剪区域：只展示球体左半部分 */
-  leftClip: {
-    position: 'absolute',
-    left: 0,
-    width: HALF_SIZE,
-    height: BALL_SIZE,
-    overflow: 'hidden',
-  },
-  /** 完整圆环，通过旋转+裁剪只显示半边 */
-  halfCircle: {
-    width: BALL_SIZE,
-    height: BALL_SIZE,
-    borderRadius: HALF_SIZE,
-    borderWidth: RING_WIDTH,
-    position: 'absolute',
-    top: 0,
-  },
-})
+const clamp01 = (value: number): number => Math.min(Math.max(value, 0), 1)
 
 /**
- * 渲染悬浮球播放器组件。
- * 封面铺满球体，播放时持续旋转（唱片效果），暂停时停止。
+ * 渲染底部条形 Mini 播放器。
  * @param onOpenPlayer - 点击打开全屏播放器的回调
  */
 export default function MiniPlayer({ onOpenPlayer }: MiniPlayerProps) {
-  const { colors } = useTheme()
-  const { isPlaying, currentTrack, progress } = usePlayerStatus()
+  const { colors, isDark } = useTheme()
+  const { isPlaying, currentTrack, progress, position, duration } = usePlayerStatus()
 
-  /** 出现/消失的缩放动画 */
-  const scaleAnim = useRef(new Animated.Value(currentTrack ? 1 : 0)).current
-  /** 播放时持续旋转动画 */
-  const rotateAnim = useRef(new Animated.Value(0)).current
-  const rotateLoop = useRef<Animated.CompositeAnimation | null>(null)
+  const entryAnim = useRef(new Animated.Value(currentTrack ? 1 : 0)).current
+  const [lyricLines, setLyricLines] = useState<LyricLine[]>([])
+  const [lyricLoading, setLyricLoading] = useState(false)
+  const [seekBarWidth, setSeekBarWidth] = useState(0)
+  const [isSeeking, setIsSeeking] = useState(false)
+  const [seekProgress, setSeekProgress] = useState(0)
+  const lyricTrackKey = currentTrack
+    ? `${currentTrack.source || 'kw'}_${currentTrack.songmid || currentTrack.id}`
+    : ''
 
-  /** 当前曲目变化时的入场/退场动画 */
   useEffect(() => {
-    Animated.spring(scaleAnim, {
+    Animated.spring(entryAnim, {
       toValue: currentTrack ? 1 : 0,
       useNativeDriver: true,
-      tension: 200,
-      friction: 15,
+      tension: 180,
+      friction: 18,
     }).start()
-  }, [currentTrack, scaleAnim])
+  }, [currentTrack, entryAnim])
 
-  /** 播放时启动匀速旋转，暂停时停在当前角度 */
   useEffect(() => {
-    if (isPlaying) {
-      const loop = Animated.loop(
-        Animated.timing(rotateAnim, {
-          toValue: 1,
-          duration: 8000,
-          easing: Easing.linear,
-          useNativeDriver: true,
-        })
-      )
-      rotateLoop.current = loop
-      loop.start()
-      return () => loop.stop()
+    if (!currentTrack) {
+      setLyricLines([])
+      setLyricLoading(false)
+      return
     }
-    // 暂停时停止旋转但保持当前角度
-    if (rotateLoop.current) {
-      rotateLoop.current.stop()
-      rotateLoop.current = null
-    }
-  }, [isPlaying, rotateAnim])
 
-  const handlePress = useCallback(() => {
+    let active = true
+    setLyricLoading(true)
+    setLyricLines([])
+
+    void getLyric(currentTrack)
+      .then((data) => {
+        if (!active) return
+        setLyricLines(data.lines || [])
+      })
+      .catch(() => {
+        if (!active) return
+        setLyricLines([])
+      })
+      .finally(() => {
+        if (!active) return
+        setLyricLoading(false)
+      })
+
+    return () => {
+      active = false
+    }
+  }, [lyricTrackKey])
+
+  useEffect(() => {
+    if (!isSeeking) {
+      setSeekProgress(clamp01(progress))
+    }
+  }, [progress, isSeeking])
+
+  useEffect(() => {
+    setIsSeeking(false)
+    setSeekProgress(0)
+  }, [lyricTrackKey])
+
+  const handleOpen = useCallback(() => {
     onOpenPlayer?.()
   }, [onOpenPlayer])
 
-  /** 长按切换播放/暂停 */
   const handlePlayPause = useCallback(async () => {
     try {
       if (isPlaying) {
@@ -191,115 +116,305 @@ export default function MiniPlayer({ onOpenPlayer }: MiniPlayerProps) {
     }
   }, [isPlaying])
 
+  const calcProgressFromEvent = useCallback((event: GestureResponderEvent): number => {
+    if (seekBarWidth <= 0) return 0
+    return clamp01(event.nativeEvent.locationX / seekBarWidth)
+  }, [seekBarWidth])
+
+  const commitSeek = useCallback((nextProgress: number) => {
+    if (duration > 0) {
+      void playerController.seek(Math.floor(duration * nextProgress))
+    }
+  }, [duration])
+
+  const handleSeekLayout = useCallback((event: LayoutChangeEvent) => {
+    setSeekBarWidth(event.nativeEvent.layout.width)
+  }, [])
+
+  const handleSeekGrant = useCallback((event: GestureResponderEvent) => {
+    const nextProgress = calcProgressFromEvent(event)
+    setIsSeeking(true)
+    setSeekProgress(nextProgress)
+  }, [calcProgressFromEvent])
+
+  const handleSeekMove = useCallback((event: GestureResponderEvent) => {
+    setSeekProgress(calcProgressFromEvent(event))
+  }, [calcProgressFromEvent])
+
+  const handleSeekRelease = useCallback((event: GestureResponderEvent) => {
+    const nextProgress = calcProgressFromEvent(event)
+    setSeekProgress(nextProgress)
+    setIsSeeking(false)
+    commitSeek(nextProgress)
+  }, [calcProgressFromEvent, commitSeek])
+
   if (!currentTrack) return null
 
-  /** 旋转插值：0→1 映射到 0deg→360deg */
-  const spin = rotateAnim.interpolate({
-    inputRange: [0, 1],
-    outputRange: ['0deg', '360deg'],
-  })
+  const artistInfo = currentTrack.source
+    ? `${currentTrack.artist} · ${currentTrack.source.toUpperCase()}`
+    : currentTrack.artist
+  const currentLyricIndex = findCurrentLineIndex(lyricLines, position)
+  const currentLyricText = !lyricLines.length
+    ? (lyricLoading ? '歌词加载中...' : '暂无歌词')
+    : (currentLyricIndex < 0
+      ? (lyricLines[0]?.text || '暂无歌词')
+      : (lyricLines[currentLyricIndex]?.text || '暂无歌词'))
+  const hasActiveLyric = lyricLines.length > 0 && currentLyricIndex >= 0
+  const activeProgress = isSeeking ? seekProgress : clamp01(progress)
+  const thumbSize = isSeeking ? 10 : 8
+  const trackTop = (SEEK_TOUCH_HEIGHT - SEEK_TRACK_HEIGHT) / 2
+  const thumbTop = trackTop + (SEEK_TRACK_HEIGHT - thumbSize) / 2
+  const thumbOffset = seekBarWidth > 0
+    ? Math.max(
+      0,
+      Math.min(
+        seekBarWidth - thumbSize,
+        activeProgress * seekBarWidth - thumbSize / 2
+      )
+    )
+    : 0
 
   return (
     <Animated.View
       style={[
         styles.container,
         {
-          transform: [{ scale: scaleAnim }],
-          opacity: scaleAnim,
+          backgroundColor: colors.miniPlayer,
+          borderColor: colors.tabBarBorder,
+          opacity: entryAnim,
+          transform: [
+            {
+              translateY: entryAnim.interpolate({
+                inputRange: [0, 1],
+                outputRange: [20, 0],
+              }),
+            },
+          ],
         },
       ]}
     >
-      <TouchableOpacity
-        activeOpacity={0.85}
-        onPress={handlePress}
-        onLongPress={handlePlayPause}
-        delayLongPress={300}
-      >
-        <View style={styles.ball}>
-          {/* 环形进度条 */}
-          <CircularProgress
-            progress={progress}
-            color={colors.accent}
-            trackColor={colors.separator}
-          />
-
-          {/* 旋转的封面内圆 */}
-          <Animated.View
+      <View style={styles.row}>
+        <TouchableOpacity
+          style={styles.mainArea}
+          activeOpacity={0.82}
+          onPress={handleOpen}
+        >
+          <View
             style={[
-              styles.inner,
-              { backgroundColor: colors.surfaceElevated, transform: [{ rotate: spin }] },
+              styles.cover,
+              { backgroundColor: colors.surfaceSecondary },
             ]}
           >
             {currentTrack.coverUrl ? (
-              <Image
-                source={{ uri: currentTrack.coverUrl }}
-                style={styles.coverImage}
-              />
+              <Image source={{ uri: currentTrack.coverUrl }} style={styles.coverImage} />
             ) : (
-              <Ionicons name="musical-note" size={22} color={colors.textTertiary} />
+              <Ionicons name="musical-note" size={20} color={colors.textTertiary} />
             )}
-          </Animated.View>
+          </View>
+          <View style={styles.trackMeta}>
+            <Text numberOfLines={1} style={[styles.title, { color: colors.text }]}>
+              {currentTrack.title}
+            </Text>
+            <Text numberOfLines={1} style={[styles.artist, { color: colors.textSecondary }]}>
+              {artistInfo}
+            </Text>
+          </View>
+          <View style={styles.lyricWrap}>
+            <Text
+              numberOfLines={1}
+              style={[
+                styles.lyricText,
+                { color: hasActiveLyric ? colors.accent : colors.textSecondary },
+              ]}
+            >
+              {currentLyricText}
+            </Text>
+          </View>
+        </TouchableOpacity>
 
-          {/* 播放/暂停状态叠加（不跟随旋转） */}
-          {!isPlaying && (
-            <View style={styles.statusOverlay}>
-              <Ionicons name="play" size={18} color="#FFFFFF" />
-            </View>
-          )}
+        <TouchableOpacity
+          style={[
+            styles.controlButton,
+            {
+              backgroundColor: isDark ? 'rgba(255, 255, 255, 0.10)' : 'rgba(0, 0, 0, 0.06)',
+            },
+          ]}
+          onPress={handlePlayPause}
+          activeOpacity={0.8}
+        >
+          <Ionicons
+            name={isPlaying ? 'pause' : 'play'}
+            size={18}
+            color={colors.text}
+          />
+        </TouchableOpacity>
+      </View>
+
+      <View style={styles.seekWrap}>
+        <View
+          style={styles.seekTouchArea}
+          onLayout={handleSeekLayout}
+          onStartShouldSetResponder={() => true}
+          onMoveShouldSetResponder={() => true}
+          onResponderGrant={handleSeekGrant}
+          onResponderMove={handleSeekMove}
+          onResponderRelease={handleSeekRelease}
+          onResponderTerminate={handleSeekRelease}
+        >
+          <View
+            style={[
+              styles.seekTrack,
+              { backgroundColor: isDark ? 'rgba(255, 255, 255, 0.15)' : 'rgba(0, 0, 0, 0.14)' },
+            ]}
+          />
+          <View
+            style={[
+              styles.seekFill,
+              {
+                backgroundColor: colors.accent,
+                width: `${activeProgress * 100}%`,
+              },
+            ]}
+          />
+          <View
+            pointerEvents="none"
+            style={[
+              styles.seekThumb,
+              {
+                width: thumbSize,
+                height: thumbSize,
+                borderRadius: thumbSize / 2,
+                left: thumbOffset,
+                top: thumbTop,
+                backgroundColor: colors.accent,
+                borderColor: isDark ? 'rgba(255, 255, 255, 0.28)' : 'rgba(255, 255, 255, 0.92)',
+                opacity: isSeeking ? 1 : 0.9,
+                transform: [{ scale: isSeeking ? 1.06 : 1 }],
+              },
+            ]}
+          />
         </View>
-      </TouchableOpacity>
+      </View>
     </Animated.View>
   )
 }
 
 const styles = StyleSheet.create({
-  /** 悬浮球外层容器 */
   container: {
-    width: BALL_SIZE,
-    height: BALL_SIZE,
+    height: MINI_PLAYER_HEIGHT,
+    borderRadius: 18,
+    borderWidth: StyleSheet.hairlineWidth,
+    paddingHorizontal: 10,
+    paddingTop: 6,
+    paddingBottom: 2,
+    justifyContent: 'space-between',
     ...Platform.select({
       ios: {
         shadowColor: '#000',
-        shadowOffset: { width: 0, height: 4 },
-        shadowOpacity: 0.25,
-        shadowRadius: 8,
+        shadowOffset: { width: 0, height: 8 },
+        shadowOpacity: 0.2,
+        shadowRadius: 14,
       },
       android: {
-        elevation: 10,
+        elevation: 8,
       },
     }),
   },
-  /** 球体主体 */
-  ball: {
-    width: BALL_SIZE,
-    height: BALL_SIZE,
-    borderRadius: BALL_SIZE / 2,
+  row: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    flex: 1,
+  },
+  mainArea: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginRight: 8,
+  },
+  cover: {
+    width: COVER_SIZE,
+    height: COVER_SIZE,
+    borderRadius: 12,
+    overflow: 'hidden',
     alignItems: 'center',
     justifyContent: 'center',
-    overflow: 'hidden',
   },
-  /** 内圆封面区域（跟随旋转） */
-  inner: {
-    width: INNER_SIZE,
-    height: INNER_SIZE,
-    borderRadius: INNER_SIZE / 2,
-    alignItems: 'center',
-    justifyContent: 'center',
-    overflow: 'hidden',
-  },
-  /** 封面图片 */
   coverImage: {
-    width: INNER_SIZE,
-    height: INNER_SIZE,
+    width: COVER_SIZE,
+    height: COVER_SIZE,
   },
-  /** 暂停时播放图标叠加（不跟随旋转） */
-  statusOverlay: {
-    position: 'absolute',
-    width: INNER_SIZE,
-    height: INNER_SIZE,
-    borderRadius: INNER_SIZE / 2,
-    backgroundColor: 'rgba(0,0,0,0.35)',
+  trackMeta: {
+    width: 118,
+    marginLeft: 10,
+    justifyContent: 'center',
+  },
+  title: {
+    fontSize: fontSize.subhead,
+    fontWeight: '700',
+    lineHeight: 18,
+  },
+  artist: {
+    marginTop: 2,
+    fontSize: fontSize.caption1,
+    fontWeight: '500',
+    lineHeight: 14,
+  },
+  lyricWrap: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+    paddingHorizontal: 8,
+  },
+  lyricText: {
+    fontSize: fontSize.caption1,
+    fontWeight: '600',
+    textAlign: 'center',
+  },
+  controlButton: {
+    width: CONTROL_SIZE,
+    height: CONTROL_SIZE,
+    borderRadius: CONTROL_SIZE / 2,
     alignItems: 'center',
     justifyContent: 'center',
+  },
+  seekWrap: {
+    marginTop: 1,
+    paddingHorizontal: 2,
+    paddingBottom: 1,
+  },
+  seekTouchArea: {
+    height: SEEK_TOUCH_HEIGHT,
+    justifyContent: 'center',
+  },
+  seekTrack: {
+    position: 'absolute',
+    left: 0,
+    right: 0,
+    top: (SEEK_TOUCH_HEIGHT - SEEK_TRACK_HEIGHT) / 2,
+    height: SEEK_TRACK_HEIGHT,
+    borderRadius: 9999,
+    overflow: 'visible',
+  },
+  seekFill: {
+    position: 'absolute',
+    left: 0,
+    top: (SEEK_TOUCH_HEIGHT - SEEK_TRACK_HEIGHT) / 2,
+    height: SEEK_TRACK_HEIGHT,
+    borderRadius: 9999,
+  },
+  seekThumb: {
+    position: 'absolute',
+    borderWidth: 1,
+    ...Platform.select({
+      ios: {
+        shadowColor: '#000',
+        shadowOffset: { width: 0, height: 1 },
+        shadowOpacity: 0.25,
+        shadowRadius: 2,
+      },
+      android: {
+        elevation: 2,
+      },
+    }),
   },
 })

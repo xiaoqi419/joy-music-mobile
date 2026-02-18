@@ -9,7 +9,7 @@ import { SafeAreaProvider, useSafeAreaInsets } from 'react-native-safe-area-cont
 import { Provider as ReduxProvider, useDispatch } from 'react-redux'
 import * as SplashScreen from 'expo-splash-screen'
 import store from './src/store'
-import { useTheme, CAPSULE_BOTTOM_MARGIN } from './src/theme'
+import { useTheme, CAPSULE_BOTTOM_MARGIN, CAPSULE_TAB_HEIGHT } from './src/theme'
 import TabBar, { TabName } from './src/components/common/TabBar'
 import MiniPlayer from './src/components/common/MiniPlayer'
 import DiscoverScreen from './src/screens/Discover'
@@ -258,12 +258,13 @@ function AppContent() {
         </View>
       )}
 
-      {/* 悬浮球播放器 - 位于 TabBar 右侧同级 */}
+      {/* 条形 Mini 播放器 - 位于 TabBar 上方 */}
       <View
         style={{
           position: 'absolute',
-          right: 24,
-          bottom: Math.max(insets.bottom, 16) + CAPSULE_BOTTOM_MARGIN,
+          left: 16,
+          right: 16,
+          bottom: Math.max(insets.bottom, 16) + CAPSULE_BOTTOM_MARGIN + CAPSULE_TAB_HEIGHT + 10,
         }}
       >
         <MiniPlayer onOpenPlayer={() => setShowNowPlaying(true)} />

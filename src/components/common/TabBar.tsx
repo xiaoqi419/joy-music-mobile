@@ -1,7 +1,7 @@
 /**
  * iOS 26 液态玻璃胶囊底部导航栏。
  * 居中悬浮药丸形状，半透明模糊材质，带高光和投影。
- * 选中指示器带弹性滑动动画，图标切换带缩放动画。
+ * 图标切换带缩放动画。
  */
 
 import React, { useCallback, useEffect, useRef } from 'react'
@@ -21,16 +21,9 @@ interface TabBarProps {
 }
 
 /** 胶囊内每个 tab 项的宽度 */
-const TAB_ITEM_WIDTH = 58
+const TAB_ITEM_WIDTH = 64
 /** 胶囊水平内边距 */
-const CAPSULE_H_PADDING = 6
-/** 选中态背景的尺寸 */
-const ACTIVE_INDICATOR_WIDTH = 50
-const ACTIVE_INDICATOR_HEIGHT = 46
-
-/** 根据 tab 索引计算指示器的水平偏移量 */
-const getIndicatorOffset = (index: number): number =>
-  CAPSULE_H_PADDING + index * TAB_ITEM_WIDTH + (TAB_ITEM_WIDTH - ACTIVE_INDICATOR_WIDTH) / 2
+const CAPSULE_H_PADDING = 8
 
 const tabs: {
   key: TabName
@@ -55,35 +48,25 @@ export default function TabBar({ activeTab, onTabChange }: TabBarProps) {
 
   const activeIndex = tabs.findIndex((t) => t.key === activeTab)
 
-  /** 指示器水平滑动动画值 */
-  const slideAnim = useRef(new Animated.Value(getIndicatorOffset(activeIndex))).current
   /** 每个 tab 图标的缩放动画值 */
   const scaleAnims = useRef(tabs.map((_, i) =>
-    new Animated.Value(i === activeIndex ? 1 : 0.85)
+    new Animated.Value(i === activeIndex ? 1.04 : 0.88)
   )).current
 
-  /** activeTab 变化时驱动滑动和缩放动画 */
+  /** activeTab 变化时驱动缩放动画 */
   useEffect(() => {
     const targetIndex = tabs.findIndex((t) => t.key === activeTab)
-
-    // 指示器弹性滑动
-    Animated.spring(slideAnim, {
-      toValue: getIndicatorOffset(targetIndex),
-      useNativeDriver: true,
-      tension: 200,
-      friction: 20,
-    }).start()
 
     // 图标缩放：选中放大，其余缩小
     scaleAnims.forEach((anim, i) => {
       Animated.spring(anim, {
-        toValue: i === targetIndex ? 1 : 0.85,
+        toValue: i === targetIndex ? 1.04 : 0.88,
         useNativeDriver: true,
         tension: 300,
         friction: 15,
       }).start()
     })
-  }, [activeTab, slideAnim, scaleAnims])
+  }, [activeTab, scaleAnims])
 
   /** 切换 tab 时触发轻触觉反馈 */
   const handleTabPress = useCallback((tab: TabName) => {
@@ -91,9 +74,8 @@ export default function TabBar({ activeTab, onTabChange }: TabBarProps) {
     onTabChange(tab)
   }, [onTabChange])
 
-  const activeIndicatorColor = isDark
-    ? 'rgba(10, 132, 255, 0.30)'
-    : 'rgba(0, 122, 255, 0.16)'
+  const activeLabelColor = isDark ? '#EAF4FF' : '#09345E'
+  const inactiveLabelColor = isDark ? 'rgba(255, 255, 255, 0.70)' : 'rgba(28, 28, 30, 0.68)'
 
   return (
     <View
@@ -105,7 +87,7 @@ export default function TabBar({ activeTab, onTabChange }: TabBarProps) {
       <View style={styles.capsule}>
         {/* 液态玻璃模糊底层 */}
         <BlurView
-          intensity={isDark ? 72 : 88}
+          intensity={isDark ? 78 : 92}
           tint={isDark ? 'dark' : 'light'}
           style={styles.glassLayer}
         />
@@ -136,18 +118,6 @@ export default function TabBar({ activeTab, onTabChange }: TabBarProps) {
           ]}
         />
 
-        {/* 滑动选中指示器 */}
-        <Animated.View
-          style={[
-            styles.activeIndicator,
-            {
-              backgroundColor: activeIndicatorColor,
-              borderColor: colors.accent,
-              transform: [{ translateX: slideAnim }],
-            },
-          ]}
-        />
-
         {/* Tab 按钮 */}
         {tabs.map((tab, index) => {
           const isActive = activeTab === tab.key
@@ -156,6 +126,7 @@ export default function TabBar({ activeTab, onTabChange }: TabBarProps) {
               key={tab.key}
               style={styles.tabItem}
               onPress={() => handleTabPress(tab.key)}
+              hitSlop={{ top: 6, bottom: 6, left: 4, right: 4 }}
               activeOpacity={0.7}
             >
               <Animated.View
@@ -166,14 +137,14 @@ export default function TabBar({ activeTab, onTabChange }: TabBarProps) {
               >
                 <Ionicons
                   name={isActive ? tab.iconActive : tab.icon}
-                  size={20}
-                  color={isActive ? colors.text : colors.textSecondary}
+                  size={isActive ? 22 : 20}
+                  color={isActive ? activeLabelColor : inactiveLabelColor}
                 />
                 <Text
                   style={[
                     styles.tabLabel,
                     isActive ? styles.tabLabelActive : styles.tabLabelInactive,
-                    { color: isActive ? colors.text : colors.textSecondary },
+                    { color: isActive ? activeLabelColor : inactiveLabelColor },
                   ]}
                 >
                   {tab.label}
@@ -206,12 +177,12 @@ const styles = StyleSheet.create({
     ...Platform.select({
       ios: {
         shadowColor: '#000',
-        shadowOffset: { width: 0, height: 4 },
-        shadowOpacity: 0.15,
-        shadowRadius: 12,
+        shadowOffset: { width: 0, height: 10 },
+        shadowOpacity: 0.22,
+        shadowRadius: 20,
       },
       android: {
-        elevation: 8,
+        elevation: 12,
       },
     }),
   },
@@ -241,17 +212,7 @@ const styles = StyleSheet.create({
   innerBorder: {
     ...StyleSheet.absoluteFillObject,
     borderRadius: 9999,
-    borderWidth: 0.5,
-  },
-  /** 滑动选中指示器（绝对定位，由 translateX 驱动） */
-  activeIndicator: {
-    position: 'absolute',
-    top: (CAPSULE_TAB_HEIGHT - ACTIVE_INDICATOR_HEIGHT) / 2,
-    left: 0,
-    width: ACTIVE_INDICATOR_WIDTH,
-    height: ACTIVE_INDICATOR_HEIGHT,
-    borderRadius: ACTIVE_INDICATOR_HEIGHT / 2,
-    borderWidth: StyleSheet.hairlineWidth,
+    borderWidth: 0.75,
   },
   /** 单个 Tab 按钮 */
   tabItem: {
@@ -264,15 +225,15 @@ const styles = StyleSheet.create({
   tabContent: {
     alignItems: 'center',
     justifyContent: 'center',
-    gap: 1,
+    gap: 2,
   },
   /** 中文标签 */
   tabLabel: {
-    fontSize: fontSize.caption1,
+    fontSize: fontSize.caption1 + 1,
   },
   tabLabelActive: {
     fontWeight: '700',
-    letterSpacing: 0.15,
+    letterSpacing: 0.2,
   },
   tabLabelInactive: {
     fontWeight: '600',
