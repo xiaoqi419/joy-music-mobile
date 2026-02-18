@@ -28,7 +28,7 @@ interface MiniPlayerProps {
 const COVER_SIZE = 44
 const CONTROL_SIZE = 36
 const SEEK_TRACK_HEIGHT = 5
-const SEEK_TOUCH_HEIGHT = 24
+const SEEK_TOUCH_HEIGHT = 18
 
 const clamp01 = (value: number): number => Math.min(Math.max(value, 0), 1)
 
@@ -305,9 +305,9 @@ const styles = StyleSheet.create({
     borderRadius: 18,
     borderWidth: StyleSheet.hairlineWidth,
     paddingHorizontal: 10,
-    paddingTop: 6,
-    paddingBottom: 2,
-    justifyContent: 'space-between',
+    paddingTop: 8,
+    paddingBottom: 10,
+    justifyContent: 'center',
     ...Platform.select({
       ios: {
         shadowColor: '#000',
@@ -378,9 +378,10 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   seekWrap: {
-    marginTop: 1,
-    paddingHorizontal: 2,
-    paddingBottom: 1,
+    position: 'absolute',
+    left: 10,
+    right: 10,
+    bottom: -6,
   },
   seekTouchArea: {
     height: SEEK_TOUCH_HEIGHT,
