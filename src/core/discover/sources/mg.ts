@@ -55,7 +55,9 @@ function qualityMap(item: any): Record<string, boolean> {
 }
 
 function mapTrack(item: any): Track {
-  const songmid = String(item.copyrightId || item.songId || item.id || '')
+  const songId = String(item.songId || item.id || '')
+  const copyrightId = String(item.copyrightId || '')
+  const songmid = songId || copyrightId
 
   return {
     id: `mg_${songmid}`,
@@ -67,6 +69,7 @@ function mapTrack(item: any): Track {
     coverUrl: item.mediumPic || item.cover || undefined,
     source: 'mg',
     songmid,
+    copyrightId: copyrightId || undefined,
     picUrl: item.mediumPic || item.cover || undefined,
     // @ts-expect-error keep runtime metadata compatible with URL resolver
     _types: qualityMap(item),

@@ -13,6 +13,7 @@ export interface Track {
   // ikun music source specific fields
   source?: string
   songmid?: string
+  copyrightId?: string
   hash?: string
   picUrl?: string
 }

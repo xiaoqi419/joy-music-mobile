@@ -1,6 +1,6 @@
 /**
  * 歌词获取器。
- * 根据歌曲来源（KW/WY）调用不同 API 获取歌词文本，
+ * 根据歌曲来源调用对应平台 API 获取歌词文本，
  * 返回已解析的 LyricLine 数组。
  */
 
@@ -19,6 +19,84 @@ export interface LyricData {
 }
 
 const EMPTY_LYRIC: LyricData = { lines: [], rawLrc: '', rawTlrc: '' }
+const CERU_API_URL = 'https://c.wwwweb.top'
+const CERU_API_KEY = 'KAWANG_2544c96a-DEABFNVMBU4C0RAF'
+const MG_RESOURCE_INFO_URL =
+  'https://c.musicapp.migu.cn/MIGUM2.0/v1.0/content/resourceinfo.do?resourceType=2'
+const KG_HEADERS = {
+  'KG-RC': '1',
+  'KG-THash': 'expand_search_manager.cpp:852736169:451',
+  'User-Agent': 'KuGou2012-9020-ExpandSearchManager',
+}
+const MG_TEXT_HEADERS = {
+  Referer: 'https://app.c.nf.migu.cn/',
+  'User-Agent':
+    'Mozilla/5.0 (Linux; Android 5.1.1; Nexus 6 Build/LYZ28E) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/59.0.3071.115 Mobile Safari/537.36',
+  channel: '0146921',
+}
+const BASE64_TABLE = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/='
+
+function buildLyricData(rawLrc: string, rawTlrc = ''): LyricData {
+  if (!rawLrc) return EMPTY_LYRIC
+
+  let lines = parseLrc(rawLrc)
+  if (rawTlrc) {
+    const translations = parseLrc(rawTlrc)
+    lines = mergeLyricTranslation(lines, translations)
+  }
+  return { lines, rawLrc, rawTlrc }
+}
+
+function decodeBase64Binary(input: string): string {
+  const clean = input.replace(/[^A-Za-z0-9+/=]/g, '')
+  let output = ''
+  let index = 0
+
+  while (index < clean.length) {
+    const enc1 = BASE64_TABLE.indexOf(clean.charAt(index++))
+    const enc2 = BASE64_TABLE.indexOf(clean.charAt(index++))
+    const enc3 = BASE64_TABLE.indexOf(clean.charAt(index++))
+    const enc4 = BASE64_TABLE.indexOf(clean.charAt(index++))
+
+    const chr1 = (enc1 << 2) | (enc2 >> 4)
+    const chr2 = ((enc2 & 15) << 4) | (enc3 >> 2)
+    const chr3 = ((enc3 & 3) << 6) | enc4
+
+    output += String.fromCharCode(chr1)
+    if (enc3 !== 64) output += String.fromCharCode(chr2)
+    if (enc4 !== 64) output += String.fromCharCode(chr3)
+  }
+  return output
+}
+
+function decodeBase64Utf8(input: string): string {
+  if (!input) return ''
+  const binary =
+    typeof globalThis.atob === 'function'
+      ? globalThis.atob(input)
+      : decodeBase64Binary(input)
+
+  try {
+    const percentEncoded = Array.from(binary)
+      .map(char => `%${char.charCodeAt(0).toString(16).padStart(2, '0')}`)
+      .join('')
+    return decodeURIComponent(percentEncoded)
+  } catch {
+    return binary
+  }
+}
+
+async function requestJson<T = any>(url: string, init?: RequestInit): Promise<T> {
+  const resp = await fetch(url, init)
+  if (!resp.ok) throw new Error(`HTTP ${resp.status}: ${url}`)
+  return (await resp.json()) as T
+}
+
+async function requestText(url: string, init?: RequestInit): Promise<string> {
+  const resp = await fetch(url, init)
+  if (!resp.ok) throw new Error(`HTTP ${resp.status}: ${url}`)
+  return resp.text()
+}
 
 /**
  * 获取 KW（酷我）歌词。
@@ -26,11 +104,12 @@ const EMPTY_LYRIC: LyricData = { lines: [], rawLrc: '', rawTlrc: '' }
  * @param songmid - 歌曲 ID
  */
 async function fetchKwLyric(songmid: string): Promise<LyricData> {
-  const resp = await fetch(
-    `http://m.kuwo.cn/newh5/singles/songinfoandlrc?musicId=${songmid}`,
-    { headers: { 'User-Agent': 'Mozilla/5.0' } }
+  const json = await requestJson<any>(
+    `https://m.kuwo.cn/newh5/singles/songinfoandlrc?musicId=${songmid}`,
+    {
+      headers: { 'User-Agent': 'Mozilla/5.0' },
+    }
   )
-  const json = await resp.json()
   const lrclist: Array<{ lineLyric?: string; time?: string }> =
     json?.data?.lrclist
 
@@ -47,9 +126,7 @@ async function fetchKwLyric(songmid: string): Promise<LyricData> {
     lrcLines.push(`${tag}${item.lineLyric || ''}`)
   }
 
-  const rawLrc = lrcLines.join('\n')
-  const lines = parseLrc(rawLrc)
-  return { lines, rawLrc, rawTlrc: '' }
+  return buildLyricData(lrcLines.join('\n'))
 }
 
 /**
@@ -71,14 +148,116 @@ async function fetchWyLyric(songmid: string): Promise<LyricData> {
 
   const rawLrc: string = data?.lrc?.lyric || ''
   const rawTlrc: string = data?.tlyric?.lyric || ''
+  return buildLyricData(rawLrc, rawTlrc)
+}
 
-  let lines = parseLrc(rawLrc)
-  if (rawTlrc) {
-    const translations = parseLrc(rawTlrc)
-    lines = mergeLyricTranslation(lines, translations)
+/**
+ * 获取 TX（QQ 音乐）歌词。
+ * 通过 CeruMusic 同源接口请求，避免 QRC 解密与复杂签名。
+ */
+async function fetchTxLyric(songmid: string): Promise<LyricData> {
+  const resp = await requestJson<any>(`${CERU_API_URL}/music/lyric`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'X-Api-Key': CERU_API_KEY,
+    },
+    body: JSON.stringify({ source: 'tx', musicId: songmid }),
+  })
+  if (Number(resp?.code) !== 200) return EMPTY_LYRIC
+
+  const rawLrc = String(resp?.data?.lyric || '')
+  const rawTlrc = String(resp?.data?.trans || '')
+  return buildLyricData(rawLrc, rawTlrc)
+}
+
+/**
+ * 获取 KG（酷狗）歌词（参考 CeruMusic：search + download）。
+ * 优先下载 lrc，避免 krc 解析依赖。
+ */
+async function fetchKgLyric(track: Track): Promise<LyricData> {
+  const hash = track.hash || ''
+  if (!hash) return EMPTY_LYRIC
+
+  const keyword = encodeURIComponent(track.title || '')
+  const timeLength = Math.max(0, Math.round(track.duration || 0))
+  const searchResp = await requestJson<any>(
+    `https://lyrics.kugou.com/search?ver=1&man=yes&client=pc&keyword=${keyword}&hash=${hash}&timelength=${timeLength}&lrctxt=1`,
+    { headers: KG_HEADERS }
+  )
+
+  const candidates = Array.isArray(searchResp?.candidates)
+    ? searchResp.candidates
+    : []
+  if (!candidates.length) return EMPTY_LYRIC
+
+  const selected =
+    candidates.find(
+      (item: any) =>
+        !(Number(item?.krctype) === 1 && Number(item?.contenttype) !== 1)
+    ) || candidates[0]
+
+  if (!selected?.id || !selected?.accesskey) return EMPTY_LYRIC
+
+  const downloadResp = await requestJson<any>(
+    `https://lyrics.kugou.com/download?ver=1&client=pc&id=${selected.id}&accesskey=${selected.accesskey}&fmt=lrc&charset=utf8`,
+    { headers: KG_HEADERS }
+  )
+  if (Number(downloadResp?.status) !== 200 || !downloadResp?.content) {
+    return EMPTY_LYRIC
   }
 
-  return { lines, rawLrc, rawTlrc }
+  const rawLrc = decodeBase64Utf8(String(downloadResp.content))
+  return buildLyricData(rawLrc)
+}
+
+async function fetchMgResource(resourceId: string): Promise<any | null> {
+  const resp = await requestJson<any>(MG_RESOURCE_INFO_URL, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/x-www-form-urlencoded',
+    },
+    body: `resourceId=${encodeURIComponent(resourceId)}`,
+  })
+  if (resp?.code !== '000000') return null
+  const resourceList = Array.isArray(resp?.resource) ? resp.resource : []
+  return resourceList[0] ?? null
+}
+
+/**
+ * 获取 MG（咪咕）歌词（参考 CeruMusic：resourceinfo -> lrcUrl）。
+ */
+async function fetchMgLyric(track: Track): Promise<LyricData> {
+  const candidates: string[] = []
+  if (track.songmid) candidates.push(track.songmid)
+  if (track.id?.startsWith('mg_')) candidates.push(track.id.slice(3))
+  if (track.copyrightId) candidates.push(track.copyrightId)
+
+  const dedupCandidates = Array.from(new Set(candidates.filter(Boolean)))
+  for (const resourceId of dedupCandidates) {
+    const resource = await fetchMgResource(resourceId)
+    if (!resource) continue
+
+    const lrcUrl = String(resource?.lrcUrl || '')
+    if (!lrcUrl) continue
+
+    const rawLrc = (await requestText(lrcUrl, { headers: MG_TEXT_HEADERS })).trim()
+    if (!rawLrc) continue
+
+    const trcUrl = String(resource?.trcUrl || '')
+    let rawTlrc = ''
+    if (trcUrl) {
+      try {
+        rawTlrc = (
+          await requestText(trcUrl, { headers: MG_TEXT_HEADERS })
+        ).trim()
+      } catch {
+        rawTlrc = ''
+      }
+    }
+    return buildLyricData(rawLrc, rawTlrc)
+  }
+  return EMPTY_LYRIC
 }
 
 /**
@@ -98,8 +277,13 @@ export async function fetchLyric(track: Track): Promise<LyricData> {
         return await fetchKwLyric(songmid)
       case 'wy':
         return await fetchWyLyric(songmid)
+      case 'tx':
+        return await fetchTxLyric(songmid)
+      case 'kg':
+        return await fetchKgLyric(track)
+      case 'mg':
+        return await fetchMgLyric(track)
       default:
-        // TX/KG/MG 暂未实现
         return EMPTY_LYRIC
     }
   } catch (error) {
