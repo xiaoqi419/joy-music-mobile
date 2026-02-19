@@ -5,6 +5,7 @@ import {
   LeaderboardDetail,
   SongListDetail,
   SongListPage,
+  SongListSortInfo,
   SongListTagInfo,
 } from '../../types/discover'
 import {
@@ -47,6 +48,10 @@ export async function getSongListTags(source: DiscoverSourceId): Promise<{
   hotTags: SongListTagInfo[]
 }> {
   return adapter(source).songList.getTags()
+}
+
+export function getSongListSortList(source: DiscoverSourceId): SongListSortInfo[] {
+  return adapter(source).songList.sortList || []
 }
 
 export async function getSongListPage(params: {

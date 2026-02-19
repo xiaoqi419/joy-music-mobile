@@ -43,6 +43,14 @@ const decodeName = (value: string): string =>
     .replace(/&#39;/g, "'")
     .replace(/&quot;/g, '"')
 
+function normalizeTagField(value: unknown): string {
+  const text = String(value ?? '').trim()
+  if (!text) return ''
+  const lower = text.toLowerCase()
+  if (lower === 'undefined' || lower === 'null') return ''
+  return text
+}
+
 function parseDurationMs(raw: any): number {
   const value = Number(raw || 0)
   if (!Number.isFinite(value) || value <= 0) return 0
@@ -171,21 +179,30 @@ async function getTags(): Promise<{ tags: SongListTagInfo[]; hotTags: SongListTa
 
   if (resp.data?.status !== 1) throw new Error('KG tags API failed')
 
-  const hotTags: SongListTagInfo[] = Object.values(resp.data?.data?.hotTag || {}).map((tag: any) => ({
-    id: String(tag.special_id),
-    name: String(tag.special_name),
-    source: 'kg',
-  }))
+  const hotTags: SongListTagInfo[] = []
+  for (const tag of Object.values(resp.data?.data?.hotTag || {})) {
+    const id = normalizeTagField((tag as any)?.special_id)
+    const name = normalizeTagField((tag as any)?.special_name)
+    if (!id || !name) continue
+    hotTags.push({
+      id,
+      name,
+      source: 'kg',
+    })
+  }
 
   const tags: SongListTagInfo[] = []
   const groups = resp.data?.data?.tagids || {}
   for (const groupName of Object.keys(groups)) {
     for (const tag of groups[groupName]?.data || []) {
+      const id = normalizeTagField(tag.id)
+      const name = normalizeTagField(tag.name)
+      if (!id || !name) continue
       tags.push({
-        id: String(tag.id),
-        name: String(tag.name),
-        parentId: String(tag.parent_id || ''),
-        parentName: String(tag.pname || groupName),
+        id,
+        name,
+        parentId: normalizeTagField(tag.parent_id),
+        parentName: normalizeTagField(tag.pname || groupName),
         source: 'kg',
       })
     }

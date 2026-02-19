@@ -9,36 +9,34 @@ import {
   TouchableOpacity,
   StyleSheet,
   Image,
-  Dimensions,
   FlatList,
 } from 'react-native'
 import { Ionicons } from '@expo/vector-icons'
 import { useTheme, spacing, fontSize, borderRadius } from '../../theme'
 import { SongListItem } from '../../types/discover'
 
-const SCREEN_WIDTH = Dimensions.get('window').width
-const CARD_GAP = spacing.md
-const CARD_WIDTH = (SCREEN_WIDTH - spacing.md * 2 - CARD_GAP) / 2
-
 interface PlaylistSectionProps {
   playlists: SongListItem[]
   loading?: boolean
   error?: string | null
   onPlaylistPress?: (playlist: SongListItem) => void
+  horizontalPadding?: number
 }
 
 /**
  * 渲染歌单卡片（封面 + 播放量角标 + 名称）。
  */
-function PlaylistCard({ item, onPress }: { item: SongListItem; onPress?: () => void }) {
+function PlaylistCard({
+  item,
+  onPress,
+}: {
+  item: SongListItem
+  onPress?: () => void
+}) {
   const { colors } = useTheme()
 
   return (
-    <TouchableOpacity
-      style={styles.card}
-      activeOpacity={0.8}
-      onPress={onPress}
-    >
+    <TouchableOpacity style={styles.card} activeOpacity={0.8} onPress={onPress}>
       <View style={[styles.coverContainer, { backgroundColor: colors.surfaceElevated }]}>
         <Image source={{ uri: item.coverUrl || 'https://via.placeholder.com/300' }} style={styles.coverImage} />
         <View style={styles.playCountBadge}>
@@ -61,10 +59,11 @@ export default function PlaylistSection({
   loading = false,
   error = null,
   onPlaylistPress,
+  horizontalPadding = spacing.md,
 }: PlaylistSectionProps) {
   if (loading) {
     return (
-      <View style={styles.container}>
+      <View style={[styles.container, { paddingHorizontal: horizontalPadding }]}>
         <Text style={styles.statusText}>Loading playlists...</Text>
       </View>
     )
@@ -72,7 +71,7 @@ export default function PlaylistSection({
 
   if (error) {
     return (
-      <View style={styles.container}>
+      <View style={[styles.container, { paddingHorizontal: horizontalPadding }]}>
         <Text style={styles.statusText}>{error}</Text>
       </View>
     )
@@ -80,14 +79,14 @@ export default function PlaylistSection({
 
   if (playlists.length === 0) {
     return (
-      <View style={styles.container}>
+      <View style={[styles.container, { paddingHorizontal: horizontalPadding }]}>
         <Text style={styles.statusText}>No playlists found.</Text>
       </View>
     )
   }
 
   return (
-    <View style={styles.container}>
+    <View style={[styles.container, { paddingHorizontal: horizontalPadding }]}>
       <FlatList
         data={playlists}
         numColumns={2}
@@ -96,10 +95,9 @@ export default function PlaylistSection({
         columnWrapperStyle={styles.row}
         contentContainerStyle={styles.listContent}
         renderItem={({ item }) => (
-          <PlaylistCard
-            item={item}
-            onPress={() => onPlaylistPress?.(item)}
-          />
+          <View style={styles.cardColumn}>
+            <PlaylistCard item={item} onPress={() => onPlaylistPress?.(item)} />
+          </View>
         )}
       />
     </View>
@@ -108,7 +106,7 @@ export default function PlaylistSection({
 
 const styles = StyleSheet.create({
   container: {
-    paddingHorizontal: spacing.md,
+    width: '100%',
   },
   statusText: {
     fontSize: fontSize.subhead,
@@ -116,17 +114,21 @@ const styles = StyleSheet.create({
     paddingVertical: spacing.sm,
   },
   listContent: {
-    gap: spacing.md,
+    paddingBottom: spacing.xs,
   },
   row: {
-    gap: CARD_GAP,
+    justifyContent: 'space-between',
+    marginBottom: spacing.md,
+  },
+  cardColumn: {
+    width: '48%',
   },
   card: {
-    width: CARD_WIDTH,
+    width: '100%',
   },
   coverContainer: {
-    width: CARD_WIDTH,
-    height: CARD_WIDTH,
+    width: '100%',
+    aspectRatio: 1,
     borderRadius: borderRadius.md,
     overflow: 'hidden',
     position: 'relative',

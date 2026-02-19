@@ -10,8 +10,10 @@ import { useTheme, spacing, fontSize, BOTTOM_INSET } from '../../theme'
 import SectionHeader from '../../components/common/SectionHeader'
 import SourceChips from '../../components/common/SourceChips'
 import PlaylistSection from './PlaylistSection'
+import SongListMorePage from './SongListMorePage'
 import { DiscoverSourceId, SongListItem } from '../../types/discover'
 import {
+  getSongListSortList,
   getSongListPage,
   getSongListSetting,
   saveSongListSetting,
@@ -19,6 +21,7 @@ import {
 
 interface DiscoverScreenProps {
   onPlaylistPress?: (playlist: SongListItem) => void
+  onMorePageVisibilityChange?: (visible: boolean) => void
 }
 
 /**
@@ -27,6 +30,7 @@ interface DiscoverScreenProps {
  */
 export default function DiscoverScreen({
   onPlaylistPress,
+  onMorePageVisibilityChange,
 }: DiscoverScreenProps) {
   const { colors } = useTheme()
   const insets = useSafeAreaInsets()
@@ -38,6 +42,17 @@ export default function DiscoverScreen({
   const [playlistLoading, setPlaylistLoading] = useState(false)
   const [playlistError, setPlaylistError] = useState<string | null>(null)
   const [refreshing, setRefreshing] = useState(false)
+  const [showSongListMore, setShowSongListMore] = useState(false)
+
+  useEffect(() => {
+    onMorePageVisibilityChange?.(showSongListMore)
+  }, [showSongListMore, onMorePageVisibilityChange])
+
+  useEffect(() => {
+    return () => {
+      onMorePageVisibilityChange?.(false)
+    }
+  }, [onMorePageVisibilityChange])
 
   /** 加载歌单列表 */
   const loadSongList = useCallback(
@@ -92,9 +107,33 @@ export default function DiscoverScreen({
     void loadSongList(songListSource, songListSort, songListTag)
   }, [songListSource, songListSort, songListTag, loadSongList])
 
+  const handleSongListSourceChange = useCallback((source: DiscoverSourceId) => {
+    setSongListSource(source)
+    const sorts = getSongListSortList(source)
+    setSongListSort(sorts[0]?.id || 'new')
+    setSongListTag('')
+    void saveSongListSetting({
+      source,
+      sortId: sorts[0]?.id || 'new',
+      tagId: '',
+      tagName: '',
+    })
+  }, [])
+
+  const handleMoreFiltersChange = useCallback((value: { sortId: string; tagId: string; tagName: string }) => {
+    setSongListSort(prev => (prev === value.sortId ? prev : value.sortId))
+    setSongListTag(prev => (prev === value.tagId ? prev : value.tagId))
+    void saveSongListSetting({
+      source: songListSource,
+      sortId: value.sortId,
+      tagId: value.tagId,
+      tagName: value.tagName,
+    })
+  }, [songListSource])
+
   const sourceChips = useMemo(
-    () => <SourceChips value={songListSource} onChange={setSongListSource} />,
-    [songListSource]
+    () => <SourceChips value={songListSource} onChange={handleSongListSourceChange} />,
+    [songListSource, handleSongListSourceChange]
   )
 
   /** 下拉刷新（跳过缓存） */
@@ -105,42 +144,54 @@ export default function DiscoverScreen({
 
   return (
     <View style={[styles.container, { backgroundColor: colors.background }]}>
-      <ScrollView
-        showsVerticalScrollIndicator={false}
-        contentContainerStyle={{ paddingBottom: BOTTOM_INSET + spacing.md }}
-        refreshControl={
-          <RefreshControl
-            refreshing={refreshing}
-            onRefresh={handleRefresh}
-            tintColor={colors.accent}
-            colors={[colors.accent]}
-          />
-        }
-      >
-        <View style={[styles.header, { paddingTop: insets.top + spacing.md }]}>
-          <Text style={[styles.largeTitle, { color: colors.text }]}>发现音乐</Text>
-        </View>
-
-        <SectionHeader title="推荐歌单" showMore onMorePress={() => {}} />
-        {sourceChips}
-
-        {/* 刷新提示横幅 */}
-        {refreshing && (
-          <View style={[styles.refreshBanner, { backgroundColor: colors.accentLight }]}>
-            <ActivityIndicator size="small" color={colors.accent} />
-            <Text style={[styles.refreshText, { color: colors.accent }]}>正在刷新歌单…</Text>
+      {showSongListMore ? (
+        <SongListMorePage
+          source={songListSource}
+          sortId={songListSort}
+          tagId={songListTag}
+          onBack={() => setShowSongListMore(false)}
+          onSourceChange={handleSongListSourceChange}
+          onFiltersChange={handleMoreFiltersChange}
+          onPlaylistPress={onPlaylistPress}
+        />
+      ) : (
+        <ScrollView
+          showsVerticalScrollIndicator={false}
+          contentContainerStyle={{ paddingBottom: BOTTOM_INSET + spacing.md }}
+          refreshControl={
+            <RefreshControl
+              refreshing={refreshing}
+              onRefresh={handleRefresh}
+              tintColor={colors.accent}
+              colors={[colors.accent]}
+            />
+          }
+        >
+          <View style={[styles.header, { paddingTop: insets.top + spacing.md }]}>
+            <Text style={[styles.largeTitle, { color: colors.text }]}>发现音乐</Text>
           </View>
-        )}
 
-        <View style={{ opacity: refreshing ? 0.5 : 1 }}>
-          <PlaylistSection
-            playlists={playlists}
-            loading={playlistLoading}
-            error={playlistError}
-            onPlaylistPress={onPlaylistPress}
-          />
-        </View>
-      </ScrollView>
+          <SectionHeader title="推荐歌单" showMore onMorePress={() => setShowSongListMore(true)} />
+          {sourceChips}
+
+          {/* 刷新提示横幅 */}
+          {refreshing && (
+            <View style={[styles.refreshBanner, { backgroundColor: colors.accentLight }]}>
+              <ActivityIndicator size="small" color={colors.accent} />
+              <Text style={[styles.refreshText, { color: colors.accent }]}>正在刷新歌单…</Text>
+            </View>
+          )}
+
+          <View style={{ opacity: refreshing ? 0.5 : 1 }}>
+            <PlaylistSection
+              playlists={playlists}
+              loading={playlistLoading}
+              error={playlistError}
+              onPlaylistPress={onPlaylistPress}
+            />
+          </View>
+        </ScrollView>
+      )}
     </View>
   )
 }

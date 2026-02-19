@@ -51,7 +51,9 @@ function AppContent() {
   const [activeTab, setActiveTab] = useState<TabName>('discover')
   const [detailView, setDetailView] = useState<DetailView | null>(null)
   const [showNowPlaying, setShowNowPlaying] = useState(false)
+  const [isDiscoverMoreVisible, setIsDiscoverMoreVisible] = useState(false)
   const [detailLoading, setDetailLoading] = useState(false)
+  const shouldHideTabBar = activeTab === 'discover' && isDiscoverMoreVisible
 
   const syncPlayerStateToStore = useCallback((playbackStatus?: PlaybackStatus | null) => {
     const snapshot = playerController.getPlayerState()
@@ -212,6 +214,12 @@ function AppContent() {
     setDetailView(null)
   }, [])
 
+  useEffect(() => {
+    if (activeTab !== 'discover' && isDiscoverMoreVisible) {
+      setIsDiscoverMoreVisible(false)
+    }
+  }, [activeTab, isDiscoverMoreVisible])
+
   return (
     <View style={[styles.container, { backgroundColor: colors.background }]}>
       <StatusBar barStyle={isDark ? 'light-content' : 'dark-content'} />
@@ -221,6 +229,7 @@ function AppContent() {
         {activeTab === 'discover' && (
           <DiscoverScreen
             onPlaylistPress={handlePlaylistPress}
+            onMorePageVisibilityChange={setIsDiscoverMoreVisible}
           />
         )}
         {activeTab === 'leaderboard' && (
@@ -264,7 +273,9 @@ function AppContent() {
           position: 'absolute',
           left: 16,
           right: 16,
-          bottom: Math.max(insets.bottom, 16) + CAPSULE_BOTTOM_MARGIN + CAPSULE_TAB_HEIGHT + 10,
+          bottom: Math.max(insets.bottom, 16) + (
+            shouldHideTabBar ? 10 : CAPSULE_BOTTOM_MARGIN + CAPSULE_TAB_HEIGHT + 10
+          ),
         }}
       >
         <MiniPlayer onOpenPlayer={() => setShowNowPlaying(true)} />
@@ -275,7 +286,9 @@ function AppContent() {
       )}
 
       {/* TabBar - fixed at bottom */}
-      <TabBar activeTab={activeTab} onTabChange={setActiveTab} />
+      {!shouldHideTabBar && (
+        <TabBar activeTab={activeTab} onTabChange={setActiveTab} />
+      )}
     </View>
   )
 }
