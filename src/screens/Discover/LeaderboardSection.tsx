@@ -1,16 +1,13 @@
 /**
- * Leaderboard section - horizontal scrolling cards with gradient backgrounds
+ * 排行榜纵向列表区。
+ * 目标：一次性展示更多榜单，避免横向滑动成本过高。
  */
 
 import React from 'react'
-import { View, Text, ScrollView, TouchableOpacity, StyleSheet } from 'react-native'
-import { LinearGradient } from 'expo-linear-gradient'
+import { View, Text, TouchableOpacity, StyleSheet, Image } from 'react-native'
 import { Ionicons } from '@expo/vector-icons'
-import { spacing, fontSize, borderRadius } from '../../theme'
+import { useTheme, spacing, fontSize, borderRadius } from '../../theme'
 import { LeaderboardBoardItem } from '../../types/discover'
-
-const CARD_WIDTH = 280
-const CARD_HEIGHT = 160
 
 interface LeaderboardSectionProps {
   boards: LeaderboardBoardItem[]
@@ -25,105 +22,166 @@ export default function LeaderboardSection({
   error = null,
   onLeaderboardPress,
 }: LeaderboardSectionProps) {
+  const { colors } = useTheme()
+
   if (loading) {
     return (
-      <View style={styles.emptyWrap}>
-        <Text style={styles.emptyText}>Loading charts...</Text>
+      <View style={styles.stateWrap}>
+        <Text style={[styles.stateText, { color: colors.textSecondary }]}>正在加载排行榜...</Text>
       </View>
     )
   }
+
   if (error) {
     return (
-      <View style={styles.emptyWrap}>
-        <Text style={styles.emptyText}>{error}</Text>
+      <View style={styles.stateWrap}>
+        <Text style={[styles.stateText, { color: colors.textSecondary }]}>{error}</Text>
       </View>
     )
   }
+
   if (boards.length === 0) {
     return (
-      <View style={styles.emptyWrap}>
-        <Text style={styles.emptyText}>No charts available.</Text>
+      <View style={styles.stateWrap}>
+        <Text style={[styles.stateText, { color: colors.textSecondary }]}>当前平台暂无可用榜单</Text>
       </View>
     )
   }
+
   return (
-    <ScrollView
-      horizontal
-      showsHorizontalScrollIndicator={false}
-      contentContainerStyle={styles.scrollContent}
-      decelerationRate="fast"
-      snapToInterval={CARD_WIDTH + spacing.md}
-    >
-      {boards.map((board, idx) => (
+    <View style={styles.listWrap}>
+      {boards.map((board, index) => (
         <TouchableOpacity
           key={board.id}
-          activeOpacity={0.8}
+          activeOpacity={0.82}
           onPress={() => onLeaderboardPress?.(board)}
+          style={[
+            styles.card,
+            {
+              backgroundColor: colors.surface,
+              borderColor: colors.separator,
+            },
+          ]}
         >
-          <LinearGradient
-            colors={getGradientByIndex(idx)}
-            start={{ x: 0, y: 0 }}
-            end={{ x: 1, y: 1 }}
-            style={styles.card}
-          >
-            <View style={styles.cardHeader}>
-              <Text style={styles.cardTitle}>{board.name}</Text>
-              <Ionicons name="chevron-forward" size={18} color="rgba(255,255,255,0.8)" />
+          {board.coverUrl ? (
+            <Image
+              source={{ uri: board.coverUrl }}
+              style={styles.cover}
+            />
+          ) : (
+            <View
+              style={[
+                styles.coverFallback,
+                { backgroundColor: colors.accentLight },
+              ]}
+            >
+              <Ionicons name="musical-notes-outline" size={18} color={colors.accent} />
+            </View>
+          )}
+
+          <View style={styles.content}>
+            <View style={styles.titleRow}>
+              <View
+                style={[
+                  styles.rankBadge,
+                  {
+                    backgroundColor: index < 3 ? colors.accentLight : colors.surfaceSecondary,
+                  },
+                ]}
+              >
+                <Text
+                  style={[
+                    styles.rankText,
+                    { color: index < 3 ? colors.accent : colors.textSecondary },
+                  ]}
+                >
+                  {index + 1}
+                </Text>
+              </View>
+              <Text style={[styles.title, { color: colors.text }]} numberOfLines={1}>
+                {board.name}
+              </Text>
             </View>
 
-            <Text style={styles.cardDescription}>
-              {board.source.toUpperCase()} · Tap to open the full list
+            <Text style={[styles.subtitle, { color: colors.textSecondary }]} numberOfLines={1}>
+              {board.updateFrequency || `${board.source.toUpperCase()} 平台榜单`}
             </Text>
-          </LinearGradient>
+            <Text style={[styles.meta, { color: colors.textTertiary }]} numberOfLines={1}>
+              榜单 ID：{board.bangId}
+            </Text>
+          </View>
+
+          <Ionicons name="chevron-forward" size={18} color={colors.textTertiary} />
         </TouchableOpacity>
       ))}
-    </ScrollView>
+    </View>
   )
 }
 
-function getGradientByIndex(index: number): [string, string] {
-  const gradients: Array<[string, string]> = [
-    ['#FF6B6B', '#EE5A24'],
-    ['#4ECDC4', '#44BD9E'],
-    ['#A29BFE', '#6C5CE7'],
-    ['#FFD166', '#F29E4C'],
-    ['#74C0FC', '#4DABF7'],
-  ]
-  return gradients[index % gradients.length]
-}
-
 const styles = StyleSheet.create({
-  scrollContent: {
+  listWrap: {
     paddingHorizontal: spacing.md,
-    gap: spacing.md,
+    gap: spacing.sm,
   },
   card: {
-    width: CARD_WIDTH,
-    height: CARD_HEIGHT,
     borderRadius: borderRadius.lg,
-    padding: spacing.md,
-    justifyContent: 'space-between',
-  },
-  cardHeader: {
+    borderWidth: StyleSheet.hairlineWidth,
+    paddingHorizontal: spacing.sm,
+    paddingVertical: spacing.sm,
     flexDirection: 'row',
     alignItems: 'center',
-    justifyContent: 'space-between',
+    gap: spacing.sm,
   },
-  cardTitle: {
-    fontSize: fontSize.title3,
-    fontWeight: '700',
-    color: '#FFFFFF',
+  cover: {
+    width: 54,
+    height: 54,
+    borderRadius: 10,
   },
-  cardDescription: {
+  coverFallback: {
+    width: 54,
+    height: 54,
+    borderRadius: 10,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  content: {
+    flex: 1,
+    gap: 2,
+  },
+  titleRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+  },
+  rankBadge: {
+    minWidth: 20,
+    height: 20,
+    borderRadius: 999,
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: 6,
+  },
+  rankText: {
     fontSize: fontSize.caption2,
-    color: 'rgba(255,255,255,0.6)',
+    fontWeight: '700',
   },
-  emptyWrap: {
+  title: {
+    flex: 1,
+    fontSize: fontSize.callout,
+    fontWeight: '700',
+  },
+  subtitle: {
+    fontSize: fontSize.caption1,
+    fontWeight: '500',
+  },
+  meta: {
+    fontSize: fontSize.caption2,
+  },
+  stateWrap: {
     paddingHorizontal: spacing.md,
     paddingVertical: spacing.md,
   },
-  emptyText: {
+  stateText: {
     fontSize: fontSize.subhead,
-    color: '#8E8E93',
   },
 })

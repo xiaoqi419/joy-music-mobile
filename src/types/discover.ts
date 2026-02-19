@@ -61,6 +61,8 @@ export interface LeaderboardBoardItem {
   id: string
   name: string
   bangId: string
+  coverUrl?: string
+  updateFrequency?: string
   source: DiscoverSourceId
 }
 

@@ -19,7 +19,7 @@ const sortList = [
   { id: '8', tid: 'rise', name: 'Rise' },
 ]
 
-const TOP_LIST = [
+const STATIC_TOP_LIST = [
   { id: 'kg__8888', name: 'TOP500', bangId: '8888' },
   { id: 'kg__6666', name: 'Rising', bangId: '6666' },
   { id: 'kg__52144', name: '抖音Hot Songs', bangId: '52144' },
@@ -350,10 +350,91 @@ async function getListDetail(id: string, page: number): Promise<SongListDetail> 
   }
 }
 
+function parseDynamicBoards(rawList: any[]): LeaderboardBoardList['list'] {
+  const parsed: Array<{
+    id: string
+    name: string
+    bangId: string
+    coverUrl?: string
+    updateFrequency?: string
+    source: 'kg'
+    playTimes: number
+  }> = []
+
+  for (const item of rawList) {
+    // 与 CeruMusic 保持一致：仅保留可出歌的榜单（isvol = 1）。
+    if (item?.isvol !== undefined && Number(item.isvol) !== 1) continue
+
+    const bangId = String(item?.rankid || item?.id || '').trim()
+    const name = String(item?.rankname || item?.name || '').trim()
+    if (!bangId || !name) continue
+
+    const rawCover = String(item?.imgurl || item?.img || '').trim()
+    const rawUpdate = String(item?.update_frequency || item?.updateFrequency || '').trim()
+    parsed.push({
+      id: `kg__${bangId}`,
+      name,
+      bangId,
+      coverUrl: rawCover ? rawCover.replace('{size}', '500') : undefined,
+      updateFrequency: rawUpdate || undefined,
+      source: 'kg',
+      playTimes: Number(item?.play_times || 0),
+    })
+  }
+
+  parsed.sort((a, b) => b.playTimes - a.playTimes)
+  const uniq = new Set<string>()
+  const list: LeaderboardBoardList['list'] = []
+  for (const item of parsed) {
+    if (uniq.has(item.bangId)) continue
+    uniq.add(item.bangId)
+    list.push({
+      id: item.id,
+      name: item.name,
+      bangId: item.bangId,
+      coverUrl: item.coverUrl,
+      updateFrequency: item.updateFrequency,
+      source: item.source,
+    })
+  }
+  return list
+}
+
 async function getBoards(): Promise<LeaderboardBoardList> {
-  return {
-    source: 'kg',
-    list: TOP_LIST.map(item => ({ ...item, source: 'kg' as const })),
+  try {
+    const resp = await withRetry(() =>
+      httpRequest('http://mobilecdnbj.kugou.com/api/v5/rank/list', {
+        query: {
+          version: 9108,
+          plat: 0,
+          showtype: 2,
+          parentid: 0,
+          apiver: 6,
+          area_code: 1,
+          withsong: 1,
+        },
+      })
+    )
+    if (resp.data?.errcode !== 0) {
+      throw new Error('KG dynamic leaderboard API failed')
+    }
+
+    const dynamicList = parseDynamicBoards(resp.data?.data?.info || [])
+    if (!dynamicList.length) {
+      throw new Error('KG dynamic leaderboard is empty')
+    }
+
+    return {
+      source: 'kg',
+      list: dynamicList,
+    }
+  } catch (error) {
+    // 网络抖动或接口受限时回退静态榜单，避免页面空白。
+    console.warn('[Discover][KG] Dynamic leaderboard failed, fallback to static list:', error)
+    return {
+      source: 'kg',
+      list: STATIC_TOP_LIST.map(item => ({ ...item, source: 'kg' as const })),
+    }
   }
 }
 

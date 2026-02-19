@@ -17,7 +17,7 @@ const sortList = [
   { id: 'new', tid: 'new', name: 'New' },
 ]
 
-const TOP_LIST = [
+const STATIC_TOP_LIST = [
   { id: 'tx__4', name: 'Pop Index', bangId: '4' },
   { id: 'tx__26', name: 'Hot Songs', bangId: '26' },
   { id: 'tx__27', name: 'New Songs', bangId: '27' },
@@ -281,10 +281,105 @@ async function getListDetail(id: string, page: number): Promise<SongListDetail> 
   }
 }
 
+/** 统一处理 TX 榜单名称，去掉固定前缀并补全“榜”后缀。 */
+function normalizeBoardName(rawName: unknown): string {
+  let name = String(rawName || '').trim()
+  if (!name) return ''
+  if (name.startsWith('巅峰榜·')) {
+    name = name.slice(4)
+  }
+  if (!name.endsWith('榜')) {
+    name = `${name}榜`
+  }
+  return name
+}
+
+function parseDynamicBoards(rawList: any[]): LeaderboardBoardList['list'] {
+  const parsed: Array<{
+    id: string
+    name: string
+    bangId: string
+    coverUrl?: string
+    updateFrequency?: string
+    source: 'tx'
+    listen: number
+  }> = []
+
+  for (const item of rawList) {
+    const bangId = String(item?.id || '').trim()
+    // 排除 MV 榜，保持与 CeruMusic 策略一致。
+    if (!bangId || bangId === '201') continue
+
+    const name = normalizeBoardName(item?.topTitle || item?.title || item?.name)
+    if (!name) continue
+
+    const rawCover = String(item?.picUrl || item?.frontPicUrl || '').trim()
+    const rawUpdate = String(item?.updateTips || item?.intro || '').trim()
+    parsed.push({
+      id: `tx__${bangId}`,
+      name,
+      bangId,
+      coverUrl: rawCover ? rawCover.replace(/^http:/, 'https:') : undefined,
+      updateFrequency: rawUpdate || undefined,
+      source: 'tx',
+      listen: Number(item?.listenCount || 0),
+    })
+  }
+
+  parsed.sort((a, b) => b.listen - a.listen)
+  const uniq = new Set<string>()
+  const list: LeaderboardBoardList['list'] = []
+  for (const item of parsed) {
+    if (uniq.has(item.bangId)) continue
+    uniq.add(item.bangId)
+    list.push({
+      id: item.id,
+      name: item.name,
+      bangId: item.bangId,
+      coverUrl: item.coverUrl,
+      updateFrequency: item.updateFrequency,
+      source: item.source,
+    })
+  }
+  return list
+}
+
 async function getBoards(): Promise<LeaderboardBoardList> {
-  return {
-    source: 'tx',
-    list: TOP_LIST.map(item => ({ ...item, source: 'tx' as const })),
+  try {
+    const resp = await withRetry(() =>
+      httpRequest('https://c.y.qq.com/v8/fcg-bin/fcg_myqq_toplist.fcg', {
+        query: {
+          g_tk: 1928093487,
+          inCharset: 'utf-8',
+          outCharset: 'utf-8',
+          notice: 0,
+          format: 'json',
+          uin: 0,
+          needNewCode: 1,
+          platform: 'h5',
+        },
+      })
+    )
+    if (resp.data?.code !== 0) {
+      throw new Error('TX dynamic leaderboard API failed')
+    }
+
+    const dynamicList = parseDynamicBoards(resp.data?.data?.topList || [])
+    if (!dynamicList.length) {
+      throw new Error('TX dynamic leaderboard is empty')
+    }
+
+    return {
+      source: 'tx',
+      list: dynamicList,
+    }
+  } catch (error) {
+    // 动态榜单拉取失败时回退静态列表，避免排行榜页无数据。
+    console.warn('[Discover][TX] Dynamic leaderboard failed, fallback to static list:', error)
+    return {
+      source: 'tx',
+      list: STATIC_TOP_LIST.map(item => ({ ...item, source: 'tx' as const })),
+    }
   }
 }
 

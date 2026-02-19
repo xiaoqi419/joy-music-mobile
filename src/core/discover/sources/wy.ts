@@ -11,7 +11,7 @@ import {
   SongListPage,
   SongListTagInfo,
 } from '../../../types/discover'
-import { withRetry } from '../http'
+import { httpRequest, withRetry } from '../http'
 import { wyRequest } from '../wyCrypto'
 import { DiscoverSourceAdapter } from './types'
 
@@ -20,13 +20,20 @@ const DETAIL_LIMIT = 1000
 
 const sortList = [{ id: 'hot', tid: 'hot', name: 'Hot' }]
 
-const TOP_LIST = [
+const STATIC_TOP_LIST = [
   { id: 'wy__19723756', name: '飙升榜', bangId: '19723756' },
   { id: 'wy__3779629', name: '新歌榜', bangId: '3779629' },
   { id: 'wy__3778678', name: '热歌榜', bangId: '3778678' },
   { id: 'wy__2884035', name: '原创榜', bangId: '2884035' },
+  { id: 'wy__71384707', name: '古典榜', bangId: '71384707' },
+  { id: 'wy__2250011882', name: '抖音榜', bangId: '2250011882' },
   { id: 'wy__745956260', name: '韩语榜', bangId: '745956260' },
+  { id: 'wy__1978921795', name: '电音榜', bangId: '1978921795' },
+  { id: 'wy__2006508653', name: '电竞榜', bangId: '2006508653' },
+  { id: 'wy__21845217', name: 'KTV唛榜', bangId: '21845217' },
 ]
+
+const MIN_EXPECTED_WY_BOARD_COUNT = 10
 
 /** 格式化播放量为中文可读字符串 */
 const toPlayCount = (count: number | string | undefined): string => {
@@ -178,10 +185,85 @@ async function getListDetail(id: string, page: number): Promise<SongListDetail> 
 }
 
 /** 获取排行榜列表 */
+function parseDynamicBoards(rawList: any[]): LeaderboardBoardList['list'] {
+  const uniq = new Set<string>()
+  const list: LeaderboardBoardList['list'] = []
+  for (const item of rawList) {
+    const bangId = String(item?.id || '').trim()
+    const name = String(item?.name || '').trim()
+    if (!bangId || !name || uniq.has(bangId)) continue
+
+    uniq.add(bangId)
+    const rawCover = String(item?.coverImgUrl || item?.coverUrl || '').trim()
+    const rawUpdate = String(item?.updateFrequency || item?.frequency || '').trim()
+    list.push({
+      id: `wy__${bangId}`,
+      name,
+      bangId,
+      coverUrl: rawCover || undefined,
+      updateFrequency: rawUpdate || undefined,
+      source: 'wy',
+    })
+  }
+  return list
+}
+
+function getStaticBoards(): LeaderboardBoardList['list'] {
+  return STATIC_TOP_LIST.map(item => ({ ...item, source: 'wy' as const }))
+}
+
 async function getBoards(): Promise<LeaderboardBoardList> {
-  return {
-    source: 'wy',
-    list: TOP_LIST.map(item => ({ ...item, source: 'wy' as const })),
+  try {
+    // 先尝试 weapi 动态榜单。
+    let linuxList: LeaderboardBoardList['list'] = []
+    try {
+      const resp = await withRetry(() =>
+        wyRequest('https://music.163.com/weapi/toplist', {})
+      )
+      if (resp.data?.code === 200) {
+        linuxList = parseDynamicBoards(resp.data?.list || [])
+      }
+    } catch (error) {
+      console.warn('[Discover][WY] weapi/toplist failed:', error)
+    }
+
+    // 若 weapi 返回数量异常（如仅 3 个），再走公开榜单接口兜底。
+    let openApiList: LeaderboardBoardList['list'] = []
+    if (linuxList.length < MIN_EXPECTED_WY_BOARD_COUNT) {
+      try {
+        const openResp = await withRetry(() =>
+          httpRequest('https://music.163.com/api/toplist/detail')
+        )
+        openApiList = parseDynamicBoards(openResp.data?.list || [])
+      } catch (error) {
+        console.warn('[Discover][WY] api/toplist/detail failed:', error)
+      }
+    }
+
+    const staticList = getStaticBoards()
+    const bestList = [linuxList, openApiList, staticList].sort((a, b) => b.length - a.length)[0]
+
+    if (!bestList.length) {
+      throw new Error('WY leaderboard list is empty')
+    }
+
+    if (bestList === staticList) {
+      console.warn('[Discover][WY] Dynamic leaderboard unavailable, fallback to static boards.')
+    } else if (bestList.length < MIN_EXPECTED_WY_BOARD_COUNT) {
+      console.warn('[Discover][WY] Dynamic leaderboard count is low:', bestList.length)
+    }
+
+    return {
+      source: 'wy',
+      list: bestList,
+    }
+  } catch (error) {
+    // 动态接口失败时保留内置榜单，确保“排行榜”页面可访问。
+    console.warn('[Discover][WY] Dynamic leaderboard failed, fallback to static list:', error)
+    return {
+      source: 'wy',
+      list: getStaticBoards(),
+    }
   }
 }
 

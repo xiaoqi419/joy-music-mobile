@@ -133,7 +133,8 @@ function AppContent() {
       }
       setDetailView({
         title: board.name,
-        description: `${board.source.toUpperCase()} leaderboard`,
+        description: `${board.source.toUpperCase()} 榜单`,
+        coverUrl: board.coverUrl,
         tracks: detail.list,
       })
     } catch (error) {
@@ -235,7 +236,6 @@ function AppContent() {
         {activeTab === 'leaderboard' && (
           <LeaderboardScreen
             onLeaderboardPress={handleLeaderboardPress}
-            onTrackPress={handleTrackPress}
           />
         )}
         {activeTab === 'search' && (

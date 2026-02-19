@@ -18,7 +18,7 @@ const sortList = [
   { id: 'hot', tid: 'hot', name: 'Hot' },
 ]
 
-const BOARD_LIST = [
+const STATIC_BOARD_LIST = [
   { id: 'kw__93', name: '飙升榜', bangId: '93' },
   { id: 'kw__17', name: '新歌榜', bangId: '17' },
   { id: 'kw__16', name: '热歌榜', bangId: '16' },
@@ -236,10 +236,87 @@ async function getSongListDetail(id: string, page: number): Promise<SongListDeta
   }
 }
 
+/**
+ * 解析 KW 动态榜单列表。
+ * 接口返回会包含 listen 字段，这里用于排序后再输出标准榜单结构。
+ */
+function parseDynamicBoards(rawList: any[]): LeaderboardBoardList['list'] {
+  const parsed: Array<{
+    id: string
+    name: string
+    bangId: string
+    coverUrl?: string
+    updateFrequency?: string
+    source: 'kw'
+    listen: number
+  }> = []
+
+  for (const item of rawList) {
+    const bangId = String(item?.sourceid || item?.id || '').trim()
+    const name = String(item?.name || '').trim()
+    if (!bangId || !name) continue
+
+    const rawCover = String(item?.pic || item?.img || '').trim()
+    const rawUpdate = String(item?.info || item?.update_frequency || '').trim()
+    parsed.push({
+      id: `kw__${bangId}`,
+      name,
+      bangId,
+      coverUrl: rawCover || undefined,
+      updateFrequency: rawUpdate || undefined,
+      source: 'kw',
+      listen: Number(item?.listen || 0),
+    })
+  }
+
+  parsed.sort((a, b) => b.listen - a.listen)
+  const uniq = new Set<string>()
+  const list: LeaderboardBoardList['list'] = []
+  for (const item of parsed) {
+    if (uniq.has(item.bangId)) continue
+    uniq.add(item.bangId)
+    list.push({
+      id: item.id,
+      name: item.name,
+      bangId: item.bangId,
+      coverUrl: item.coverUrl,
+      updateFrequency: item.updateFrequency,
+      source: item.source,
+    })
+  }
+  return list
+}
+
 async function getBoards(): Promise<LeaderboardBoardList> {
-  return {
-    source: 'kw',
-    list: BOARD_LIST.map(item => ({ ...item, source: 'kw' as const })),
+  try {
+    const resp = await withRetry(() =>
+      httpRequest('http://qukudata.kuwo.cn/q.k', {
+        query: {
+          op: 'query',
+          cont: 'tree',
+          node: 2,
+          pn: 0,
+          rn: 1000,
+          fmt: 'json',
+          level: 3,
+        },
+      })
+    )
+    const dynamicList = parseDynamicBoards(resp.data?.child || [])
+    if (!dynamicList.length) {
+      throw new Error('KW dynamic leaderboard is empty')
+    }
+    return {
+      source: 'kw',
+      list: dynamicList,
+    }
+  } catch (error) {
+    // 动态接口可能受风控或网络波动影响，失败时回退到内置榜单保证可用性。
+    console.warn('[Discover][KW] Dynamic leaderboard failed, fallback to static list:', error)
+    return {
+      source: 'kw',
+      list: STATIC_BOARD_LIST.map(item => ({ ...item, source: 'kw' as const })),
+    }
   }
 }
 
