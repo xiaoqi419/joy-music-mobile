@@ -27,12 +27,48 @@ const TOP_LIST = [
   { id: 'kg__24971', name: 'DJ Hot', bangId: '24971' },
 ]
 
-const toPlayCount = (count: number | string | undefined): string => {
-  const num = Number(count || 0)
-  if (!Number.isFinite(num)) return '0'
-  if (num > 100000000) return `${Math.round(num / 10000000) / 10}B`
-  if (num > 10000) return `${Math.round(num / 1000) / 10}W`
+function trimDecimal(value: number): string {
+  if (!Number.isFinite(value)) return '0'
+  return String(Math.round(value * 10) / 10).replace(/\.0$/, '')
+}
+
+function formatPlayCountNumber(value: number): string {
+  const num = Number(value || 0)
+  if (!Number.isFinite(num) || num < 0) return '0'
+  if (num > 100000000) return `${trimDecimal(num / 100000000)}B`
+  if (num > 10000) return `${trimDecimal(num / 10000)}W`
   return String(Math.round(num))
+}
+
+const toPlayCount = (count: number | string | undefined | null): string => {
+  if (count === undefined || count === null) return ''
+
+  if (typeof count === 'number') {
+    return formatPlayCountNumber(count)
+  }
+
+  const raw = String(count).trim()
+  if (!raw) return ''
+
+  const lower = raw.toLowerCase()
+  if (lower === 'undefined' || lower === 'null') return ''
+
+  const normalized = raw.replace(/[,，\s]/g, '')
+  const unitMatched = /^(\d+(?:\.\d+)?)([万亿wWbB])$/.exec(normalized)
+  if (unitMatched) {
+    const value = Number(unitMatched[1])
+    if (!Number.isFinite(value)) return ''
+    const unitRaw = unitMatched[2]
+    if (unitRaw === '万' || unitRaw === '亿') return `${trimDecimal(value)}${unitRaw}`
+    return `${trimDecimal(value)}${unitRaw.toUpperCase()}`
+  }
+
+  const num = Number(normalized)
+  if (Number.isFinite(num)) {
+    return formatPlayCountNumber(num)
+  }
+
+  return ''
 }
 
 const decodeName = (value: string): string =>
@@ -231,7 +267,7 @@ async function getList(sortId: string, tagId: string, page: number): Promise<Son
     name: String(item.specialname || ''),
     author: String(item.nickname || ''),
     coverUrl: item.img || item.imgurl || undefined,
-    playCount: toPlayCount(item.total_play_count || item.play_count),
+    playCount: toPlayCount(item.total_play_count) || toPlayCount(item.play_count) || '0',
     description: String(item.intro || ''),
     total: Number(item.songcount || 0),
     source: 'kg' as const,
@@ -309,7 +345,7 @@ async function getListDetail(id: string, page: number): Promise<SongListDetail> 
       coverUrl: remoteCover || htmlInfo.coverUrl || '',
       description: remoteDesc || htmlInfo.description || '',
       author: String(resp.data?.data?.nickname || ''),
-      playCount: toPlayCount(resp.data?.data?.playcount),
+      playCount: toPlayCount(resp.data?.data?.playcount) || '0',
     },
   }
 }
