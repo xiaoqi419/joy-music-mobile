@@ -2,16 +2,16 @@
  * Library screen - user's music collection
  */
 
-import React from 'react'
+import React, { useCallback } from 'react'
 import { View, Text, ScrollView, TouchableOpacity, StyleSheet } from 'react-native'
 import { useSafeAreaInsets } from 'react-native-safe-area-context'
 import { Ionicons } from '@expo/vector-icons'
 import { useTheme, spacing, fontSize, borderRadius, BOTTOM_INSET } from '../../theme'
 import TrackListItem from '../../components/common/TrackListItem'
 import { usePlayerStatus } from '../../hooks/usePlayerStatus'
-import { useSelector } from 'react-redux'
+import { useDispatch, useSelector } from 'react-redux'
 import { RootState } from '../../store'
-import { Track } from '../../types/music'
+import { ThemeMode, Track } from '../../types/music'
 
 interface LibraryScreenProps {
   onTrackPress?: (track: Track) => void
@@ -24,6 +24,34 @@ interface MenuItemProps {
   color: string
   onPress?: () => void
 }
+
+interface ThemeOptionItem {
+  value: ThemeMode
+  label: string
+  description: string
+  icon: keyof typeof Ionicons.glyphMap
+}
+
+const THEME_OPTIONS: ThemeOptionItem[] = [
+  {
+    value: 'system',
+    label: '跟随系统',
+    description: '自动切换浅色与深色',
+    icon: 'phone-portrait-outline',
+  },
+  {
+    value: 'light',
+    label: '浅色',
+    description: '始终使用浅色界面',
+    icon: 'sunny-outline',
+  },
+  {
+    value: 'dark',
+    label: '深色',
+    description: '始终使用深色界面',
+    icon: 'moon-outline',
+  },
+]
 
 function MenuItem({ icon, label, count, color, onPress }: MenuItemProps) {
   const { colors } = useTheme()
@@ -50,9 +78,18 @@ function MenuItem({ icon, label, count, color, onPress }: MenuItemProps) {
 
 export default function LibraryScreen({ onTrackPress }: LibraryScreenProps) {
   const { colors } = useTheme()
+  const dispatch = useDispatch()
   const insets = useSafeAreaInsets()
   const { isPlaying, currentTrack } = usePlayerStatus()
   const playerState = useSelector((state: RootState) => state.player)
+  const themeMode = useSelector((state: RootState) => state.config.theme)
+
+  const handleThemeChange = useCallback((mode: ThemeMode) => {
+    dispatch({
+      type: 'CONFIG_SET_THEME',
+      payload: mode,
+    })
+  }, [dispatch])
 
   return (
     <View style={[styles.container, { backgroundColor: colors.background }]}>
@@ -62,7 +99,55 @@ export default function LibraryScreen({ onTrackPress }: LibraryScreenProps) {
       >
         {/* Large title */}
         <View style={[styles.header, { paddingTop: insets.top + spacing.md }]}>
-          <Text style={[styles.largeTitle, { color: colors.text }]}>我的音乐</Text>
+          <Text style={[styles.largeTitle, { color: colors.text }]}>我的</Text>
+        </View>
+
+        <View style={styles.appearanceSection}>
+          <View style={styles.sectionHeader}>
+            <Text style={[styles.sectionTitle, { color: colors.text }]}>外观</Text>
+            <Text style={[styles.sectionSubtitle, { color: colors.textTertiary }]}>主题</Text>
+          </View>
+          <View style={[styles.appearanceCard, { backgroundColor: colors.surface }]}>
+            {THEME_OPTIONS.map((option, index) => {
+              const isSelected = themeMode === option.value
+              return (
+                <TouchableOpacity
+                  key={option.value}
+                  style={[
+                    styles.themeItem,
+                    index < THEME_OPTIONS.length - 1
+                      ? { borderBottomColor: colors.separator, borderBottomWidth: StyleSheet.hairlineWidth }
+                      : null,
+                    isSelected
+                      ? { backgroundColor: colors.accentLight }
+                      : null,
+                  ]}
+                  activeOpacity={0.7}
+                  onPress={() => handleThemeChange(option.value)}
+                >
+                  <View
+                    style={[
+                      styles.themeIconWrap,
+                      { backgroundColor: isSelected ? colors.accent : colors.surfaceSecondary },
+                    ]}
+                  >
+                    <Ionicons
+                      name={option.icon}
+                      size={16}
+                      color={isSelected ? '#FFFFFF' : colors.textSecondary}
+                    />
+                  </View>
+                  <View style={styles.themeMeta}>
+                    <Text style={[styles.themeLabel, { color: colors.text }]}>{option.label}</Text>
+                    <Text style={[styles.themeDesc, { color: colors.textSecondary }]}>{option.description}</Text>
+                  </View>
+                  {isSelected && (
+                    <Ionicons name="checkmark-circle" size={20} color={colors.accent} />
+                  )}
+                </TouchableOpacity>
+              )
+            })}
+          </View>
         </View>
 
         {/* Menu items */}
@@ -143,6 +228,56 @@ const styles = StyleSheet.create({
     fontSize: fontSize.largeTitle,
     fontWeight: '800',
     letterSpacing: 0.35,
+  },
+  appearanceSection: {
+    marginBottom: spacing.md,
+  },
+  sectionHeader: {
+    flexDirection: 'row',
+    alignItems: 'baseline',
+    justifyContent: 'space-between',
+    paddingHorizontal: spacing.md,
+    marginBottom: spacing.sm,
+  },
+  sectionTitle: {
+    fontSize: fontSize.headline,
+    fontWeight: '700',
+  },
+  sectionSubtitle: {
+    fontSize: fontSize.footnote,
+    fontWeight: '500',
+  },
+  appearanceCard: {
+    marginHorizontal: spacing.md,
+    borderRadius: borderRadius.md,
+    overflow: 'hidden',
+  },
+  themeItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.sm + 2,
+    gap: spacing.sm,
+  },
+  themeIconWrap: {
+    width: 28,
+    height: 28,
+    borderRadius: borderRadius.sm,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  themeMeta: {
+    flex: 1,
+    minHeight: 42,
+    justifyContent: 'center',
+  },
+  themeLabel: {
+    fontSize: fontSize.body,
+    fontWeight: '600',
+  },
+  themeDesc: {
+    marginTop: 2,
+    fontSize: fontSize.caption1,
   },
   menuContainer: {
     marginHorizontal: spacing.md,

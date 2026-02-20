@@ -3,9 +3,10 @@
  */
 
 import { AppConfig } from '../../types/music'
+import { ThemeMode } from '../../types/music'
 
 const initialState: AppConfig = {
-  theme: 'dark',
+  theme: 'system',
   language: 'zh-CN',
   cachePath: '',
   maxCacheSize: 500 * 1024 * 1024, // 500MB
@@ -16,12 +17,16 @@ interface ConfigAction {
   payload?: any
 }
 
+const isThemeMode = (value: unknown): value is ThemeMode =>
+  value === 'system' || value === 'light' || value === 'dark'
+
 export default function configReducer(
   state = initialState,
   action: ConfigAction,
 ): AppConfig {
   switch (action.type) {
     case 'CONFIG_SET_THEME':
+      if (!isThemeMode(action.payload)) return state
       return {
         ...state,
         theme: action.payload,

@@ -6,7 +6,7 @@
 import React, { useCallback, useEffect, useState } from 'react'
 import { ActivityIndicator, Alert, StatusBar, StyleSheet, Text, View } from 'react-native'
 import { SafeAreaProvider, useSafeAreaInsets } from 'react-native-safe-area-context'
-import { Provider as ReduxProvider, useDispatch } from 'react-redux'
+import { Provider as ReduxProvider, useDispatch, useSelector } from 'react-redux'
 import * as SplashScreen from 'expo-splash-screen'
 import store from './src/store'
 import { useTheme, CAPSULE_BOTTOM_MARGIN, CAPSULE_TAB_HEIGHT } from './src/theme'
@@ -22,6 +22,8 @@ import { playerController, type PlaybackStatus } from './src/core/player'
 import { Track } from './src/types/music'
 import { LeaderboardBoardItem, SongListItem } from './src/types/discover'
 import { getLeaderboardDetail, getSongListDetail } from './src/core/discover'
+import { RootState } from './src/store'
+import { loadThemeMode, saveThemeMode } from './src/core/config/theme'
 
 // Keep the splash screen visible while we fetch resources
 SplashScreen.preventAutoHideAsync()
@@ -47,12 +49,14 @@ function App() {
 function AppContent() {
   const { colors, isDark } = useTheme()
   const dispatch = useDispatch()
+  const themeMode = useSelector((state: RootState) => state.config.theme)
   const insets = useSafeAreaInsets()
   const [activeTab, setActiveTab] = useState<TabName>('discover')
   const [detailView, setDetailView] = useState<DetailView | null>(null)
   const [showNowPlaying, setShowNowPlaying] = useState(false)
   const [isDiscoverMoreVisible, setIsDiscoverMoreVisible] = useState(false)
   const [detailLoading, setDetailLoading] = useState(false)
+  const [themeHydrated, setThemeHydrated] = useState(false)
   const shouldHideTabBar = activeTab === 'discover' && isDiscoverMoreVisible
 
   const syncPlayerStateToStore = useCallback((playbackStatus?: PlaybackStatus | null) => {
@@ -77,6 +81,16 @@ function AppContent() {
 
     const init = async () => {
       try {
+        // 启动时先恢复主题，避免用户每次重启都回到默认主题。
+        const savedTheme = await loadThemeMode()
+        if (active) {
+          dispatch({
+            type: 'CONFIG_SET_THEME',
+            payload: savedTheme,
+          })
+        }
+        if (active) setThemeHydrated(true)
+
         await playerController.initialize()
         const initialStatus = await playerController.getPlaybackStatus()
         if (active) syncPlayerStateToStore(initialStatus)
@@ -96,7 +110,12 @@ function AppContent() {
       active = false
       unsubscribe?.()
     }
-  }, [syncPlayerStateToStore])
+  }, [dispatch, syncPlayerStateToStore])
+
+  useEffect(() => {
+    if (!themeHydrated) return
+    saveThemeMode(themeMode)
+  }, [themeHydrated, themeMode])
 
   const handleTrackPress = useCallback(async (track: Track) => {
     try {

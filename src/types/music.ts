@@ -44,8 +44,10 @@ export interface SearchResult {
   artists: any[]
 }
 
+export type ThemeMode = 'system' | 'light' | 'dark'
+
 export interface AppConfig {
-  theme: 'light' | 'dark'
+  theme: ThemeMode
   language: string
   cachePath: string
   maxCacheSize: number
