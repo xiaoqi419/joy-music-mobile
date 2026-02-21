@@ -11,6 +11,9 @@ export interface MusicUrlRequest {
   musicInfo: any
   quality?: Quality
   isRefresh?: boolean
+  onProgress?: (progress: MusicUrlProgress) => void
+  attempt?: number
+  totalAttempts?: number
 }
 
 export interface MusicUrlResponse {
@@ -19,10 +22,26 @@ export interface MusicUrlResponse {
   musicId: string
 }
 
+export interface MusicUrlProgress {
+  message: string
+  quality?: Quality
+  attempt: number
+  totalAttempts: number
+}
+
 /**
  * Default quality fallback order
  */
-const QUALITY_FALLBACK: Quality[] = ['flac24bit', 'flac', '320k', '128k']
+const QUALITY_FALLBACK: Quality[] = [
+  'master',
+  'atmos_plus',
+  'atmos',
+  'hires',
+  'flac24bit',
+  'flac',
+  '320k',
+  '128k',
+]
 
 /**
  * Select the best available quality
@@ -57,17 +76,22 @@ export const getMusicUrl = async(request: MusicUrlRequest): Promise<MusicUrlResp
     musicInfo,
     quality,
     isRefresh = false,
+    onProgress,
+    attempt = 1,
+    totalAttempts = 1,
   } = request
 
   try {
+    const requestedQuality = quality || 'master'
+
     // Step 1: Check cache if not refreshing
     if (!isRefresh) {
-      const cachedUrl = await musicUrlCache.getMusicUrl(musicId, quality || '320k')
+      const cachedUrl = await musicUrlCache.getMusicUrl(musicId, requestedQuality)
       if (cachedUrl) {
         console.log(`[MusicUrl] Using cached URL for ${musicId}`)
         return {
           url: cachedUrl,
-          quality: quality || '320k',
+          quality: requestedQuality,
           musicId,
         }
       }
@@ -85,7 +109,13 @@ export const getMusicUrl = async(request: MusicUrlRequest): Promise<MusicUrlResp
     )
 
     // Step 4: Select quality
-    const targetQuality = getPlayQuality(quality, supportedQualities)
+    const targetQuality = getPlayQuality(requestedQuality, supportedQualities)
+    onProgress?.({
+      message: `正在尝试 ${targetQuality} 音质（${attempt}/${totalAttempts}）`,
+      quality: targetQuality,
+      attempt,
+      totalAttempts,
+    })
 
     // Step 5: Fetch URL from source
     console.log(`[MusicUrl] Fetching URL for ${musicId} with quality ${targetQuality}`)
@@ -104,6 +134,12 @@ export const getMusicUrl = async(request: MusicUrlRequest): Promise<MusicUrlResp
         }
 
         if (supportedQualities.includes(fallbackQuality)) {
+          onProgress?.({
+            message: `正在降级尝试 ${fallbackQuality} 音质（${attempt}/${totalAttempts}）`,
+            quality: fallbackQuality,
+            attempt,
+            totalAttempts,
+          })
           try {
             console.log(`[MusicUrl] Trying fallback quality: ${fallbackQuality}`)
             fallbackUrl = await source.getMusicUrl(musicInfo, fallbackQuality)
@@ -161,20 +197,35 @@ export const getMusicUrlWithRetry = async(
   maxRetries: number = 2
 ): Promise<MusicUrlResponse> => {
   let lastError: Error | null = null
+  const totalAttempts = maxRetries + 1
 
   for (let attempt = 0; attempt <= maxRetries; attempt++) {
     try {
       // Add delay on retry
       if (attempt > 0) {
         const delay = Math.random() * 2000 + 1000 // 1-3 seconds
+        request.onProgress?.({
+          message: `第 ${attempt + 1}/${totalAttempts} 次重试，等待 ${Math.round(delay)}ms...`,
+          attempt: attempt + 1,
+          totalAttempts,
+        })
         console.log(`[MusicUrl] Retrying after ${delay}ms (attempt ${attempt + 1}/${maxRetries + 1})`)
         await new Promise(resolve => setTimeout(resolve, delay))
       }
 
-      return await getMusicUrl(request)
+      return await getMusicUrl({
+        ...request,
+        attempt: attempt + 1,
+        totalAttempts,
+      })
     } catch (error) {
       lastError = error instanceof Error ? error : new Error(String(error))
       console.warn(`[MusicUrl] Attempt ${attempt + 1} failed:`, lastError.message)
+      request.onProgress?.({
+        message: `第 ${attempt + 1}/${totalAttempts} 次失败：${lastError.message}`,
+        attempt: attempt + 1,
+        totalAttempts,
+      })
 
       if (attempt === maxRetries) {
         break

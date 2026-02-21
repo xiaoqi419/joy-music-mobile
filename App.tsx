@@ -24,6 +24,11 @@ import { LeaderboardBoardItem, SongListItem } from './src/types/discover'
 import { getLeaderboardDetail, getSongListDetail } from './src/core/discover'
 import { RootState } from './src/store'
 import { loadThemeMode, saveThemeMode } from './src/core/config/theme'
+import {
+  loadMusicSourceSettings,
+  saveMusicSourceSettings,
+} from './src/core/config/musicSource'
+import { applyJoyRuntimeConfig } from './src/core/music/sources/joy'
 
 // Keep the splash screen visible while we fetch resources
 SplashScreen.preventAutoHideAsync()
@@ -50,6 +55,7 @@ function AppContent() {
   const { colors, isDark } = useTheme()
   const dispatch = useDispatch()
   const themeMode = useSelector((state: RootState) => state.config.theme)
+  const musicSourceState = useSelector((state: RootState) => state.musicSource)
   const insets = useSafeAreaInsets()
   const [activeTab, setActiveTab] = useState<TabName>('discover')
   const [detailView, setDetailView] = useState<DetailView | null>(null)
@@ -57,7 +63,18 @@ function AppContent() {
   const [isDiscoverMoreVisible, setIsDiscoverMoreVisible] = useState(false)
   const [detailLoading, setDetailLoading] = useState(false)
   const [themeHydrated, setThemeHydrated] = useState(false)
+  const [musicSourceHydrated, setMusicSourceHydrated] = useState(false)
+  const [isResolvingTrack, setIsResolvingTrack] = useState(() => playerController.isResolvingTrack())
+  const [resolvingHint, setResolvingHint] = useState(() => playerController.getResolvingHint())
   const shouldHideTabBar = activeTab === 'discover' && isDiscoverMoreVisible
+
+  const getReadablePlayError = useCallback((error: unknown) => {
+    const message = error instanceof Error ? error.message : '获取歌曲链接失败'
+    if (/cannot post|405|404/i.test(message)) {
+      return '音源接口地址不可用，请在“我的 > 自定义源管理”检查 API 地址是否正确'
+    }
+    return message
+  }, [])
 
   const syncPlayerStateToStore = useCallback((playbackStatus?: PlaybackStatus | null) => {
     const snapshot = playerController.getPlayerState()
@@ -91,6 +108,18 @@ function AppContent() {
         }
         if (active) setThemeHydrated(true)
 
+        // 启动时恢复自定义音源配置，并注入播放运行时。
+        const sourceSettings = await loadMusicSourceSettings()
+        if (active) {
+          dispatch({
+            type: 'MUSIC_SOURCE_HYDRATE_SETTINGS',
+            payload: sourceSettings,
+          })
+          applyJoyRuntimeConfig(sourceSettings)
+          playerController.setPreferredQuality(sourceSettings.preferredQuality)
+          setMusicSourceHydrated(true)
+        }
+
         await playerController.initialize()
         const initialStatus = await playerController.getPlaybackStatus()
         if (active) syncPlayerStateToStore(initialStatus)
@@ -117,6 +146,34 @@ function AppContent() {
     saveThemeMode(themeMode)
   }, [themeHydrated, themeMode])
 
+  useEffect(() => {
+    const unsubscribeResolving = playerController.onResolvingChange(setIsResolvingTrack)
+    const unsubscribeHint = playerController.onResolvingHintChange(setResolvingHint)
+    return () => {
+      unsubscribeResolving()
+      unsubscribeHint()
+    }
+  }, [])
+
+  useEffect(() => {
+    if (!musicSourceHydrated) return
+    const snapshot = {
+      selectedSourceId: musicSourceState.selectedImportedSourceId,
+      autoSwitch: musicSourceState.autoSwitch,
+      preferredQuality: musicSourceState.preferredQuality,
+      importedSources: musicSourceState.importedSources,
+    }
+    saveMusicSourceSettings(snapshot)
+    applyJoyRuntimeConfig(snapshot)
+    playerController.setPreferredQuality(snapshot.preferredQuality)
+  }, [
+    musicSourceHydrated,
+    musicSourceState.selectedImportedSourceId,
+    musicSourceState.autoSwitch,
+    musicSourceState.preferredQuality,
+    musicSourceState.importedSources,
+  ])
+
   const handleTrackPress = useCallback(async (track: Track) => {
     try {
       const currentTrack = playerController.getCurrentTrack()
@@ -128,15 +185,15 @@ function AppContent() {
 
       await playerController.insertTrackAndPlay(track, {
         autoPlay: true,
-        quality: '320k',
       })
       const playbackStatus = await playerController.getPlaybackStatus()
       syncPlayerStateToStore(playbackStatus)
       setShowNowPlaying(true)
     } catch (e) {
       console.error('Play error:', e)
+      Alert.alert('播放失败', getReadablePlayError(e))
     }
-  }, [syncPlayerStateToStore])
+  }, [getReadablePlayError, syncPlayerStateToStore])
 
   const handleLeaderboardPress = useCallback(async(board: LeaderboardBoardItem) => {
     try {
@@ -195,15 +252,15 @@ function AppContent() {
     try {
       await playerController.playFromPlaylist(detailView.tracks, 0, {
         autoPlay: true,
-        quality: '320k',
       })
       const playbackStatus = await playerController.getPlaybackStatus()
       syncPlayerStateToStore(playbackStatus)
       setShowNowPlaying(true)
     } catch (e) {
       console.error('Play all error:', e)
+      Alert.alert('播放失败', getReadablePlayError(e))
     }
-  }, [detailView, syncPlayerStateToStore])
+  }, [detailView, getReadablePlayError, syncPlayerStateToStore])
 
   const handlePlayAll = useCallback(() => {
     if (!detailView || detailView.tracks.length === 0) return
@@ -286,6 +343,35 @@ function AppContent() {
         </View>
       )}
 
+      {isResolvingTrack && !showNowPlaying && (
+        <View
+          style={[
+            styles.resolveHintOverlay,
+            {
+              bottom: Math.max(insets.bottom, 16) + (
+                shouldHideTabBar ? 64 : CAPSULE_BOTTOM_MARGIN + CAPSULE_TAB_HEIGHT + 64
+              ),
+            },
+          ]}
+          pointerEvents="none"
+        >
+          <View
+            style={[
+              styles.resolveHintCard,
+              {
+                backgroundColor: colors.surfaceElevated,
+                borderColor: colors.separator,
+              },
+            ]}
+          >
+            <ActivityIndicator size="small" color={colors.accent} />
+            <Text style={[styles.resolveHintText, { color: colors.textSecondary }]} numberOfLines={2}>
+              {resolvingHint}
+            </Text>
+          </View>
+        </View>
+      )}
+
       {/* 条形 Mini 播放器 - 位于 TabBar 上方 */}
       <View
         style={{
@@ -328,6 +414,30 @@ const styles = StyleSheet.create({
   },
   loadingText: {
     fontSize: 14,
+    fontWeight: '600',
+  },
+  resolveHintOverlay: {
+    position: 'absolute',
+    left: 0,
+    right: 0,
+    alignItems: 'center',
+    zIndex: 70,
+    paddingHorizontal: 24,
+  },
+  resolveHintCard: {
+    minHeight: 36,
+    maxWidth: 340,
+    borderRadius: 18,
+    borderWidth: StyleSheet.hairlineWidth,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
+  resolveHintText: {
+    flex: 1,
+    fontSize: 12,
     fontWeight: '600',
   },
 })

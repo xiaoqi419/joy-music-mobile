@@ -11,6 +11,7 @@ import React, {
   useState,
 } from 'react';
 import {
+  ActivityIndicator,
   View,
   Text,
   StyleSheet,
@@ -125,10 +126,21 @@ export default function NowPlaying({ onClose }: NowPlayingProps) {
   const lyricsBtnAnim = useRef(new Animated.Value(0)).current;
   const queueSheetAnim = useRef(new Animated.Value(0)).current;
   const [queueSheetVisible, setQueueSheetVisible] = useState(false);
+  const [isResolvingTrack, setIsResolvingTrack] = useState(() => playerController.isResolvingTrack());
+  const [resolvingHint, setResolvingHint] = useState(() => playerController.getResolvingHint());
   const currentPlayMode = useMemo(
     () => getPlayModeFromState(repeatMode, shuffleMode),
     [repeatMode, shuffleMode],
   )
+
+  useEffect(() => {
+    const unsubscribeResolving = playerController.onResolvingChange(setIsResolvingTrack);
+    const unsubscribeHint = playerController.onResolvingHintChange(setResolvingHint);
+    return () => {
+      unsubscribeResolving();
+      unsubscribeHint();
+    };
+  }, []);
 
   /** 播放时启动匀速旋转，暂停时停在当前角度 */
   useEffect(() => {
@@ -278,7 +290,6 @@ export default function NowPlaying({ onClose }: NowPlayingProps) {
     try {
       await playerController.playFromPlaylist(queue, index, {
         autoPlay: true,
-        quality: '320k',
       });
       syncPlayerSnapshotToStore()
       closeQueueSheet();
@@ -386,6 +397,26 @@ export default function NowPlaying({ onClose }: NowPlayingProps) {
         end={{ x: 0.5, y: 1 }}
         style={StyleSheet.absoluteFill}
       />
+
+      {isResolvingTrack && (
+        <View style={styles.bufferingOverlay} pointerEvents="none">
+          <View
+            style={[
+              styles.bufferingCard,
+              {
+                backgroundColor: isDark ? 'rgba(24,24,28,0.82)' : 'rgba(255,255,255,0.88)',
+                borderColor: colors.separator,
+              },
+            ]}
+          >
+            <ActivityIndicator size="small" color={colors.accent} />
+            <Text style={[styles.bufferingTitle, { color: colors.text }]}>缓冲中...</Text>
+            <Text style={[styles.bufferingDesc, { color: colors.textSecondary }]} numberOfLines={2}>
+              {resolvingHint}
+            </Text>
+          </View>
+        </View>
+      )}
 
       {/* ── 顶部栏 ── */}
       <View style={[styles.headerBlock, { paddingTop: insets.top + spacing.xs }]}>
@@ -849,6 +880,29 @@ const styles = StyleSheet.create({
   backdropImage: {
     ...StyleSheet.absoluteFillObject,
     opacity: 0.32,
+  },
+  bufferingOverlay: {
+    ...StyleSheet.absoluteFillObject,
+    zIndex: 260,
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: spacing.lg,
+  },
+  bufferingCard: {
+    minWidth: 174,
+    borderRadius: borderRadius.lg,
+    borderWidth: StyleSheet.hairlineWidth,
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.sm + 2,
+    alignItems: 'center',
+    gap: spacing.xs,
+  },
+  bufferingTitle: {
+    fontSize: fontSize.callout,
+    fontWeight: '700',
+  },
+  bufferingDesc: {
+    fontSize: fontSize.caption1,
   },
   headerBlock: {
     paddingHorizontal: spacing.md,

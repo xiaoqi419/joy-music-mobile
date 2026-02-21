@@ -1,6 +1,6 @@
 /**
  * Music player test component
- * Demonstrates playback functionality with ikun source
+ * Demonstrates playback functionality with Joy source
  */
 
 import React, { useState, useEffect } from 'react'
@@ -19,7 +19,7 @@ const TEST_TRACKS: Track[] = [
     duration: 180000,
     url: '',
     coverUrl: 'https://via.placeholder.com/300',
-    // ikun specific fields
+    // Joy specific fields
     source: 'kw',
     songmid: 'test_song_1',
     hash: 'test_hash_1',
@@ -86,7 +86,6 @@ export default function PlayerTestComponent() {
 
       await playerController.playTrack(track, {
         autoPlay: true,
-        quality: '320k',
       })
     } catch (err) {
       const errorMsg = err instanceof Error ? err.message : 'Error playing track'

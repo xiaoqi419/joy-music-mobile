@@ -1,6 +1,6 @@
 /**
  * Mock data for discovery page
- * Used because ikun API doesn't provide search/leaderboard/songlist endpoints
+ * Used because Joy API doesn't provide search/leaderboard/songlist endpoints
  */
 
 import { Track } from '../types/music'

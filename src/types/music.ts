@@ -10,7 +10,7 @@ export interface Track {
   duration: number
   url: string
   coverUrl?: string
-  // ikun music source specific fields
+  // Joy 音源适配字段
   source?: string
   songmid?: string
   copyrightId?: string

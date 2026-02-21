@@ -19,7 +19,15 @@ export interface MusicSourceInfo {
   supportedQualities: Quality[]
 }
 
-export type Quality = '128k' | '320k' | 'flac' | 'flac24bit' | 'hires' | 'atmos' | 'master'
+export type Quality =
+  | '128k'
+  | '320k'
+  | 'flac'
+  | 'flac24bit'
+  | 'hires'
+  | 'atmos'
+  | 'atmos_plus'
+  | 'master'
 
 export interface MusicSourceAPI {
   id: string
@@ -47,7 +55,7 @@ export interface MusicSourceAPI {
 class MusicSourceManager {
   private sources: Map<string, MusicSourceAPI> = new Map()
   private sourceInfos: Map<string, MusicSourceInfo> = new Map()
-  private currentSourceId: string = 'ikun'
+  private currentSourceId: string = 'joy'
 
   /**
    * Register a music source

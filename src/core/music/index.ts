@@ -6,21 +6,21 @@
 
 import { Track, Playlist } from '../../types/music'
 import { musicSourceManager, Quality } from './source'
-import { ikunMusicSource } from './sources/ikun'
-import { getMusicUrl, getMusicUrlWithRetry, MusicUrlRequest } from './url'
+import { joyMusicSource } from './sources/joy'
+import { getMusicUrl, getMusicUrlWithRetry, MusicUrlProgress, MusicUrlRequest } from './url'
 import { musicUrlCache, clearAllCache } from './cache'
 
 // Initialize music sources on module load
 const initializeMusicSources = () => {
-  musicSourceManager.registerSource(ikunMusicSource, {
-    id: 'ikun',
-    name: 'Ikun Music',
+  musicSourceManager.registerSource(joyMusicSource, {
+    id: 'joy',
+    name: 'Joy Source',
     enabled: true,
-    supportedQualities: ['128k', '320k', 'flac', 'flac24bit', 'hires'],
+    supportedQualities: ['128k', '320k', 'flac', 'flac24bit', 'hires', 'atmos', 'atmos_plus', 'master'],
   })
 
   // Set default source
-  musicSourceManager.setCurrentSource('ikun')
+  musicSourceManager.setCurrentSource('joy')
   console.log('[Music] Music sources initialized')
 }
 
@@ -95,13 +95,15 @@ class MusicManager {
   async getMusicPlayUrl(
     musicInfo: any,
     quality?: Quality,
-    isRefresh?: boolean
+    isRefresh?: boolean,
+    onProgress?: (progress: MusicUrlProgress) => void
   ): Promise<string> {
     return getMusicUrlWithRetry({
       musicId: musicInfo.id || musicInfo.songmid || musicInfo.hash,
       musicInfo,
-      quality: quality || '320k',
+      quality: quality || 'master',
       isRefresh,
+      onProgress,
     }).then(response => response.url)
   }
 

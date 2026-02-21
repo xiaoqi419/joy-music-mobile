@@ -30,7 +30,11 @@ class MusicPlayerController {
   private shuffleMode = false
   private isHandlingTrackFinish = false
   private statusCallbacks: Set<(status: PlaybackStatus) => void> = new Set()
-  private preferredQuality: Quality = '320k'
+  private preferredQuality: Quality = 'master'
+  private pendingResolveCount = 0
+  private resolvingCallbacks: Set<(isResolving: boolean) => void> = new Set()
+  private resolvingHint = '正在获取可播放链接...'
+  private resolvingHintCallbacks: Set<(hint: string) => void> = new Set()
 
   constructor() {
     // Set up player status updates
@@ -54,6 +58,8 @@ class MusicPlayerController {
    * Play a track
    */
   async playTrack(track: Track, config?: PlaybackConfig): Promise<void> {
+    this.beginResolveTrackUrl()
+    this.setResolvingHint('正在获取可播放链接...')
     try {
       console.log(`[PlayerController] Playing track: ${track.title}`)
 
@@ -68,7 +74,9 @@ class MusicPlayerController {
       // Get playback URL from music manager
       const url = await musicManager.getMusicPlayUrl(
         track,
-        config?.quality || this.preferredQuality
+        config?.quality || this.preferredQuality,
+        false,
+        (progress) => this.setResolvingHint(progress.message)
       )
 
       // Play through player engine
@@ -87,6 +95,8 @@ class MusicPlayerController {
     } catch (error) {
       console.error('[PlayerController] Error playing track:', error)
       throw error
+    } finally {
+      this.endResolveTrackUrl()
     }
   }
 
@@ -266,6 +276,7 @@ class MusicPlayerController {
    * Set preferred quality for playback
    */
   setPreferredQuality(quality: Quality): void {
+    if (this.preferredQuality === quality) return
     this.preferredQuality = quality
     console.log(`[PlayerController] Preferred quality set to: ${quality}`)
   }
@@ -498,6 +509,72 @@ class MusicPlayerController {
    */
   getCurrentSource(): string {
     return musicManager.getCurrentSource()
+  }
+
+  /**
+   * 订阅“正在解析播放链接”状态，用于 UI 展示缓冲提示。
+   */
+  onResolvingChange(callback: (isResolving: boolean) => void): () => void {
+    this.resolvingCallbacks.add(callback)
+    callback(this.isResolvingTrack())
+    return () => {
+      this.resolvingCallbacks.delete(callback)
+    }
+  }
+
+  /**
+   * 订阅链接解析提示文案，用于展示当前降级重试进度。
+   */
+  onResolvingHintChange(callback: (hint: string) => void): () => void {
+    this.resolvingHintCallbacks.add(callback)
+    callback(this.resolvingHint)
+    return () => {
+      this.resolvingHintCallbacks.delete(callback)
+    }
+  }
+
+  /**
+   * 当前是否仍在解析歌曲播放链接。
+   */
+  isResolvingTrack(): boolean {
+    return this.pendingResolveCount > 0
+  }
+
+  getResolvingHint(): string {
+    return this.resolvingHint
+  }
+
+  private beginResolveTrackUrl(): void {
+    this.pendingResolveCount += 1
+    this.emitResolvingState()
+  }
+
+  private endResolveTrackUrl(): void {
+    this.pendingResolveCount = Math.max(0, this.pendingResolveCount - 1)
+    this.emitResolvingState()
+  }
+
+  private emitResolvingState(): void {
+    const isResolving = this.isResolvingTrack()
+    for (const callback of this.resolvingCallbacks) {
+      try {
+        callback(isResolving)
+      } catch (error) {
+        console.error('[PlayerController] Error in resolving callback:', error)
+      }
+    }
+  }
+
+  private setResolvingHint(hint: string): void {
+    if (!hint || this.resolvingHint === hint) return
+    this.resolvingHint = hint
+    for (const callback of this.resolvingHintCallbacks) {
+      try {
+        callback(hint)
+      } catch (error) {
+        console.error('[PlayerController] Error in resolving hint callback:', error)
+      }
+    }
   }
 }
 
