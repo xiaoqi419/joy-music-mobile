@@ -7,7 +7,12 @@
 import { Track, Playlist } from '../../types/music'
 import { musicSourceManager, Quality } from './source'
 import { joyMusicSource } from './sources/joy'
-import { getMusicUrl, getMusicUrlWithRetry, MusicUrlProgress, MusicUrlRequest } from './url'
+import {
+  getMusicUrl,
+  getMusicUrlWithRetry,
+  MusicUrlProgress,
+  MusicUrlResponse,
+} from './url'
 import { musicUrlCache, clearAllCache } from './cache'
 
 // Initialize music sources on module load
@@ -98,13 +103,30 @@ class MusicManager {
     isRefresh?: boolean,
     onProgress?: (progress: MusicUrlProgress) => void
   ): Promise<string> {
+    return this.resolveMusicPlayUrl(
+      musicInfo,
+      quality,
+      isRefresh,
+      onProgress,
+    ).then(response => response.url)
+  }
+
+  /**
+   * Resolve playable URL and return response metadata.
+   */
+  async resolveMusicPlayUrl(
+    musicInfo: any,
+    quality?: Quality,
+    isRefresh?: boolean,
+    onProgress?: (progress: MusicUrlProgress) => void
+  ): Promise<MusicUrlResponse> {
     return getMusicUrlWithRetry({
       musicId: musicInfo.id || musicInfo.songmid || musicInfo.hash,
       musicInfo,
       quality: quality || 'master',
       isRefresh,
       onProgress,
-    }).then(response => response.url)
+    })
   }
 
   /**

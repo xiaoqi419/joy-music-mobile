@@ -34,6 +34,8 @@ import { useTheme, spacing, fontSize, borderRadius } from '../../theme';
 import { usePlayerStatus } from '../../hooks/usePlayerStatus';
 import { useSwipeDownClose } from '../../hooks/useSwipeDownClose';
 import { playerController, type PlayMode } from '../../core/player';
+import type { Quality } from '../../core/music';
+import { ALL_QUALITIES } from '../../core/config/musicSource';
 import { getLyric, LyricData } from '../../core/lyric';
 import LyricsView from '../../components/common/LyricsView';
 import type { RootState } from '../../store';
@@ -43,6 +45,17 @@ const SCREEN_HEIGHT = Dimensions.get('window').height;
 /** 封面视图模式下的封面直径 */
 const COVER_SIZE_LG = Math.min(320, SCREEN_WIDTH - 72);
 const QUEUE_SHEET_HEIGHT = Math.min(560, SCREEN_HEIGHT * 0.66);
+const QUALITY_PRIORITY: Quality[] = ['master', 'atmos_plus', 'atmos', 'hires', 'flac24bit', 'flac', '320k', '128k'];
+const QUALITY_LABELS: Record<Quality, string> = {
+  master: '母带',
+  atmos_plus: '全景增强',
+  atmos: '全景环绕',
+  hires: '高解析',
+  flac24bit: '24位无损',
+  flac: '无损',
+  '320k': '高品质',
+  '128k': '标准',
+};
 
 function getPlayModeFromState(
   repeatMode: RootState['player']['repeatMode'],
@@ -97,6 +110,9 @@ export default function NowPlaying({ onClose }: NowPlayingProps) {
   const queueCurrentIndex = useSelector((state: RootState) => state.player.currentIndex);
   const repeatMode = useSelector((state: RootState) => state.player.repeatMode);
   const shuffleMode = useSelector((state: RootState) => state.player.shuffleMode);
+  const preferredQuality = useSelector((state: RootState) => state.musicSource.preferredQuality);
+  const importedSources = useSelector((state: RootState) => state.musicSource.importedSources);
+  const selectedImportedSourceId = useSelector((state: RootState) => state.musicSource.selectedImportedSourceId);
 
   /* ── 视图切换 ── */
   const [activeTab, setActiveTab] = useState<ViewTab>('cover');
@@ -128,19 +144,40 @@ export default function NowPlaying({ onClose }: NowPlayingProps) {
   const [queueSheetVisible, setQueueSheetVisible] = useState(false);
   const [isResolvingTrack, setIsResolvingTrack] = useState(() => playerController.isResolvingTrack());
   const [resolvingHint, setResolvingHint] = useState(() => playerController.getResolvingHint());
+  const [resolvedQuality, setResolvedQuality] = useState<Quality | null>(() => playerController.getCurrentResolvedQuality());
+  const [qualityMenuVisible, setQualityMenuVisible] = useState(false);
   const currentPlayMode = useMemo(
     () => getPlayModeFromState(repeatMode, shuffleMode),
     [repeatMode, shuffleMode],
   )
 
+  const selectedSourceConfig = useMemo(
+    () => importedSources.find((item) => item.id === selectedImportedSourceId),
+    [importedSources, selectedImportedSourceId],
+  );
+  const currentTrackPlatform = (currentTrack?.source || 'kw').toLowerCase();
+  const availableQualities = useMemo(() => {
+    const platformQualities = selectedSourceConfig?.platforms?.[currentTrackPlatform]?.qualitys;
+    const raw = platformQualities?.length ? platformQualities : ALL_QUALITIES;
+    const ordered = QUALITY_PRIORITY.filter((item) => raw.includes(item));
+    return ordered.length ? ordered : raw;
+  }, [selectedSourceConfig, currentTrackPlatform]);
+  const qualityDisplay = QUALITY_LABELS[resolvedQuality || preferredQuality];
+
   useEffect(() => {
     const unsubscribeResolving = playerController.onResolvingChange(setIsResolvingTrack);
     const unsubscribeHint = playerController.onResolvingHintChange(setResolvingHint);
+    const unsubscribeQuality = playerController.onResolvedQualityChange(setResolvedQuality);
     return () => {
       unsubscribeResolving();
       unsubscribeHint();
+      unsubscribeQuality();
     };
   }, []);
+
+  useEffect(() => {
+    setQualityMenuVisible(false);
+  }, [activeTab, queueSheetVisible, currentTrack?.id]);
 
   /** 播放时启动匀速旋转，暂停时停在当前角度 */
   useEffect(() => {
@@ -258,6 +295,29 @@ export default function NowPlaying({ onClose }: NowPlayingProps) {
       },
     })
   }, [dispatch])
+
+  const handleSelectQuality = useCallback(async(nextQuality: Quality) => {
+    setQualityMenuVisible(false);
+    dispatch({ type: 'MUSIC_SOURCE_SET_QUALITY', payload: nextQuality });
+
+    if (!currentTrack) return;
+
+    const resumePosition = position;
+    const shouldAutoPlay = isPlaying;
+    try {
+      await playerController.playTrack(currentTrack, {
+        autoPlay: shouldAutoPlay,
+        quality: nextQuality,
+      });
+      if (resumePosition > 0) {
+        await playerController.seek(resumePosition);
+      }
+      syncPlayerSnapshotToStore();
+    } catch (error) {
+      console.error('Change quality error:', error);
+      Alert.alert('切换音质失败', error instanceof Error ? error.message : '请稍后重试');
+    }
+  }, [currentTrack, dispatch, isPlaying, position, syncPlayerSnapshotToStore]);
 
   const openQueueSheet = useCallback(() => {
     if (!queue.length) {
@@ -445,15 +505,87 @@ export default function NowPlaying({ onClose }: NowPlayingProps) {
               },
             ]}
           >
-            <Text style={[styles.trackTitle, { color: colors.text }]} numberOfLines={2}>
-              {currentTrack.title}
-            </Text>
-            <Text style={[styles.trackArtist, { color: colors.textSecondary }]} numberOfLines={1}>
-              {currentTrack.artist}
-            </Text>
-            <Text style={[styles.trackMeta, { color: colors.textTertiary }]} numberOfLines={1}>
-              {subMeta}
-            </Text>
+            <View style={styles.metaCardRow}>
+              <View style={styles.metaMain}>
+                <Text style={[styles.trackTitle, { color: colors.text }]} numberOfLines={2}>
+                  {currentTrack.title}
+                </Text>
+                <Text style={[styles.trackArtist, { color: colors.textSecondary }]} numberOfLines={1}>
+                  {currentTrack.artist}
+                </Text>
+                <Text style={[styles.trackMeta, { color: colors.textTertiary }]} numberOfLines={1}>
+                  {subMeta}
+                </Text>
+              </View>
+
+              <View style={styles.qualitySelectorWrap}>
+                <TouchableOpacity
+                  style={[
+                    styles.qualitySelectorBtn,
+                    {
+                      backgroundColor: isDark ? 'rgba(255,255,255,0.1)' : 'rgba(0,0,0,0.06)',
+                      borderColor: colors.separator,
+                    },
+                  ]}
+                  activeOpacity={0.78}
+                  onPress={() => setQualityMenuVisible((value) => !value)}
+                >
+                  <Text style={[styles.qualitySelectorText, { color: colors.textSecondary }]} numberOfLines={1}>
+                    {qualityDisplay}
+                  </Text>
+                  <Ionicons
+                    name={qualityMenuVisible ? 'chevron-up' : 'chevron-down'}
+                    size={12}
+                    color={colors.textSecondary}
+                  />
+                </TouchableOpacity>
+
+                {qualityMenuVisible && (
+                  <View
+                    style={[
+                      styles.qualityMenu,
+                      {
+                        backgroundColor: isDark ? '#181A20' : '#FFFFFF',
+                        borderColor: colors.separator,
+                      },
+                    ]}
+                  >
+                    {availableQualities.map((quality) => {
+                      const isActive = quality === (resolvedQuality || preferredQuality);
+                      return (
+                        <TouchableOpacity
+                          key={quality}
+                          style={[
+                            styles.qualityMenuItem,
+                            isActive
+                              ? { backgroundColor: isDark ? 'rgba(10,132,255,0.15)' : 'rgba(0,122,255,0.1)' }
+                              : null,
+                          ]}
+                          activeOpacity={0.75}
+                          onPress={() => void handleSelectQuality(quality)}
+                        >
+                          <Text
+                            style={[
+                              styles.qualityMenuText,
+                              {
+                                color: isActive ? colors.accent : colors.text,
+                              },
+                            ]}
+                          >
+                            {QUALITY_LABELS[quality]}
+                          </Text>
+                          <View style={styles.qualityMenuMarkRow}>
+                            {isActive && (
+                              <Ionicons name="checkmark" size={14} color={colors.accent} />
+                            )}
+                          </View>
+                        </TouchableOpacity>
+                      );
+                    })}
+                  </View>
+                )}
+              </View>
+            </View>
           </View>
         )}
 
@@ -935,6 +1067,63 @@ const styles = StyleSheet.create({
     borderWidth: StyleSheet.hairlineWidth,
     paddingHorizontal: spacing.md,
     paddingVertical: spacing.sm + 2,
+  },
+  metaCardRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.md,
+  },
+  metaMain: {
+    flex: 1,
+    minHeight: 54,
+  },
+  qualitySelectorWrap: {
+    position: 'relative',
+    alignSelf: 'center',
+  },
+  qualitySelectorBtn: {
+    minWidth: 72,
+    minHeight: 28,
+    borderRadius: borderRadius.full,
+    borderWidth: StyleSheet.hairlineWidth,
+    paddingLeft: 12,
+    paddingRight: 10,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'flex-start',
+    gap: 6,
+  },
+  qualitySelectorText: {
+    fontSize: fontSize.caption1,
+    fontWeight: '700',
+  },
+  qualityMenu: {
+    position: 'absolute',
+    top: 34,
+    right: 0,
+    minWidth: 110,
+    borderRadius: borderRadius.md,
+    borderWidth: StyleSheet.hairlineWidth,
+    overflow: 'hidden',
+    zIndex: 20,
+  },
+  qualityMenuItem: {
+    minHeight: 34,
+    paddingHorizontal: spacing.sm,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+  },
+  qualityMenuText: {
+    fontSize: fontSize.caption1,
+    fontWeight: '600',
+  },
+  qualityMenuMarkRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    minWidth: 24,
+    justifyContent: 'flex-end',
   },
   /* ── 内容区（封面 / 歌词共享） ── */
   contentArea: {

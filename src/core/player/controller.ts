@@ -31,10 +31,12 @@ class MusicPlayerController {
   private isHandlingTrackFinish = false
   private statusCallbacks: Set<(status: PlaybackStatus) => void> = new Set()
   private preferredQuality: Quality = 'master'
+  private currentResolvedQuality: Quality | null = null
   private pendingResolveCount = 0
   private resolvingCallbacks: Set<(isResolving: boolean) => void> = new Set()
   private resolvingHint = '正在获取可播放链接...'
   private resolvingHintCallbacks: Set<(hint: string) => void> = new Set()
+  private resolvedQualityCallbacks: Set<(quality: Quality | null) => void> = new Set()
 
   constructor() {
     // Set up player status updates
@@ -72,12 +74,14 @@ class MusicPlayerController {
       }
 
       // Get playback URL from music manager
-      const url = await musicManager.getMusicPlayUrl(
+      const playUrlResponse = await musicManager.resolveMusicPlayUrl(
         track,
         config?.quality || this.preferredQuality,
         false,
         (progress) => this.setResolvingHint(progress.message)
       )
+      const url = playUrlResponse.url
+      this.setCurrentResolvedQuality(playUrlResponse.quality)
 
       // Play through player engine
       await expoAVPlayer.play(track, url, {
@@ -229,6 +233,7 @@ class MusicPlayerController {
       await expoAVPlayer.stop()
       this.isPlaying = false
       this.currentTrack = null
+      this.setCurrentResolvedQuality(null)
       console.log('[PlayerController] Stopped')
     } catch (error) {
       console.error('[PlayerController] Error stopping:', error)
@@ -534,6 +539,17 @@ class MusicPlayerController {
   }
 
   /**
+   * 订阅当前实际播放音质（最终成功拿到链接的音质）。
+   */
+  onResolvedQualityChange(callback: (quality: Quality | null) => void): () => void {
+    this.resolvedQualityCallbacks.add(callback)
+    callback(this.currentResolvedQuality)
+    return () => {
+      this.resolvedQualityCallbacks.delete(callback)
+    }
+  }
+
+  /**
    * 当前是否仍在解析歌曲播放链接。
    */
   isResolvingTrack(): boolean {
@@ -542,6 +558,10 @@ class MusicPlayerController {
 
   getResolvingHint(): string {
     return this.resolvingHint
+  }
+
+  getCurrentResolvedQuality(): Quality | null {
+    return this.currentResolvedQuality
   }
 
   private beginResolveTrackUrl(): void {
@@ -573,6 +593,18 @@ class MusicPlayerController {
         callback(hint)
       } catch (error) {
         console.error('[PlayerController] Error in resolving hint callback:', error)
+      }
+    }
+  }
+
+  private setCurrentResolvedQuality(quality: Quality | null): void {
+    if (this.currentResolvedQuality === quality) return
+    this.currentResolvedQuality = quality
+    for (const callback of this.resolvedQualityCallbacks) {
+      try {
+        callback(quality)
+      } catch (error) {
+        console.error('[PlayerController] Error in resolved quality callback:', error)
       }
     }
   }

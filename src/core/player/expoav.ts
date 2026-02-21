@@ -144,8 +144,26 @@ class ExpoAudioPlayerWrapper {
 
   private updateLockScreen(track: Track): void {
     if (!this.player || Platform.OS !== 'ios') return
+    const playerWithLockScreen = this.player as AudioPlayer & {
+      setActiveForLockScreen?: (
+        active: boolean,
+        metadata: {
+          title: string
+          artist: string
+          albumTitle: string
+          artworkUrl: string
+        },
+        controls: {
+          showSeekBackward: boolean
+          showSeekForward: boolean
+        }
+      ) => void
+    }
+    if (typeof playerWithLockScreen.setActiveForLockScreen !== 'function') {
+      return
+    }
     try {
-      this.player.setActiveForLockScreen(
+      playerWithLockScreen.setActiveForLockScreen(
         true,
         {
           title: track.title,
@@ -165,8 +183,14 @@ class ExpoAudioPlayerWrapper {
 
   private clearLockScreen(): void {
     if (!this.player || Platform.OS !== 'ios') return
+    const playerWithLockScreen = this.player as AudioPlayer & {
+      clearLockScreenControls?: () => void
+    }
+    if (typeof playerWithLockScreen.clearLockScreenControls !== 'function') {
+      return
+    }
     try {
-      this.player.clearLockScreenControls()
+      playerWithLockScreen.clearLockScreenControls()
     } catch (error) {
       console.warn('[ExpoAudioPlayer] Failed to clear lock screen controls:', error)
     }
