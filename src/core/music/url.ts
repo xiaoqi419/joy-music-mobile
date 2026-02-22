@@ -44,26 +44,75 @@ const QUALITY_FALLBACK: Quality[] = [
 ]
 
 /**
- * Select the best available quality
+ * Read per-track quality capabilities from track metadata (e.g. _types).
+ */
+const getTrackAvailableQualities = (musicInfo: any): Quality[] => {
+  const rawTypes = musicInfo?._types
+  if (!rawTypes || typeof rawTypes !== 'object') return []
+
+  const result: Quality[] = []
+  for (const quality of QUALITY_FALLBACK) {
+    if ((rawTypes as Record<string, unknown>)[quality]) {
+      result.push(quality)
+    }
+  }
+  return result
+}
+
+/**
+ * Merge source-supported qualities and track-supported qualities.
+ */
+const getEffectiveQualities = (
+  sourceQualities: Quality[],
+  trackQualities: Quality[]
+): Quality[] => {
+  if (!trackQualities.length) return sourceQualities
+  const trackSet = new Set(trackQualities)
+  const filtered = QUALITY_FALLBACK.filter(
+    (quality) => trackSet.has(quality) && sourceQualities.includes(quality)
+  )
+  return filtered.length ? filtered : sourceQualities
+}
+
+/**
+ * Build quality attempts with strict downward fallback.
+ */
+const getPlayQualityAttempts = (
+  requestedQuality: Quality | undefined,
+  supportedQualities: Quality[]
+): Quality[] => {
+  const orderedSupported = QUALITY_FALLBACK.filter((quality) =>
+    supportedQualities.includes(quality)
+  )
+  if (!orderedSupported.length) {
+    return supportedQualities[0] ? [supportedQualities[0]] : ['128k']
+  }
+
+  if (!requestedQuality) {
+    return orderedSupported
+  }
+
+  const requestedIndex = QUALITY_FALLBACK.indexOf(requestedQuality)
+  if (requestedIndex < 0) {
+    return orderedSupported
+  }
+
+  const degradeAttempts = QUALITY_FALLBACK
+    .slice(requestedIndex)
+    .filter((quality) => orderedSupported.includes(quality))
+
+  return degradeAttempts.length ? degradeAttempts : orderedSupported
+}
+
+/**
+ * Select the best available quality.
  */
 export const getPlayQuality = (
   requestedQuality: Quality | undefined,
   supportedQualities: Quality[]
 ): Quality => {
-  // If specific quality is requested and available, use it
-  if (requestedQuality && supportedQualities.includes(requestedQuality)) {
-    return requestedQuality
-  }
-
-  // Otherwise, use fallback order
-  for (const quality of QUALITY_FALLBACK) {
-    if (supportedQualities.includes(quality)) {
-      return quality
-    }
-  }
-
-  // Last resort: use the first supported quality
-  return supportedQualities[0] || '128k'
+  const attempts = getPlayQualityAttempts(requestedQuality, supportedQualities)
+  return attempts[0] || supportedQualities[0] || '128k'
 }
 
 /**
@@ -83,35 +132,52 @@ export const getMusicUrl = async(request: MusicUrlRequest): Promise<MusicUrlResp
 
   try {
     const requestedQuality = quality || 'master'
+    const trackSource = String(musicInfo?.source || '').toLowerCase()
+    // TX 链接时效通常更短，命中陈旧缓存后会出现“有链接但无法播放”。
+    const shouldSkipCache = trackSource === 'tx'
 
-    // Step 1: Check cache if not refreshing
-    if (!isRefresh) {
-      const cachedUrl = await musicUrlCache.getMusicUrl(musicId, requestedQuality)
-      if (cachedUrl) {
-        console.log(`[MusicUrl] Using cached URL for ${musicId}`)
-        return {
-          url: cachedUrl,
-          quality: requestedQuality,
-          musicId,
-        }
-      }
-    }
-
-    // Step 2: Get current source
+    // Step 1: Get current source
     const source = musicSourceManager.getCurrentSource()
     if (!source) {
       throw new Error('No music source available')
     }
 
-    // Step 3: Get supported qualities
-    const supportedQualities = musicSourceManager.getSourceQualities(
+    // Step 2: Resolve effective qualities (source + track capabilities)
+    const sourceQualities = musicSourceManager.getSourceQualities(
       musicSourceManager.getCurrentSourceId()
     )
+    const trackQualities = getTrackAvailableQualities(musicInfo)
+    // TX 的 _types 在部分歌曲上不稳定，可能把可用音质误判得过窄（只剩 flac24bit）。
+    // 这里对 TX 始终按平台全量音质链路尝试，避免被单曲元数据卡死。
+    const availableQualities = trackSource === 'tx'
+      ? sourceQualities
+      : getEffectiveQualities(sourceQualities, trackQualities)
+    const qualityAttempts = getPlayQualityAttempts(requestedQuality, availableQualities)
+    const targetQuality = qualityAttempts[0] || '128k'
 
-    // Step 4: Select quality
-    const targetQuality = getPlayQuality(requestedQuality, supportedQualities)
+    if (trackSource !== 'tx' && trackQualities.length && !trackQualities.includes(requestedQuality)) {
+      console.log(
+        `[MusicUrl] ${musicId} unavailable in ${requestedQuality}, fallback to ${targetQuality}`
+      )
+    }
+
+    // Step 3: Check cache if not refreshing
+    if (!isRefresh && !shouldSkipCache) {
+      const cachedUrl = await musicUrlCache.getMusicUrl(musicId, targetQuality)
+      if (cachedUrl) {
+        console.log(`[MusicUrl] Using cached URL for ${musicId}`)
+        return {
+          url: cachedUrl,
+          quality: targetQuality,
+          musicId,
+        }
+      }
+    }
+
+    // Step 4: Request URL
+    const retrySuffix = totalAttempts > 1 ? `（网络重试 ${attempt}/${totalAttempts}）` : ''
     onProgress?.({
-      message: `正在尝试 ${targetQuality} 音质（${attempt}/${totalAttempts}）`,
+      message: `正在尝试 ${targetQuality} 音质${retrySuffix}`,
       quality: targetQuality,
       attempt,
       totalAttempts,
@@ -128,40 +194,37 @@ export const getMusicUrl = async(request: MusicUrlRequest): Promise<MusicUrlResp
       console.warn(`[MusicUrl] Failed with ${targetQuality}, trying fallback qualities`)
 
       let fallbackUrl: string | null = null
-      for (const fallbackQuality of QUALITY_FALLBACK) {
-        if (fallbackQuality === targetQuality) {
-          continue
-        }
+      for (const fallbackQuality of qualityAttempts.slice(1)) {
+        const fallbackRetrySuffix = totalAttempts > 1 ? `（网络重试 ${attempt}/${totalAttempts}）` : ''
+        onProgress?.({
+          message: `正在降级尝试 ${fallbackQuality} 音质${fallbackRetrySuffix}`,
+          quality: fallbackQuality,
+          attempt,
+          totalAttempts,
+        })
+        try {
+          console.log(`[MusicUrl] Trying fallback quality: ${fallbackQuality}`)
+          fallbackUrl = await source.getMusicUrl(musicInfo, fallbackQuality)
+          console.log(`[MusicUrl] Success with fallback quality: ${fallbackQuality}`)
 
-        if (supportedQualities.includes(fallbackQuality)) {
-          onProgress?.({
-            message: `正在降级尝试 ${fallbackQuality} 音质（${attempt}/${totalAttempts}）`,
-            quality: fallbackQuality,
-            attempt,
-            totalAttempts,
-          })
-          try {
-            console.log(`[MusicUrl] Trying fallback quality: ${fallbackQuality}`)
-            fallbackUrl = await source.getMusicUrl(musicInfo, fallbackQuality)
-            console.log(`[MusicUrl] Success with fallback quality: ${fallbackQuality}`)
-
-            // Cache the fallback quality
+          // Cache the fallback quality
+          if (!shouldSkipCache) {
             await musicUrlCache.saveMusicUrl(
               musicId,
               fallbackQuality,
               fallbackUrl,
               musicSourceManager.getCurrentSourceId()
             )
-
-            return {
-              url: fallbackUrl,
-              quality: fallbackQuality,
-              musicId,
-            }
-          } catch (fallbackError) {
-            console.warn(`[MusicUrl] Fallback quality ${fallbackQuality} failed`)
-            continue
           }
+
+          return {
+            url: fallbackUrl,
+            quality: fallbackQuality,
+            musicId,
+          }
+        } catch (fallbackError) {
+          console.warn(`[MusicUrl] Fallback quality ${fallbackQuality} failed`)
+          continue
         }
       }
 
@@ -170,12 +233,14 @@ export const getMusicUrl = async(request: MusicUrlRequest): Promise<MusicUrlResp
     }
 
     // Step 6: Cache the URL
-    await musicUrlCache.saveMusicUrl(
-      musicId,
-      targetQuality,
-      url,
-      musicSourceManager.getCurrentSourceId()
-    )
+    if (!shouldSkipCache) {
+      await musicUrlCache.saveMusicUrl(
+        musicId,
+        targetQuality,
+        url,
+        musicSourceManager.getCurrentSourceId()
+      )
+    }
 
     console.log(`[MusicUrl] Successfully fetched URL for ${musicId}`)
     return {
@@ -213,10 +278,12 @@ export const getMusicUrlWithRetry = async(
         await new Promise(resolve => setTimeout(resolve, delay))
       }
 
+      const requestAttempt = attempt + 1
+      const isRetryAttempt = attempt > 0
       return await getMusicUrl({
         ...request,
-        attempt: attempt + 1,
-        totalAttempts,
+        attempt: isRetryAttempt ? requestAttempt : 1,
+        totalAttempts: isRetryAttempt ? totalAttempts : 1,
       })
     } catch (error) {
       lastError = error instanceof Error ? error : new Error(String(error))
