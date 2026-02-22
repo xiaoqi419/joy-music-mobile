@@ -7,6 +7,7 @@ import { DiscoverSourceId } from '../../types/discover'
 import { SearchResult, Track } from '../../types/music'
 import { httpRequest, withRetry } from '../discover/http'
 import { wyRequest } from '../discover/wyCrypto'
+import CryptoJS from 'crypto-js'
 
 interface SearchOptions {
   query: string
@@ -99,6 +100,48 @@ const toNumber = (value: unknown, fallback = 0): number => {
 const toDurationMsFromSeconds = (value: unknown): number => Math.max(0, Math.floor(toNumber(value) * 1000))
 
 const toDurationMs = (value: unknown): number => Math.max(0, Math.floor(toNumber(value)))
+
+const TX_SIGN_PART_1_INDEXES = [23, 14, 6, 36, 16, 40, 7, 19]
+const TX_SIGN_PART_2_INDEXES = [16, 1, 32, 12, 19, 27, 8, 5]
+const TX_SIGN_SCRAMBLE_VALUES = [
+  89, 39, 179, 150, 218, 82, 58, 252, 177, 52,
+  186, 123, 120, 64, 242, 133, 143, 161, 121, 179,
+]
+
+const txPickHashByIndexes = (hash: string, indexes: number[]): string =>
+  indexes.map((idx) => hash[idx] || '').join('')
+
+function txBytesToBase64(bytes: number[]): string {
+  const words: number[] = []
+  for (let i = 0; i < bytes.length; i += 1) {
+    words[i >>> 2] = (words[i >>> 2] || 0) | (bytes[i] << (24 - (i % 4) * 8))
+  }
+  const wordArray = CryptoJS.lib.WordArray.create(words, bytes.length)
+  return CryptoJS.enc.Base64.stringify(wordArray).replace(/[\\/+=]/g, '')
+}
+
+function createTxSign(payload: unknown): string {
+  const text = JSON.stringify(payload)
+  const hash = CryptoJS.SHA1(text).toString(CryptoJS.enc.Hex).toUpperCase()
+  const part1 = txPickHashByIndexes(hash, TX_SIGN_PART_1_INDEXES)
+  const part2 = txPickHashByIndexes(hash, TX_SIGN_PART_2_INDEXES)
+  const mixedBytes = TX_SIGN_SCRAMBLE_VALUES.map(
+    (value, index) => value ^ parseInt(hash.slice(index * 2, index * 2 + 2), 16)
+  )
+  const base64Part = txBytesToBase64(mixedBytes)
+  return `zzc${part1}${base64Part}${part2}`.toLowerCase()
+}
+
+function createTxSearchId(): string {
+  const randomInt = (min: number, max: number): number =>
+    Math.floor(Math.random() * (max - min + 1)) + min
+  const e = randomInt(1, 20)
+  const t = e * Number('18014398509481984')
+  const n = randomInt(0, 4194304) * 4294967296
+  const timestamp = Date.now()
+  const r = Math.round(timestamp * 1000) % (24 * 60 * 60 * 1000)
+  return String(t + n + r)
+}
 
 const normalizeKwCover = (value: unknown): string | undefined => {
   const raw = String(value ?? '').trim()
@@ -445,62 +488,80 @@ async function searchWy(query: string, page: number, limit: number): Promise<Sea
 }
 
 async function searchTx(query: string, page: number, limit: number): Promise<SearchTracksPageResult> {
-  const resp = await withRetry(() =>
-    httpRequest('https://u.y.qq.com/cgi-bin/musicu.fcg', {
+  const payload = {
+    comm: {
+      ct: '11',
+      cv: '14090508',
+      v: '14090508',
+      tmeAppID: 'qqmusic',
+      phonetype: 'EBG-AN10',
+      deviceScore: '553.47',
+      devicelevel: '50',
+      newdevicelevel: '20',
+      rom: 'HuaWei/EMOTION/EmotionUI_14.2.0',
+      os_ver: '12',
+      OpenUDID: '0',
+      OpenUDID2: '0',
+      QIMEI36: '0',
+      udid: '0',
+      chid: '0',
+      aid: '0',
+      oaid: '0',
+      taid: '0',
+      tid: '0',
+      wid: '0',
+      uid: '0',
+      sid: '0',
+      modeSwitch: '6',
+      teenMode: '0',
+      ui_mode: '2',
+      nettype: '1020',
+      v4ip: '',
+    },
+    req: {
+      module: 'music.search.SearchCgiService',
+      method: 'DoSearchForQQMusicMobile',
+      param: {
+        search_type: 0,
+        searchid: createTxSearchId(),
+        query,
+        page_num: page,
+        num_per_page: limit,
+        highlight: 0,
+        nqc_flag: 0,
+        multi_zhida: 0,
+        cat: 2,
+        grp: 1,
+        sin: 0,
+        sem: 0,
+      },
+    },
+  }
+
+  const resp = await withRetry(async() => {
+    // 优先走 CeruMusic 当前使用的签名接口，TX 搜索稳定性更高。
+    const sign = createTxSign(payload)
+    const signedResp = await httpRequest('https://u.y.qq.com/cgi-bin/musics.fcg', {
+      method: 'POST',
+      query: { sign },
+      headers: {
+        'User-Agent': 'QQMusic 14090508(android 12)',
+      },
+      body: payload,
+    })
+    if (signedResp.data?.code === 0 && signedResp.data?.req?.code === 0) {
+      return signedResp
+    }
+
+    // 回退旧接口，兼容部分网络环境/节点策略。
+    return httpRequest('https://u.y.qq.com/cgi-bin/musicu.fcg', {
       method: 'POST',
       headers: {
         Referer: 'https://y.qq.com/portal/player.html',
       },
-      body: {
-        comm: {
-          ct: '11',
-          cv: '14090508',
-          v: '14090508',
-          tmeAppID: 'qqmusic',
-          phonetype: 'EBG-AN10',
-          deviceScore: '553.47',
-          devicelevel: '50',
-          newdevicelevel: '20',
-          rom: 'HuaWei/EMOTION/EmotionUI_14.2.0',
-          os_ver: '12',
-          OpenUDID: '0',
-          OpenUDID2: '0',
-          QIMEI36: '0',
-          udid: '0',
-          chid: '0',
-          aid: '0',
-          oaid: '0',
-          taid: '0',
-          tid: '0',
-          wid: '0',
-          uid: '0',
-          sid: '0',
-          modeSwitch: '6',
-          teenMode: '0',
-          ui_mode: '2',
-          nettype: '1020',
-          v4ip: '',
-        },
-        req: {
-          module: 'music.search.SearchCgiService',
-          method: 'DoSearchForQQMusicMobile',
-          param: {
-            search_type: 0,
-            query,
-            page_num: page,
-            num_per_page: limit,
-            highlight: 0,
-            nqc_flag: 0,
-            multi_zhida: 0,
-            cat: 2,
-            grp: 1,
-            sin: 0,
-            sem: 0,
-          },
-        },
-      },
+      body: payload,
     })
-  )
+  })
 
   if (resp.data?.code !== 0 || resp.data?.req?.code !== 0) {
     if (page > 1) {

@@ -125,20 +125,24 @@ function getSupportedQualities(config: ImportedMusicSource, platform: string): Q
 }
 
 function buildQualityAttempts(requestedQuality: Quality, supportedQualities: Quality[]): Quality[] {
-  const attempts: Quality[] = []
-  const pushIfValid = (quality: Quality) => {
-    if (supportedQualities.includes(quality) && !attempts.includes(quality)) {
-      attempts.push(quality)
-    }
+  const orderedSupported = QUALITY_FALLBACK_ORDER.filter((quality) =>
+    supportedQualities.includes(quality)
+  )
+
+  if (!orderedSupported.length) {
+    return supportedQualities[0] ? [supportedQualities[0]] : []
   }
 
-  pushIfValid(requestedQuality)
-  QUALITY_FALLBACK_ORDER.forEach(pushIfValid)
-  if (!attempts.length && supportedQualities[0]) {
-    attempts.push(supportedQualities[0])
+  const requestedIndex = QUALITY_FALLBACK_ORDER.indexOf(requestedQuality)
+  if (requestedIndex < 0) {
+    return orderedSupported
   }
 
-  return attempts
+  const degradeAttempts = QUALITY_FALLBACK_ORDER
+    .slice(requestedIndex)
+    .filter((quality) => orderedSupported.includes(quality))
+
+  return degradeAttempts.length ? degradeAttempts : orderedSupported
 }
 
 function getCandidateSourceConfigs(platform: string): ImportedMusicSource[] {

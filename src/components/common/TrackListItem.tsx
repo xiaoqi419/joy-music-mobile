@@ -62,7 +62,7 @@ export default function TrackListItem({
       )}
 
       {/* Track info */}
-      <View style={styles.info}>
+      <View style={[styles.info, showIndex && styles.infoWithIndex]}>
         <Text
           style={[
             styles.title,
@@ -102,21 +102,23 @@ const styles = StyleSheet.create({
     fontWeight: '500',
   },
   cover: {
-    width: 40,
-    height: 40,
+    width: 46,
+    height: 46,
     borderRadius: borderRadius.sm,
     alignItems: 'center',
     justifyContent: 'center',
     overflow: 'hidden',
-    marginRight: spacing.md,
+    marginRight: spacing.sm,
   },
   coverImage: {
-    width: 40,
-    height: 40,
+    width: 46,
+    height: 46,
   },
   info: {
     flex: 1,
     justifyContent: 'center',
+  },
+  infoWithIndex: {
     marginLeft: spacing.sm,
   },
   title: {
