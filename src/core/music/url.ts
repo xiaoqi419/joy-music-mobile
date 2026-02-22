@@ -5,6 +5,7 @@
 
 import { musicSourceManager, Quality } from './source'
 import { musicUrlCache } from './cache'
+import { audioFileCache } from './audioCache'
 
 export interface MusicUrlRequest {
   musicId: string
@@ -136,6 +137,23 @@ export const getMusicUrl = async(request: MusicUrlRequest): Promise<MusicUrlResp
     // TX 链接时效通常更短，命中陈旧缓存后会出现“有链接但无法播放”。
     const shouldSkipCache = trackSource === 'tx'
 
+    // 优先命中本地音频缓存，避免重复走远端 API。
+    const cachedAudio = await audioFileCache.resolveCachedPlayableUrl(musicId)
+    if (cachedAudio) {
+      console.log(`[AudioCache] Hit local file for ${musicId}`)
+      onProgress?.({
+        message: '已命中本地缓存，正在加载本地文件...',
+        quality: cachedAudio.quality,
+        attempt: 1,
+        totalAttempts: 1,
+      })
+      return {
+        url: cachedAudio.uri,
+        quality: cachedAudio.quality,
+        musicId,
+      }
+    }
+
     // Step 1: Get current source
     const source = musicSourceManager.getCurrentSource()
     if (!source) {
@@ -165,6 +183,14 @@ export const getMusicUrl = async(request: MusicUrlRequest): Promise<MusicUrlResp
     if (!isRefresh && !shouldSkipCache) {
       const cachedUrl = await musicUrlCache.getMusicUrl(musicId, targetQuality)
       if (cachedUrl) {
+        void audioFileCache.cacheFromUrl({
+          musicId,
+          url: cachedUrl,
+          quality: targetQuality,
+          source: String(musicInfo?.source || musicSourceManager.getCurrentSourceId() || ''),
+          title: String(musicInfo?.title || ''),
+          artist: String(musicInfo?.artist || ''),
+        })
         console.log(`[MusicUrl] Using cached URL for ${musicId}`)
         return {
           url: cachedUrl,
@@ -217,6 +243,15 @@ export const getMusicUrl = async(request: MusicUrlRequest): Promise<MusicUrlResp
             )
           }
 
+          void audioFileCache.cacheFromUrl({
+            musicId,
+            url: fallbackUrl,
+            quality: fallbackQuality,
+            source: String(musicInfo?.source || musicSourceManager.getCurrentSourceId() || ''),
+            title: String(musicInfo?.title || ''),
+            artist: String(musicInfo?.artist || ''),
+          })
+
           return {
             url: fallbackUrl,
             quality: fallbackQuality,
@@ -241,6 +276,15 @@ export const getMusicUrl = async(request: MusicUrlRequest): Promise<MusicUrlResp
         musicSourceManager.getCurrentSourceId()
       )
     }
+
+    void audioFileCache.cacheFromUrl({
+      musicId,
+      url,
+      quality: targetQuality,
+      source: String(musicInfo?.source || musicSourceManager.getCurrentSourceId() || ''),
+      title: String(musicInfo?.title || ''),
+      artist: String(musicInfo?.artist || ''),
+    })
 
     console.log(`[MusicUrl] Successfully fetched URL for ${musicId}`)
     return {

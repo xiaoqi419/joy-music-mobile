@@ -5,6 +5,7 @@
 
 import AsyncStorage from '@react-native-async-storage/async-storage'
 import { Quality } from './source'
+import { audioFileCache } from './audioCache'
 
 const CACHE_PREFIX = '@joy_music_'
 const URL_CACHE_PREFIX = `${CACHE_PREFIX}url_`
@@ -173,6 +174,7 @@ export const clearAllCache = async(): Promise<void> => {
   await Promise.all([
     musicUrlCache.clearAllUrlCache(),
     lyricCache.clearAllLyricCache(),
+    audioFileCache.clearAllCachedAudio(),
   ])
   console.log('[Cache] Cleared all cache')
 }

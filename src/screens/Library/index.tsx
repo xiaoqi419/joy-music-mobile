@@ -2,7 +2,7 @@
  * Library screen - user's music collection.
  */
 
-import React, { useCallback, useMemo, useState } from 'react'
+import React, { useCallback, useEffect, useMemo, useState } from 'react'
 import {
   ActivityIndicator,
   Alert,
@@ -33,12 +33,13 @@ import {
   createSourceFromScriptText,
   ImportedMusicSource,
 } from '../../core/config/musicSource'
+import { audioFileCache, formatCacheSize } from '../../core/music/audioCache'
 
 interface LibraryScreenProps {
   onTrackPress?: (track: Track) => void
 }
 
-type LibrarySubPage = 'main' | 'appearance' | 'sources'
+type LibrarySubPage = 'main' | 'appearance' | 'sources' | 'cache'
 type SourceModalMode = 'manual' | 'url'
 
 interface MenuItemProps {
@@ -143,12 +144,18 @@ export default function LibraryScreen({ onTrackPress }: LibraryScreenProps) {
   const [manualApiUrl, setManualApiUrl] = useState('')
   const [manualApiKey, setManualApiKey] = useState('')
   const [importUrl, setImportUrl] = useState('')
+  const [cacheLoading, setCacheLoading] = useState(false)
+  const [cacheEnabled, setCacheEnabled] = useState(true)
+  const [cacheFileCount, setCacheFileCount] = useState(0)
+  const [cacheSizeBytes, setCacheSizeBytes] = useState(0)
 
   const pageTitle = subPage === 'main'
     ? '我的'
     : subPage === 'appearance'
       ? '外观设置'
-      : '自定义源管理'
+      : subPage === 'sources'
+        ? '自定义源管理'
+        : '缓存管理'
 
   const ensureSelected = useCallback((id: string) => {
     if (selectedImportedSourceId) return
@@ -166,6 +173,48 @@ export default function LibraryScreen({ onTrackPress }: LibraryScreenProps) {
   const handleQualityChange = useCallback((quality: Quality) => {
     dispatch({ type: 'MUSIC_SOURCE_SET_QUALITY', payload: quality })
   }, [dispatch])
+
+  const loadAudioCacheStats = useCallback(async(silent = false) => {
+    if (!silent) setCacheLoading(true)
+    try {
+      const stats = await audioFileCache.getStats()
+      setCacheEnabled(stats.enabled)
+      setCacheFileCount(stats.fileCount)
+      setCacheSizeBytes(stats.sizeBytes)
+    } finally {
+      if (!silent) setCacheLoading(false)
+    }
+  }, [])
+
+  const handleToggleAudioCache = useCallback(async(value: boolean) => {
+    setCacheEnabled(value)
+    await audioFileCache.setEnabled(value)
+    void loadAudioCacheStats(true)
+  }, [loadAudioCacheStats])
+
+  const handleClearAudioCache = useCallback(() => {
+    Alert.alert('清空本地缓存', '确认删除所有已缓存歌曲吗？删除后将重新走在线获取。', [
+      { text: '取消', style: 'cancel' },
+      {
+        text: '清空',
+        style: 'destructive',
+        onPress: () => {
+          void (async() => {
+            try {
+              setCacheLoading(true)
+              await audioFileCache.clearAllCachedAudio()
+              await loadAudioCacheStats(true)
+              Alert.alert('已清空', '本地歌曲缓存已删除')
+            } catch (error) {
+              Alert.alert('清空失败', error instanceof Error ? error.message : '请稍后重试')
+            } finally {
+              setCacheLoading(false)
+            }
+          })()
+        },
+      },
+    ])
+  }, [loadAudioCacheStats])
 
   const openCreateSourceModal = useCallback(() => {
     setEditingSourceId('')
@@ -304,6 +353,17 @@ export default function LibraryScreen({ onTrackPress }: LibraryScreenProps) {
     }
   }, [dispatch, ensureSelected])
 
+  useEffect(() => {
+    void loadAudioCacheStats()
+  }, [loadAudioCacheStats])
+
+  useEffect(() => {
+    if (subPage !== 'cache') return
+    void loadAudioCacheStats(true)
+  }, [subPage, loadAudioCacheStats])
+
+  const cacheSummaryText = `${cacheEnabled ? '已开启' : '已关闭'} · ${formatCacheSize(cacheSizeBytes)}`
+
   const panResponder = useMemo(() => PanResponder.create({
     onStartShouldSetPanResponder: () => false,
     onMoveShouldSetPanResponder: (_, gestureState) => {
@@ -345,6 +405,12 @@ export default function LibraryScreen({ onTrackPress }: LibraryScreenProps) {
             title="自定义源管理"
             subtitle={selectedSource ? `当前：${selectedSource.name}` : '未配置音源'}
             onPress={() => setSubPage('sources')}
+          />
+          <SettingCell
+            icon="cloud-download-outline"
+            title="歌曲缓存"
+            subtitle={cacheSummaryText}
+            onPress={() => setSubPage('cache')}
           />
         </View>
       </View>
@@ -540,6 +606,60 @@ export default function LibraryScreen({ onTrackPress }: LibraryScreenProps) {
     </>
   )
 
+  const renderCachePage = () => (
+    <>
+      <View style={styles.section}>
+        <View style={styles.sectionHeader}>
+          <Text style={[styles.sectionTitle, { color: colors.text }]}>缓存策略</Text>
+          <Text style={[styles.sectionSubtitle, { color: colors.textSecondary }]}>{cacheEnabled ? '自动缓存中' : '缓存已关闭'}</Text>
+        </View>
+
+        <View style={[styles.card, { backgroundColor: colors.surface, marginHorizontal: spacing.md }]}>
+          <View style={[styles.switchRow, { borderBottomColor: colors.separator }]}>
+            <View style={styles.rowMeta}>
+              <Text style={[styles.rowTitle, { color: colors.text }]}>开启歌曲缓存</Text>
+              <Text style={[styles.rowDesc, { color: colors.textSecondary }]}>点击播放歌曲后自动下载到本地，下次优先本地播放</Text>
+            </View>
+            <Switch value={cacheEnabled} onValueChange={handleToggleAudioCache} />
+          </View>
+
+          <View style={styles.cacheStatsWrap}>
+            <View style={styles.cacheStatItem}>
+              <Text style={[styles.cacheStatLabel, { color: colors.textSecondary }]}>已缓存歌曲</Text>
+              <Text style={[styles.cacheStatValue, { color: colors.text }]}>{cacheFileCount} 首</Text>
+            </View>
+            <View style={styles.cacheStatItem}>
+              <Text style={[styles.cacheStatLabel, { color: colors.textSecondary }]}>占用空间</Text>
+              <Text style={[styles.cacheStatValue, { color: colors.text }]}>{formatCacheSize(cacheSizeBytes)}</Text>
+            </View>
+          </View>
+        </View>
+      </View>
+
+      <View style={styles.section}>
+        <View style={styles.sectionHeader}>
+          <Text style={[styles.sectionTitle, { color: colors.text }]}>缓存管理</Text>
+          <Text style={[styles.sectionSubtitle, { color: colors.textSecondary }]}>{cacheLoading ? '处理中...' : '可手动清理'}</Text>
+        </View>
+        <View style={[styles.card, { backgroundColor: colors.surface, marginHorizontal: spacing.md }]}>
+          <TouchableOpacity
+            style={styles.dangerAction}
+            activeOpacity={0.78}
+            onPress={handleClearAudioCache}
+            disabled={cacheLoading}
+          >
+            {cacheLoading
+              ? <ActivityIndicator size="small" color="#FF3B30" />
+              : <Ionicons name="trash-outline" size={16} color="#FF3B30" />}
+            <Text style={styles.dangerActionText}>删除本地缓存</Text>
+          </TouchableOpacity>
+        </View>
+      </View>
+
+      <Text style={[styles.swipeHint, { color: colors.textTertiary }]}>左侧边缘右滑可返回</Text>
+    </>
+  )
+
   return (
     <View style={[styles.container, { backgroundColor: colors.background }]} {...panResponder.panHandlers}>
       <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={{ paddingBottom: BOTTOM_INSET + spacing.md }}>
@@ -559,6 +679,7 @@ export default function LibraryScreen({ onTrackPress }: LibraryScreenProps) {
         {subPage === 'main' && renderMainPage()}
         {subPage === 'appearance' && renderAppearancePage()}
         {subPage === 'sources' && renderSourcesPage()}
+        {subPage === 'cache' && renderCachePage()}
       </ScrollView>
 
       <Modal transparent visible={sourceModalVisible} animationType="fade" onRequestClose={() => setSourceModalVisible(false)}>
@@ -707,6 +828,28 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   qualityText: { fontSize: fontSize.caption2, fontWeight: '600' },
+  cacheStatsWrap: {
+    flexDirection: 'row',
+    gap: spacing.sm,
+    paddingHorizontal: spacing.md,
+    paddingBottom: spacing.md,
+    paddingTop: spacing.sm,
+  },
+  cacheStatItem: {
+    flex: 1,
+    borderRadius: borderRadius.sm,
+    paddingHorizontal: spacing.sm,
+    paddingVertical: spacing.sm,
+    backgroundColor: 'rgba(120,120,128,0.12)',
+  },
+  cacheStatLabel: {
+    fontSize: fontSize.caption2,
+    marginBottom: 4,
+  },
+  cacheStatValue: {
+    fontSize: fontSize.subhead,
+    fontWeight: '700',
+  },
   actionsRow: {
     flexDirection: 'row',
     gap: spacing.xs,
@@ -825,5 +968,17 @@ const styles = StyleSheet.create({
     borderRadius: borderRadius.sm,
     alignItems: 'center',
     justifyContent: 'center',
+  },
+  dangerAction: {
+    minHeight: 44,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: spacing.xs,
+  },
+  dangerActionText: {
+    color: '#FF3B30',
+    fontSize: fontSize.subhead,
+    fontWeight: '700',
   },
 })
