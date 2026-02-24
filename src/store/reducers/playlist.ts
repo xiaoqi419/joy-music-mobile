@@ -24,6 +24,13 @@ export default function playlistReducer(
   action: PlaylistAction,
 ): PlaylistState {
   switch (action.type) {
+    case 'PLAYLIST_HYDRATE':
+      return {
+        ...state,
+        playlists: Array.isArray(action.payload?.playlists) ? action.payload.playlists : [],
+        currentPlaylistId: action.payload?.currentPlaylistId ?? null,
+      }
+
     case 'PLAYLIST_ADD':
       return {
         ...state,

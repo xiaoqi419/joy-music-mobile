@@ -3,7 +3,7 @@
  */
 
 import React from 'react'
-import { View, Text, TouchableOpacity, StyleSheet, Image } from 'react-native'
+import { View, Text, TouchableOpacity, StyleSheet, Image, GestureResponderEvent } from 'react-native'
 import { Ionicons } from '@expo/vector-icons'
 import { useTheme, spacing, fontSize, borderRadius, TRACK_ITEM_HEIGHT } from '../../theme'
 import { Track } from '../../types/music'
@@ -15,6 +15,7 @@ interface TrackListItemProps {
   isCurrentTrack?: boolean
   showIndex?: boolean
   onPress?: (track: Track) => void
+  onMorePress?: (track: Track) => void
 }
 
 export default function TrackListItem({
@@ -24,6 +25,7 @@ export default function TrackListItem({
   isCurrentTrack = false,
   showIndex = true,
   onPress,
+  onMorePress,
 }: TrackListItemProps) {
   const { colors } = useTheme()
 
@@ -79,7 +81,14 @@ export default function TrackListItem({
       </View>
 
       {/* More button */}
-      <TouchableOpacity style={styles.moreButton} activeOpacity={0.6}>
+      <TouchableOpacity
+        style={styles.moreButton}
+        activeOpacity={0.6}
+        onPress={(event: GestureResponderEvent) => {
+          event.stopPropagation?.()
+          onMorePress?.(track)
+        }}
+      >
         <Ionicons name="ellipsis-horizontal" size={18} color={colors.textTertiary} />
       </TouchableOpacity>
     </TouchableOpacity>

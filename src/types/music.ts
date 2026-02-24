@@ -21,6 +21,9 @@ export interface Track {
 export interface Playlist {
   id: string
   name: string
+  description?: string
+  coverUrl?: string
+  source?: 'local' | 'imported' | 'network'
   tracks: Track[]
   createdAt: number
   updatedAt: number
@@ -43,6 +46,16 @@ export interface SearchResult {
   playlists: Playlist[]
   artists: any[]
 }
+
+export interface TrackMoreActionContext {
+  playlistId?: string
+  playbackQueue?: boolean
+}
+
+export type TrackMoreActionHandler = (
+  track: Track,
+  context?: TrackMoreActionContext,
+) => void
 
 export type ThemeMode = 'system' | 'light' | 'dark'
 

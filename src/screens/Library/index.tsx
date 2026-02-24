@@ -31,7 +31,7 @@ import TrackListItem from '../../components/common/TrackListItem'
 import { usePlayerStatus } from '../../hooks/usePlayerStatus'
 import { useDispatch, useSelector } from 'react-redux'
 import { RootState } from '../../store'
-import { ThemeMode, Track } from '../../types/music'
+import { ThemeMode, Track, type TrackMoreActionHandler } from '../../types/music'
 import { Quality } from '../../core/music'
 import {
   ALL_QUALITIES,
@@ -43,6 +43,7 @@ import { audioFileCache, formatCacheSize } from '../../core/music/audioCache'
 
 interface LibraryScreenProps {
   onTrackPress?: (track: Track) => void
+  onTrackMorePress?: TrackMoreActionHandler
 }
 
 type LibrarySubPage = 'main' | 'appearance' | 'sources' | 'cache'
@@ -162,7 +163,7 @@ function EntryCard({ icon, title, subtitle, onPress, reducedMotion }: EntryCardP
   )
 }
 
-export default function LibraryScreen({ onTrackPress }: LibraryScreenProps) {
+export default function LibraryScreen({ onTrackPress, onTrackMorePress }: LibraryScreenProps) {
   const { colors } = useTheme()
   const dispatch = useDispatch()
   const insets = useSafeAreaInsets()
@@ -612,10 +613,11 @@ export default function LibraryScreen({ onTrackPress }: LibraryScreenProps) {
           isCurrentTrack={currentTrack?.id === item.id}
           isPlaying={isPlaying && currentTrack?.id === item.id}
           onPress={onTrackPress}
+          onMorePress={(track) => onTrackMorePress?.(track, { playbackQueue: true })}
         />
       </View>
     )
-  }, [colors.separator, colors.surface, currentTrack?.id, isPlaying, onTrackPress, queueCount])
+  }, [colors.separator, colors.surface, currentTrack?.id, isPlaying, onTrackMorePress, onTrackPress, queueCount])
 
   const mainListEmpty = useMemo(() => (
     <View style={[styles.emptyPlaylistCard, { backgroundColor: colors.surface, borderColor: colors.separator }]}>

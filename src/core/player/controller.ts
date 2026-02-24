@@ -252,6 +252,138 @@ class MusicPlayerController {
   }
 
   /**
+   * Insert a track to play next in queue.
+   * If the track already exists, move it right after current index.
+   */
+  insertTrackNext(track: Track): number {
+    if (!this.playlist.length) {
+      this.playlist = [track]
+      this.currentIndex = this.currentIndex >= 0 ? this.currentIndex : 0
+      if (!this.currentTrack) {
+        this.currentTrack = track
+      }
+      console.log(`[PlayerController] Inserted next track into empty queue: ${track.title}`)
+      return 0
+    }
+
+    const existsIndex = this.playlist.findIndex(item => item.id === track.id)
+    if (existsIndex === this.currentIndex) {
+      return existsIndex
+    }
+
+    const anchorIndex = this.currentIndex >= 0 ? this.currentIndex : 0
+    let insertIndex = Math.min(anchorIndex + 1, this.playlist.length)
+
+    const nextQueue = [...this.playlist]
+    if (existsIndex >= 0) {
+      const [existingTrack] = nextQueue.splice(existsIndex, 1)
+      if (existsIndex < insertIndex) {
+        insertIndex -= 1
+      }
+      nextQueue.splice(insertIndex, 0, existingTrack)
+      this.playlist = nextQueue
+      console.log(`[PlayerController] Moved track to next: ${track.title}`)
+      return insertIndex
+    }
+
+    nextQueue.splice(insertIndex, 0, track)
+    this.playlist = nextQueue
+    console.log(`[PlayerController] Inserted track to next: ${track.title}`)
+    return insertIndex
+  }
+
+  /**
+   * Move a track position inside current queue.
+   */
+  moveTrackInQueue(fromIndex: number, toIndex: number): boolean {
+    if (!this.playlist.length) return false
+    if (fromIndex < 0 || toIndex < 0) return false
+    if (fromIndex >= this.playlist.length || toIndex >= this.playlist.length) return false
+    if (fromIndex === toIndex) return false
+
+    const nextQueue = [...this.playlist]
+    const [movingTrack] = nextQueue.splice(fromIndex, 1)
+    nextQueue.splice(toIndex, 0, movingTrack)
+
+    if (this.currentIndex === fromIndex) {
+      this.currentIndex = toIndex
+    } else if (fromIndex < this.currentIndex && toIndex >= this.currentIndex) {
+      this.currentIndex -= 1
+    } else if (fromIndex > this.currentIndex && toIndex <= this.currentIndex) {
+      this.currentIndex += 1
+    }
+
+    this.playlist = nextQueue
+    this.currentTrack = this.currentIndex >= 0 ? this.playlist[this.currentIndex] : null
+    console.log(`[PlayerController] Moved queue track from ${fromIndex} to ${toIndex}`)
+    return true
+  }
+
+  /**
+   * Remove a track from queue.
+   * If removing current playing track, automatically switch to next available track.
+   */
+  async removeTrackFromQueue(track: Track): Promise<boolean> {
+    const removeIndex = this.playlist.findIndex(item => item.id === track.id)
+    if (removeIndex < 0) return false
+
+    const nextQueue = [...this.playlist]
+    nextQueue.splice(removeIndex, 1)
+
+    if (nextQueue.length === 0) {
+      this.playlist = []
+      this.currentIndex = -1
+      this.currentTrack = null
+      this.isPlaying = false
+      this.currentTimeMillis = 0
+      this.durationMillis = 0
+      this.playRequestId += 1
+      this.clearResolveTrackState()
+      this.setCurrentResolvedQuality(null)
+      await expoAVPlayer.stop().catch(() => {})
+      console.log(`[PlayerController] Removed track and cleared queue: ${track.title}`)
+      return true
+    }
+
+    if (removeIndex < this.currentIndex) {
+      this.playlist = nextQueue
+      this.currentIndex -= 1
+      this.currentTrack = this.playlist[this.currentIndex] || null
+      console.log(`[PlayerController] Removed track before current index: ${track.title}`)
+      return true
+    }
+
+    if (removeIndex > this.currentIndex) {
+      this.playlist = nextQueue
+      if (this.currentIndex >= this.playlist.length) {
+        this.currentIndex = this.playlist.length - 1
+      }
+      this.currentTrack = this.currentIndex >= 0 ? this.playlist[this.currentIndex] : null
+      console.log(`[PlayerController] Removed track from queue: ${track.title}`)
+      return true
+    }
+
+    // removeIndex === currentIndex
+    this.playlist = nextQueue
+    const nextIndex = Math.min(removeIndex, this.playlist.length - 1)
+    this.currentIndex = nextIndex
+    const nextTrack = this.playlist[nextIndex]
+
+    if (this.isPlaying) {
+      await this.playTrack(nextTrack, {
+        autoPlay: true,
+        quality: this.preferredQuality,
+      })
+    } else {
+      this.currentTrack = nextTrack
+      this.setCurrentResolvedQuality(null)
+    }
+
+    console.log(`[PlayerController] Removed current track: ${track.title}`)
+    return true
+  }
+
+  /**
    * Pause playback
    */
   async pause(): Promise<void> {

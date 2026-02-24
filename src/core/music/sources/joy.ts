@@ -47,6 +47,15 @@ interface JoyRuntimeConfig {
   importedSources: ImportedMusicSource[]
 }
 
+export const NO_AVAILABLE_SOURCE_MESSAGE = '未配置可用音源，请先在“我的 > 自定义源管理”中导入并启用音源'
+
+export class JoySourceUnavailableError extends Error {
+  constructor(message: string = NO_AVAILABLE_SOURCE_MESSAGE) {
+    super(message)
+    this.name = 'JoySourceUnavailableError'
+  }
+}
+
 const runtimeConfig: JoyRuntimeConfig = {
   selectedSourceId: '',
   autoSwitch: false,
@@ -168,6 +177,13 @@ function getCandidateSourceConfigs(platform: string): ImportedMusicSource[] {
 }
 
 /**
+ * Check whether at least one runtime source can serve current platform.
+ */
+export function hasConfiguredJoySource(platform: string): boolean {
+  return getCandidateSourceConfigs(platform).length > 0
+}
+
+/**
  * Request one URL from a specific imported source config.
  */
 const requestMusicUrl = async(
@@ -252,7 +268,7 @@ export const joyMusicSource: MusicSourceAPI = {
     const candidateSources = getCandidateSourceConfigs(platform)
 
     if (!candidateSources.length) {
-      throw new Error('未配置可用音源，请先在“我的 > 自定义源管理”中导入并启用音源')
+      throw new JoySourceUnavailableError()
     }
 
     let lastError: Error | null = null

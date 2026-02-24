@@ -24,10 +24,11 @@ import SourceChips from '../../components/common/SourceChips'
 import { usePlayerStatus } from '../../hooks/usePlayerStatus'
 import musicSearch from '../../core/search'
 import { DiscoverSourceId } from '../../types/discover'
-import { Track } from '../../types/music'
+import { Track, type TrackMoreActionHandler } from '../../types/music'
 
 interface SearchScreenProps {
   onTrackPress?: (track: Track) => void
+  onTrackMorePress?: TrackMoreActionHandler
 }
 
 const SEARCH_PAGE_LIMIT = 20
@@ -54,7 +55,7 @@ const dedupeTracks = (tracks: Track[]): Track[] => {
   return result
 }
 
-export default function SearchScreen({ onTrackPress }: SearchScreenProps) {
+export default function SearchScreen({ onTrackPress, onTrackMorePress }: SearchScreenProps) {
   const { colors, isDark } = useTheme()
   const insets = useSafeAreaInsets()
   const { isPlaying, currentTrack } = usePlayerStatus()
@@ -251,8 +252,9 @@ export default function SearchScreen({ onTrackPress }: SearchScreenProps) {
       isCurrentTrack={currentTrack?.id === item.id}
       isPlaying={isPlaying && currentTrack?.id === item.id}
       onPress={onTrackPress}
+      onMorePress={onTrackMorePress}
     />
-  ), [currentTrack?.id, isPlaying, onTrackPress])
+  ), [currentTrack?.id, isPlaying, onTrackMorePress, onTrackPress])
 
   const renderListFooter = useCallback(() => {
     if (loadingMore) {

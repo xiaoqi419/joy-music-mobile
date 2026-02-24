@@ -20,7 +20,7 @@ import { useTheme, spacing, fontSize, borderRadius, BOTTOM_INSET } from '../../t
 import TrackListItem from '../../components/common/TrackListItem'
 import { usePlayerStatus } from '../../hooks/usePlayerStatus'
 import { useSwipeBack } from '../../hooks/useSwipeBack'
-import { Track } from '../../types/music'
+import { Track, type TrackMoreActionHandler } from '../../types/music'
 
 const SCREEN_WIDTH = Dimensions.get('window').width
 const HEADER_HEIGHT = 280
@@ -33,6 +33,7 @@ interface TrackListDetailProps {
   tracks: Track[]
   onBack: () => void
   onTrackPress?: (track: Track) => void
+  onTrackMorePress?: TrackMoreActionHandler
   onPlayAll?: () => void
 }
 
@@ -44,6 +45,7 @@ export default function TrackListDetail({
   tracks,
   onBack,
   onTrackPress,
+  onTrackMorePress,
   onPlayAll,
 }: TrackListDetailProps) {
   const { colors, isDark } = useTheme()
@@ -127,6 +129,7 @@ export default function TrackListDetail({
             isCurrentTrack={currentTrack?.id === item.id}
             isPlaying={isPlaying && currentTrack?.id === item.id}
             onPress={onTrackPress}
+            onMorePress={onTrackMorePress}
           />
         )}
       />

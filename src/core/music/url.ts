@@ -6,6 +6,10 @@
 import { musicSourceManager, Quality } from './source'
 import { musicUrlCache } from './cache'
 import { audioFileCache } from './audioCache'
+import {
+  hasConfiguredJoySource,
+  JoySourceUnavailableError,
+} from './sources/joy'
 
 export interface MusicUrlRequest {
   musicId: string
@@ -160,6 +164,14 @@ export const getMusicUrl = async(request: MusicUrlRequest): Promise<MusicUrlResp
       throw new Error('No music source available')
     }
 
+    // Joy 运行时未配置可用音源时，直接中断，不进入音质降级链路。
+    if (
+      musicSourceManager.getCurrentSourceId() === 'joy' &&
+      !hasConfiguredJoySource(trackSource || 'kw')
+    ) {
+      throw new JoySourceUnavailableError()
+    }
+
     // Step 2: Resolve effective qualities (source + track capabilities)
     const sourceQualities = musicSourceManager.getSourceQualities(
       musicSourceManager.getCurrentSourceId()
@@ -216,6 +228,9 @@ export const getMusicUrl = async(request: MusicUrlRequest): Promise<MusicUrlResp
     try {
       url = await source.getMusicUrl(musicInfo, targetQuality)
     } catch (error) {
+      if (error instanceof JoySourceUnavailableError) {
+        throw error
+      }
       // If the requested quality fails, try fallback qualities
       console.warn(`[MusicUrl] Failed with ${targetQuality}, trying fallback qualities`)
 
@@ -258,6 +273,9 @@ export const getMusicUrl = async(request: MusicUrlRequest): Promise<MusicUrlResp
             musicId,
           }
         } catch (fallbackError) {
+          if (fallbackError instanceof JoySourceUnavailableError) {
+            throw fallbackError
+          }
           console.warn(`[MusicUrl] Fallback quality ${fallbackQuality} failed`)
           continue
         }
@@ -331,6 +349,14 @@ export const getMusicUrlWithRetry = async(
       })
     } catch (error) {
       lastError = error instanceof Error ? error : new Error(String(error))
+      if (lastError instanceof JoySourceUnavailableError) {
+        request.onProgress?.({
+          message: lastError.message,
+          attempt: attempt + 1,
+          totalAttempts,
+        })
+        throw lastError
+      }
       console.warn(`[MusicUrl] Attempt ${attempt + 1} failed:`, lastError.message)
       request.onProgress?.({
         message: `第 ${attempt + 1}/${totalAttempts} 次失败：${lastError.message}`,

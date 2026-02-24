@@ -7,13 +7,14 @@ import { View, StyleSheet, Text } from 'react-native'
 import TrackListItem from '../../components/common/TrackListItem'
 import { usePlayerStatus } from '../../hooks/usePlayerStatus'
 import { fontSize, useTheme } from '../../theme'
-import { Track } from '../../types/music'
+import { Track, type TrackMoreActionHandler } from '../../types/music'
 
 interface HotTracksSectionProps {
   tracks: Track[]
   loading?: boolean
   error?: string | null
   onTrackPress?: (track: Track) => void
+  onTrackMorePress?: TrackMoreActionHandler
 }
 
 export default function HotTracksSection({
@@ -21,6 +22,7 @@ export default function HotTracksSection({
   loading = false,
   error = null,
   onTrackPress,
+  onTrackMorePress,
 }: HotTracksSectionProps) {
   const { isPlaying, currentTrack } = usePlayerStatus()
   const { colors } = useTheme()
@@ -58,6 +60,7 @@ export default function HotTracksSection({
           isCurrentTrack={currentTrack?.id === track.id}
           isPlaying={isPlaying && currentTrack?.id === track.id}
           onPress={onTrackPress}
+          onMorePress={onTrackMorePress}
         />
       ))}
     </View>
