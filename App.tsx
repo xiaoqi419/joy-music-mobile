@@ -4,7 +4,7 @@
  */
 
 import React, { useCallback, useEffect, useState } from 'react'
-import { ActivityIndicator, Alert, StatusBar, StyleSheet, Text, View } from 'react-native'
+import { ActivityIndicator, Alert, StatusBar, StyleSheet, Text, View, type AlertButton } from 'react-native'
 import { SafeAreaProvider, useSafeAreaInsets } from 'react-native-safe-area-context'
 import { Provider as ReduxProvider, useDispatch, useSelector } from 'react-redux'
 import * as SplashScreen from 'expo-splash-screen'
@@ -15,11 +15,12 @@ import MiniPlayer from './src/components/common/MiniPlayer'
 import DiscoverScreen from './src/screens/Discover'
 import LeaderboardScreen from './src/screens/Leaderboard'
 import SearchScreen from './src/screens/Search'
+import PlaylistScreen from './src/screens/Playlist'
 import LibraryScreen from './src/screens/Library'
 import TrackListDetail from './src/screens/Detail/TrackListDetail'
 import NowPlaying from './src/screens/NowPlaying'
 import { playerController, type PlaybackStatus } from './src/core/player'
-import { Track } from './src/types/music'
+import { Track, type TrackMoreActionContext } from './src/types/music'
 import { LeaderboardBoardItem, SongListItem } from './src/types/discover'
 import { getLeaderboardDetail, getSongListDetail } from './src/core/discover'
 import { RootState } from './src/store'
@@ -28,7 +29,11 @@ import {
   loadMusicSourceSettings,
   saveMusicSourceSettings,
 } from './src/core/config/musicSource'
-import { applyJoyRuntimeConfig } from './src/core/music/sources/joy'
+import {
+  loadPlaylistSettings,
+  savePlaylistSettings,
+} from './src/core/config/playlist'
+import { applyJoyRuntimeConfig, hasConfiguredJoySource } from './src/core/music/sources/joy'
 
 // Keep the splash screen visible while we fetch resources
 SplashScreen.preventAutoHideAsync()
@@ -56,6 +61,7 @@ function AppContent() {
   const dispatch = useDispatch()
   const themeMode = useSelector((state: RootState) => state.config.theme)
   const musicSourceState = useSelector((state: RootState) => state.musicSource)
+  const playlistState = useSelector((state: RootState) => state.playlist)
   const insets = useSafeAreaInsets()
   const [activeTab, setActiveTab] = useState<TabName>('discover')
   const [detailView, setDetailView] = useState<DetailView | null>(null)
@@ -64,6 +70,7 @@ function AppContent() {
   const [detailLoading, setDetailLoading] = useState(false)
   const [themeHydrated, setThemeHydrated] = useState(false)
   const [musicSourceHydrated, setMusicSourceHydrated] = useState(false)
+  const [playlistHydrated, setPlaylistHydrated] = useState(false)
   const [isResolvingTrack, setIsResolvingTrack] = useState(() => playerController.isResolvingTrack())
   const [resolvingHint, setResolvingHint] = useState(() => playerController.getResolvingHint())
   const shouldHideTabBar = activeTab === 'discover' && isDiscoverMoreVisible
@@ -74,6 +81,28 @@ function AppContent() {
       return '音源接口地址不可用，请在“我的 > 自定义源管理”检查 API 地址是否正确'
     }
     return message
+  }, [])
+
+  const getTrackIdentity = useCallback((track: Track) => {
+    return `${track.source || 'unknown'}::${track.id}`
+  }, [])
+
+  const ensureTracksHaveConfiguredSource = useCallback((tracks: Track[]) => {
+    if (!tracks.length) return false
+    const missingPlatforms = Array.from(
+      new Set(
+        tracks
+          .map((track) => String(track.source || 'kw').toLowerCase())
+          .filter((platform) => !hasConfiguredJoySource(platform)),
+      ),
+    )
+    if (!missingPlatforms.length) return true
+
+    Alert.alert(
+      '未配置可用音源',
+      `当前曲目来源 ${missingPlatforms.map((item) => item.toUpperCase()).join(' / ')} 未配置可用音源，请先在“我的 > 自定义源管理”中导入并启用对应音源。`,
+    )
+    return false
   }, [])
 
   const syncPlayerStateToStore = useCallback((playbackStatus?: PlaybackStatus | null) => {
@@ -118,6 +147,16 @@ function AppContent() {
           applyJoyRuntimeConfig(sourceSettings)
           playerController.setPreferredQuality(sourceSettings.preferredQuality)
           setMusicSourceHydrated(true)
+        }
+
+        // 启动时恢复本地歌单配置。
+        const playlistSettings = await loadPlaylistSettings()
+        if (active) {
+          dispatch({
+            type: 'PLAYLIST_HYDRATE',
+            payload: playlistSettings,
+          })
+          setPlaylistHydrated(true)
         }
 
         await playerController.initialize()
@@ -174,12 +213,23 @@ function AppContent() {
     musicSourceState.importedSources,
   ])
 
+  useEffect(() => {
+    if (!playlistHydrated) return
+    savePlaylistSettings({
+      playlists: playlistState.playlists,
+      currentPlaylistId: playlistState.currentPlaylistId,
+    })
+  }, [playlistHydrated, playlistState.currentPlaylistId, playlistState.playlists])
+
   const handleTrackPress = useCallback(async (track: Track) => {
     try {
       const currentTrack = playerController.getCurrentTrack()
       // 如果点击的是当前正在播放的歌曲，直接打开播放页继续播放
       if (currentTrack?.id === track.id) {
         setShowNowPlaying(true)
+        return
+      }
+      if (!ensureTracksHaveConfiguredSource([track])) {
         return
       }
 
@@ -193,7 +243,149 @@ function AppContent() {
       console.error('Play error:', e)
       Alert.alert('播放失败', getReadablePlayError(e))
     }
+  }, [ensureTracksHaveConfiguredSource, getReadablePlayError, syncPlayerStateToStore])
+
+  const handleAppendTrackToPlaylist = useCallback((track: Track, playlistId: string) => {
+    const targetPlaylist = playlistState.playlists.find((item) => item.id === playlistId)
+    if (!targetPlaylist) {
+      Alert.alert('添加失败', '目标歌单不存在或已删除')
+      return
+    }
+
+    const exists = targetPlaylist.tracks.some((item) => getTrackIdentity(item) === getTrackIdentity(track))
+    if (exists) {
+      Alert.alert('已存在', `「${track.title}」已经在「${targetPlaylist.name}」中`)
+      return
+    }
+
+    dispatch({
+      type: 'PLAYLIST_UPDATE',
+      payload: {
+        ...targetPlaylist,
+        tracks: [...targetPlaylist.tracks, { ...track }],
+        updatedAt: Date.now(),
+      },
+    })
+    Alert.alert('添加成功', `已添加到「${targetPlaylist.name}」`)
+  }, [dispatch, getTrackIdentity, playlistState.playlists])
+
+  const handleAddTrackToPlaylist = useCallback((track: Track) => {
+    const customPlaylists = playlistState.playlists
+    if (!customPlaylists.length) {
+      Alert.alert('暂无自定义歌单', '请先在「歌单」页新建歌单后再添加歌曲。')
+      return
+    }
+
+    Alert.alert(
+      '添加到歌单',
+      `选择要添加「${track.title}」的歌单`,
+      [
+        ...customPlaylists.map((playlist) => ({
+          text: playlist.name,
+          onPress: () => {
+            handleAppendTrackToPlaylist(track, playlist.id)
+          },
+        })),
+        { text: '取消', style: 'cancel' as const },
+      ],
+    )
+  }, [handleAppendTrackToPlaylist, playlistState.playlists])
+
+  const handleRemoveTrackFromPlaylist = useCallback((track: Track, playlistId: string) => {
+    const targetPlaylist = playlistState.playlists.find((item) => item.id === playlistId)
+    if (!targetPlaylist) {
+      Alert.alert('移除失败', '目标歌单不存在或已删除')
+      return
+    }
+
+    const nextTracks = targetPlaylist.tracks.filter(
+      (item) => getTrackIdentity(item) !== getTrackIdentity(track),
+    )
+    if (nextTracks.length === targetPlaylist.tracks.length) {
+      Alert.alert('提示', '歌单中未找到该歌曲')
+      return
+    }
+
+    dispatch({
+      type: 'PLAYLIST_UPDATE',
+      payload: {
+        ...targetPlaylist,
+        tracks: nextTracks,
+        updatedAt: Date.now(),
+      },
+    })
+    Alert.alert('已移除', `「${track.title}」已从「${targetPlaylist.name}」移除`)
+  }, [dispatch, getTrackIdentity, playlistState.playlists])
+
+  const handleRemoveTrackFromQueue = useCallback(async(track: Track) => {
+    try {
+      const removed = await playerController.removeTrackFromQueue(track)
+      if (!removed) {
+        Alert.alert('提示', '当前播放列表中未找到该歌曲')
+        return
+      }
+      const playbackStatus = await playerController.getPlaybackStatus()
+      syncPlayerStateToStore(playbackStatus)
+      Alert.alert('已移除', `「${track.title}」已从播放列表移除`)
+    } catch (error) {
+      Alert.alert('移除失败', getReadablePlayError(error))
+    }
   }, [getReadablePlayError, syncPlayerStateToStore])
+
+  const handleTrackMorePress = useCallback((track: Track, context?: TrackMoreActionContext) => {
+    const actionButtons: AlertButton[] = [
+      {
+        text: '下一首播放',
+        onPress: () => {
+          try {
+            playerController.insertTrackNext(track)
+            syncPlayerStateToStore()
+            Alert.alert('已加入队列', `「${track.title}」将在下一首播放`)
+          } catch (error) {
+            Alert.alert('操作失败', getReadablePlayError(error))
+          }
+        },
+      },
+      {
+        text: '添加到歌单',
+        onPress: () => {
+          handleAddTrackToPlaylist(track)
+        },
+      },
+    ]
+
+    const playlistId = context?.playlistId
+    if (playlistId) {
+      actionButtons.push({
+        text: '删除歌曲',
+        style: 'destructive',
+        onPress: () => {
+          handleRemoveTrackFromPlaylist(track, playlistId)
+        },
+      })
+    } else if (context?.playbackQueue) {
+      actionButtons.push({
+        text: '移除播放列表',
+        style: 'destructive',
+        onPress: () => {
+          void handleRemoveTrackFromQueue(track)
+        },
+      })
+    }
+    actionButtons.push({ text: '取消', style: 'cancel' })
+
+    Alert.alert(
+      '歌曲操作',
+      `${track.title} · ${track.artist}`,
+      actionButtons,
+    )
+  }, [
+    getReadablePlayError,
+    handleAddTrackToPlaylist,
+    handleRemoveTrackFromPlaylist,
+    handleRemoveTrackFromQueue,
+    syncPlayerStateToStore,
+  ])
 
   const handleLeaderboardPress = useCallback(async(board: LeaderboardBoardItem) => {
     try {
@@ -247,10 +439,11 @@ function AppContent() {
     }
   }, [])
 
-  const replaceQueueAndPlayAll = useCallback(async() => {
-    if (!detailView || detailView.tracks.length === 0) return
+  const playTracksAsQueue = useCallback(async(tracks: Track[]) => {
+    if (!tracks.length) return
+    if (!ensureTracksHaveConfiguredSource(tracks)) return
     try {
-      await playerController.playFromPlaylist(detailView.tracks, 0, {
+      await playerController.playFromPlaylist(tracks, 0, {
         autoPlay: true,
       })
       const playbackStatus = await playerController.getPlaybackStatus()
@@ -260,10 +453,16 @@ function AppContent() {
       console.error('Play all error:', e)
       Alert.alert('播放失败', getReadablePlayError(e))
     }
-  }, [detailView, getReadablePlayError, syncPlayerStateToStore])
+  }, [ensureTracksHaveConfiguredSource, getReadablePlayError, syncPlayerStateToStore])
+
+  const replaceQueueAndPlayAll = useCallback(async() => {
+    if (!detailView || detailView.tracks.length === 0) return
+    await playTracksAsQueue(detailView.tracks)
+  }, [detailView, playTracksAsQueue])
 
   const handlePlayAll = useCallback(() => {
     if (!detailView || detailView.tracks.length === 0) return
+    if (!ensureTracksHaveConfiguredSource(detailView.tracks)) return
 
     const currentQueue = playerController.getPlaylist()
     if (!currentQueue.length) {
@@ -285,7 +484,31 @@ function AppContent() {
         },
       ],
     )
-  }, [detailView, replaceQueueAndPlayAll])
+  }, [detailView, ensureTracksHaveConfiguredSource, replaceQueueAndPlayAll])
+
+  const handlePlaylistPlayAll = useCallback((tracks: Track[]) => {
+    if (!tracks.length) return
+    if (!ensureTracksHaveConfiguredSource(tracks)) return
+    const currentQueue = playerController.getPlaylist()
+    if (!currentQueue.length) {
+      void playTracksAsQueue(tracks)
+      return
+    }
+    Alert.alert(
+      '替换当前播放列表？',
+      '播放全部将替换当前播放列表并从第一首开始播放。',
+      [
+        { text: '取消', style: 'cancel' },
+        {
+          text: '替换并播放',
+          style: 'destructive',
+          onPress: () => {
+            void playTracksAsQueue(tracks)
+          },
+        },
+      ],
+    )
+  }, [ensureTracksHaveConfiguredSource, playTracksAsQueue])
 
   const handleDetailBack = useCallback(() => {
     setDetailView(null)
@@ -315,10 +538,17 @@ function AppContent() {
           />
         )}
         {activeTab === 'search' && (
-          <SearchScreen onTrackPress={handleTrackPress} />
+          <SearchScreen onTrackPress={handleTrackPress} onTrackMorePress={handleTrackMorePress} />
+        )}
+        {activeTab === 'playlist' && (
+          <PlaylistScreen
+            onTrackPress={handleTrackPress}
+            onTrackMorePress={handleTrackMorePress}
+            onPlayAll={handlePlaylistPlayAll}
+          />
         )}
         {activeTab === 'library' && (
-          <LibraryScreen onTrackPress={handleTrackPress} />
+          <LibraryScreen onTrackPress={handleTrackPress} onTrackMorePress={handleTrackMorePress} />
         )}
       </View>
 
@@ -332,6 +562,7 @@ function AppContent() {
           tracks={detailView.tracks}
           onBack={handleDetailBack}
           onTrackPress={handleTrackPress}
+          onTrackMorePress={handleTrackMorePress}
           onPlayAll={handlePlayAll}
         />
       )}

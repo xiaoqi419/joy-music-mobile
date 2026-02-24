@@ -24,6 +24,7 @@ import {
   ScrollView,
   Pressable,
   Alert,
+  PanResponder,
 } from 'react-native';
 import Slider from '@react-native-community/slider';
 import { Ionicons } from '@expo/vector-icons';
@@ -39,12 +40,15 @@ import { ALL_QUALITIES } from '../../core/config/musicSource';
 import { getLyric, LyricData } from '../../core/lyric';
 import LyricsView from '../../components/common/LyricsView';
 import type { RootState } from '../../store';
+import type { Track } from '../../types/music';
 
 const SCREEN_WIDTH = Dimensions.get('window').width;
 const SCREEN_HEIGHT = Dimensions.get('window').height;
 /** 封面视图模式下的封面直径 */
 const COVER_SIZE_LG = Math.min(320, SCREEN_WIDTH - 72);
 const QUEUE_SHEET_HEIGHT = Math.min(560, SCREEN_HEIGHT * 0.66);
+const QUEUE_ITEM_HEIGHT = 56;
+const QUEUE_DRAG_LONG_PRESS_MS = 220;
 const QUALITY_PRIORITY: Quality[] = ['master', 'atmos_plus', 'atmos', 'hires', 'flac24bit', 'flac', '320k', '128k'];
 const QUALITY_LABELS: Record<Quality, string> = {
   master: '母带',
@@ -97,6 +101,18 @@ function formatMs(ms: number): string {
   return `${m}:${String(s).padStart(2, '0')}`;
 }
 
+function clampIndex(value: number, min: number, max: number): number {
+  return Math.max(min, Math.min(max, value));
+}
+
+function moveQueueItem<T>(list: T[], fromIndex: number, toIndex: number): T[] {
+  if (fromIndex === toIndex) return list;
+  const next = [...list];
+  const [movingItem] = next.splice(fromIndex, 1);
+  next.splice(toIndex, 0, movingItem);
+  return next;
+}
+
 /**
  * 渲染全屏播放页面。
  * @param onClose - 关闭回调（返回上一页）
@@ -108,6 +124,8 @@ export default function NowPlaying({ onClose }: NowPlayingProps) {
   const { currentTrack, isPlaying, position, duration } = usePlayerStatus();
   const queue = useSelector((state: RootState) => state.player.playlist);
   const queueCurrentIndex = useSelector((state: RootState) => state.player.currentIndex);
+  const reduxCurrentTrack = useSelector((state: RootState) => state.player.currentTrack);
+  const playlists = useSelector((state: RootState) => state.playlist.playlists);
   const repeatMode = useSelector((state: RootState) => state.player.repeatMode);
   const shuffleMode = useSelector((state: RootState) => state.player.shuffleMode);
   const preferredQuality = useSelector((state: RootState) => state.musicSource.preferredQuality);
@@ -142,6 +160,13 @@ export default function NowPlaying({ onClose }: NowPlayingProps) {
   const lyricsBtnAnim = useRef(new Animated.Value(0)).current;
   const queueSheetAnim = useRef(new Animated.Value(0)).current;
   const [queueSheetVisible, setQueueSheetVisible] = useState(false);
+  const [queueDraft, setQueueDraft] = useState(queue);
+  const [queueDragFromIndex, setQueueDragFromIndex] = useState<number | null>(null);
+  const [queueDragToIndex, setQueueDragToIndex] = useState<number | null>(null);
+  const queueDragFromRef = useRef<number | null>(null);
+  const queueDragCurrentRef = useRef<number | null>(null);
+  const queuePressSuppressRef = useRef(false);
+  const queuePressSuppressTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [isResolvingTrack, setIsResolvingTrack] = useState(() => playerController.isResolvingTrack());
   const [resolvingHint, setResolvingHint] = useState(() => playerController.getResolvingHint());
   const [resolvedQuality, setResolvedQuality] = useState<Quality | null>(() => playerController.getCurrentResolvedQuality());
@@ -150,12 +175,44 @@ export default function NowPlaying({ onClose }: NowPlayingProps) {
     () => getPlayModeFromState(repeatMode, shuffleMode),
     [repeatMode, shuffleMode],
   )
+  const controllerCurrentTrack = playerController.getCurrentTrack();
+  const controllerQueue = playerController.getPlaylist();
+  const controllerCurrentIndex = playerController.getCurrentIndex();
+  const activeTrack = useMemo(() => {
+    if (currentTrack) return currentTrack;
+    if (reduxCurrentTrack) return reduxCurrentTrack;
+    if (controllerCurrentTrack) return controllerCurrentTrack;
+    if (queueCurrentIndex >= 0 && queueCurrentIndex < queue.length) {
+      return queue[queueCurrentIndex];
+    }
+    if (controllerCurrentIndex >= 0 && controllerCurrentIndex < controllerQueue.length) {
+      return controllerQueue[controllerCurrentIndex];
+    }
+    if (queue.length > 0) {
+      return queue[0];
+    }
+    if (controllerQueue.length > 0) {
+      return controllerQueue[0];
+    }
+    return null;
+  }, [
+    controllerCurrentIndex,
+    controllerCurrentTrack,
+    controllerQueue,
+    currentTrack,
+    queue,
+    queueCurrentIndex,
+    reduxCurrentTrack,
+  ]);
+  const [displayTrack, setDisplayTrack] = useState<Track | null>(null);
+  const fallbackTrack = queueDraft.find(Boolean) || queue.find(Boolean) || controllerQueue.find(Boolean) || null;
+  const renderTrack = activeTrack || displayTrack || fallbackTrack;
 
   const selectedSourceConfig = useMemo(
     () => importedSources.find((item) => item.id === selectedImportedSourceId),
     [importedSources, selectedImportedSourceId],
   );
-  const currentTrackPlatform = (currentTrack?.source || 'kw').toLowerCase();
+  const currentTrackPlatform = (renderTrack?.source || 'kw').toLowerCase();
   const availableQualities = useMemo(() => {
     const platformQualities = selectedSourceConfig?.platforms?.[currentTrackPlatform]?.qualitys;
     const raw = platformQualities?.length ? platformQualities : ALL_QUALITIES;
@@ -177,7 +234,26 @@ export default function NowPlaying({ onClose }: NowPlayingProps) {
 
   useEffect(() => {
     setQualityMenuVisible(false);
-  }, [activeTab, queueSheetVisible, currentTrack?.id]);
+  }, [activeTab, queueSheetVisible, renderTrack?.id]);
+
+  useEffect(() => {
+    if (!activeTrack) return;
+    setDisplayTrack(activeTrack);
+  }, [activeTrack]);
+
+  useEffect(() => {
+    if (queueDragFromRef.current !== null) return;
+    setQueueDraft(queue);
+  }, [queue]);
+
+  useEffect(() => {
+    return () => {
+      if (queuePressSuppressTimerRef.current) {
+        clearTimeout(queuePressSuppressTimerRef.current);
+        queuePressSuppressTimerRef.current = null;
+      }
+    };
+  }, []);
 
   /** 播放时启动匀速旋转，暂停时停在当前角度 */
   useEffect(() => {
@@ -246,7 +322,7 @@ export default function NowPlaying({ onClose }: NowPlayingProps) {
 
   /* ── 歌曲切换时获取歌词 ── */
   useEffect(() => {
-    if (!currentTrack) {
+    if (!renderTrack) {
       setLyricData({ lines: [], rawLrc: '', rawTlrc: '' });
       return;
     }
@@ -254,7 +330,7 @@ export default function NowPlaying({ onClose }: NowPlayingProps) {
     let active = true;
     setLyricLoading(true);
 
-    getLyric(currentTrack)
+    getLyric(renderTrack)
       .then(data => {
         if (active) setLyricData(data);
       })
@@ -268,7 +344,7 @@ export default function NowPlaying({ onClose }: NowPlayingProps) {
     return () => {
       active = false;
     };
-  }, [currentTrack?.id, currentTrack?.source, currentTrack?.songmid]);
+  }, [renderTrack?.id, renderTrack?.source, renderTrack?.songmid]);
 
   /* ── 进度 ── */
   const progress = useMemo(() => {
@@ -296,16 +372,28 @@ export default function NowPlaying({ onClose }: NowPlayingProps) {
     })
   }, [dispatch])
 
+  const getTrackIdentity = useCallback((track: Track) => {
+    return `${track.source || 'unknown'}::${track.id}`;
+  }, []);
+
+  useEffect(() => {
+    if (!renderTrack) return;
+    const runtimeQueue = playerController.getPlaylist();
+    if (runtimeQueue.length > 0) return;
+    playerController.setPlaylist([renderTrack]);
+    syncPlayerSnapshotToStore();
+  }, [renderTrack, syncPlayerSnapshotToStore]);
+
   const handleSelectQuality = useCallback(async(nextQuality: Quality) => {
     setQualityMenuVisible(false);
     dispatch({ type: 'MUSIC_SOURCE_SET_QUALITY', payload: nextQuality });
 
-    if (!currentTrack) return;
+    if (!renderTrack) return;
 
     const resumePosition = position;
     const shouldAutoPlay = isPlaying;
     try {
-      await playerController.playTrack(currentTrack, {
+      await playerController.playTrack(renderTrack, {
         autoPlay: shouldAutoPlay,
         quality: nextQuality,
       });
@@ -317,13 +405,178 @@ export default function NowPlaying({ onClose }: NowPlayingProps) {
       console.error('Change quality error:', error);
       Alert.alert('切换音质失败', error instanceof Error ? error.message : '请稍后重试');
     }
-  }, [currentTrack, dispatch, isPlaying, position, syncPlayerSnapshotToStore]);
+  }, [dispatch, isPlaying, position, renderTrack, syncPlayerSnapshotToStore]);
+
+  const handleAppendTrackToPlaylist = useCallback((track: Track, playlistId: string) => {
+    const targetPlaylist = playlists.find((item) => item.id === playlistId);
+    if (!targetPlaylist) {
+      Alert.alert('添加失败', '目标歌单不存在或已删除。');
+      return;
+    }
+
+    const exists = targetPlaylist.tracks.some((item) => getTrackIdentity(item) === getTrackIdentity(track));
+    if (exists) {
+      Alert.alert('已存在', `「${track.title}」已经在「${targetPlaylist.name}」中。`);
+      return;
+    }
+
+    dispatch({
+      type: 'PLAYLIST_UPDATE',
+      payload: {
+        ...targetPlaylist,
+        tracks: [...targetPlaylist.tracks, { ...track }],
+        updatedAt: Date.now(),
+      },
+    });
+    Alert.alert('添加成功', `已添加到「${targetPlaylist.name}」。`);
+  }, [dispatch, getTrackIdentity, playlists]);
+
+  const handleAddQueueTrackToPlaylist = useCallback((track: Track) => {
+    if (!playlists.length) {
+      Alert.alert('暂无自定义歌单', '请先在歌单页创建或导入歌单。');
+      return;
+    }
+    Alert.alert(
+      '添加到歌单',
+      `选择要添加「${track.title}」的歌单`,
+      [
+        ...playlists.map((playlist) => ({
+          text: playlist.name,
+          onPress: () => {
+            handleAppendTrackToPlaylist(track, playlist.id);
+          },
+        })),
+        { text: '取消', style: 'cancel' as const },
+      ],
+    );
+  }, [handleAppendTrackToPlaylist, playlists]);
+
+  const handleRemoveQueueTrack = useCallback(async(track: Track) => {
+    try {
+      const removed = await playerController.removeTrackFromQueue(track);
+      if (!removed) {
+        Alert.alert('提示', '当前播放列表中未找到该歌曲。');
+        return;
+      }
+      const latestQueue = playerController.getPlaylist();
+      setQueueDraft(latestQueue);
+      if (!latestQueue.length) {
+        setQueueSheetVisible(false);
+      }
+      syncPlayerSnapshotToStore();
+    } catch (error) {
+      console.error('Remove queue track error:', error);
+      Alert.alert('移除失败', '从播放列表移除歌曲失败，请稍后重试。');
+    }
+  }, [syncPlayerSnapshotToStore]);
+
+  const handleQueueTrackMorePress = useCallback((track: Track) => {
+    Alert.alert(
+      '队列操作',
+      `${track.title} · ${track.artist}`,
+      [
+        {
+          text: '添加到歌单',
+          onPress: () => {
+            handleAddQueueTrackToPlaylist(track);
+          },
+        },
+        {
+          text: '移除播放列表',
+          style: 'destructive',
+          onPress: () => {
+            void handleRemoveQueueTrack(track);
+          },
+        },
+        { text: '取消', style: 'cancel' },
+      ],
+    );
+  }, [handleAddQueueTrackToPlaylist, handleRemoveQueueTrack]);
+
+  const finishQueueDrag = useCallback(() => {
+    const fromIndex = queueDragFromRef.current;
+    const toIndex = queueDragCurrentRef.current;
+
+    queueDragFromRef.current = null;
+    queueDragCurrentRef.current = null;
+    setQueueDragFromIndex(null);
+    setQueueDragToIndex(null);
+
+    if (fromIndex === null || toIndex === null || fromIndex === toIndex) {
+      return;
+    }
+    const moved = playerController.moveTrackInQueue(fromIndex, toIndex);
+    if (!moved) {
+      setQueueDraft(playerController.getPlaylist());
+      return;
+    }
+    setQueueDraft(playerController.getPlaylist());
+    syncPlayerSnapshotToStore();
+  }, [syncPlayerSnapshotToStore]);
+
+  const queueDragResponder = useMemo(() => PanResponder.create({
+    onStartShouldSetPanResponder: () => false,
+    onMoveShouldSetPanResponder: (_, gestureState) => {
+      return queueDragFromRef.current !== null && Math.abs(gestureState.dy) > 2;
+    },
+    onMoveShouldSetPanResponderCapture: (_, gestureState) => {
+      return queueDragFromRef.current !== null && Math.abs(gestureState.dy) > 2;
+    },
+    onPanResponderMove: (_, gestureState) => {
+      const dragStartIndex = queueDragFromRef.current;
+      if (dragStartIndex === null || queueDraft.length <= 1) return;
+      const estimateIndex = clampIndex(
+        Math.round(dragStartIndex + gestureState.dy / QUEUE_ITEM_HEIGHT),
+        0,
+        queueDraft.length - 1,
+      );
+      const currentIndex = queueDragCurrentRef.current ?? dragStartIndex;
+      if (estimateIndex === currentIndex) return;
+
+      setQueueDraft((prev) => moveQueueItem(prev, currentIndex, estimateIndex));
+      queueDragCurrentRef.current = estimateIndex;
+      setQueueDragToIndex(estimateIndex);
+    },
+    onPanResponderRelease: () => {
+      finishQueueDrag();
+    },
+    onPanResponderTerminate: () => {
+      finishQueueDrag();
+    },
+  }), [finishQueueDrag, queueDraft.length]);
+
+  const handleQueueItemLongPress = useCallback((index: number) => {
+    if (index < 0 || index >= queueDraft.length) return;
+    if (queueDragFromRef.current !== null) return;
+    queuePressSuppressRef.current = true;
+    if (queuePressSuppressTimerRef.current) {
+      clearTimeout(queuePressSuppressTimerRef.current);
+    }
+    queuePressSuppressTimerRef.current = setTimeout(() => {
+      queuePressSuppressRef.current = false;
+      queuePressSuppressTimerRef.current = null;
+    }, 320);
+    queueDragFromRef.current = index;
+    queueDragCurrentRef.current = index;
+    setQueueDragFromIndex(index);
+    setQueueDragToIndex(index);
+  }, [queueDraft.length]);
 
   const openQueueSheet = useCallback(() => {
     if (!queue.length) {
       Alert.alert('播放列表为空', '当前还没有可播放的歌曲。');
       return;
     }
+    setQueueDraft(queue);
+    queuePressSuppressRef.current = false;
+    if (queuePressSuppressTimerRef.current) {
+      clearTimeout(queuePressSuppressTimerRef.current);
+      queuePressSuppressTimerRef.current = null;
+    }
+    queueDragFromRef.current = null;
+    queueDragCurrentRef.current = null;
+    setQueueDragFromIndex(null);
+    setQueueDragToIndex(null);
     setQueueSheetVisible(true);
     queueSheetAnim.setValue(0);
     Animated.spring(queueSheetAnim, {
@@ -332,9 +585,18 @@ export default function NowPlaying({ onClose }: NowPlayingProps) {
       tension: 230,
       friction: 24,
     }).start();
-  }, [queue.length, queueSheetAnim]);
+  }, [queue, queueSheetAnim]);
 
   const closeQueueSheet = useCallback(() => {
+    queuePressSuppressRef.current = false;
+    if (queuePressSuppressTimerRef.current) {
+      clearTimeout(queuePressSuppressTimerRef.current);
+      queuePressSuppressTimerRef.current = null;
+    }
+    queueDragFromRef.current = null;
+    queueDragCurrentRef.current = null;
+    setQueueDragFromIndex(null);
+    setQueueDragToIndex(null);
     Animated.timing(queueSheetAnim, {
       toValue: 0,
       duration: 200,
@@ -346,9 +608,18 @@ export default function NowPlaying({ onClose }: NowPlayingProps) {
   }, [queueSheetAnim]);
 
   const handleQueueTrackPress = useCallback(async(index: number) => {
-    if (index < 0 || index >= queue.length) return;
+    if (queuePressSuppressRef.current) {
+      queuePressSuppressRef.current = false;
+      if (queuePressSuppressTimerRef.current) {
+        clearTimeout(queuePressSuppressTimerRef.current);
+        queuePressSuppressTimerRef.current = null;
+      }
+      return;
+    }
+    if (queueDragFromRef.current !== null) return;
+    if (index < 0 || index >= queueDraft.length) return;
     try {
-      await playerController.playFromPlaylist(queue, index, {
+      await playerController.playFromPlaylist(queueDraft, index, {
         autoPlay: true,
       });
       syncPlayerSnapshotToStore()
@@ -357,21 +628,21 @@ export default function NowPlaying({ onClose }: NowPlayingProps) {
       console.error('Play queue item error:', error);
       Alert.alert('播放失败', '切换到该歌曲失败，请稍后重试。');
     }
-  }, [queue, closeQueueSheet, syncPlayerSnapshotToStore]);
+  }, [closeQueueSheet, queueDraft, syncPlayerSnapshotToStore]);
 
   const handleCyclePlayMode = useCallback(() => {
     playerController.cyclePlayMode()
     syncPlayerSnapshotToStore()
   }, [syncPlayerSnapshotToStore])
 
-  const sourceLabel = currentTrack?.source
-    ? currentTrack.source.toUpperCase()
+  const sourceLabel = renderTrack?.source
+    ? renderTrack.source.toUpperCase()
     : 'LOCAL';
 
   const subMeta = useMemo(() => {
-    const parts = [currentTrack?.album, sourceLabel].filter(Boolean);
+    const parts = [renderTrack?.album, sourceLabel].filter(Boolean);
     return parts.join(' · ');
-  }, [currentTrack?.album, sourceLabel]);
+  }, [renderTrack?.album, sourceLabel]);
 
   const dismissScale = panY.interpolate({
     inputRange: [0, 320],
@@ -417,7 +688,7 @@ export default function NowPlaying({ onClose }: NowPlayingProps) {
     }
   }, [progress]);
 
-  if (!currentTrack) return null;
+  if (!renderTrack) return null;
 
   return (
     <Animated.View
@@ -440,9 +711,9 @@ export default function NowPlaying({ onClose }: NowPlayingProps) {
         end={{ x: 0.9, y: 1 }}
         style={StyleSheet.absoluteFill}
       />
-      {currentTrack.coverUrl && (
+      {renderTrack.coverUrl && (
         <Image
-          source={{ uri: currentTrack.coverUrl }}
+          source={{ uri: renderTrack.coverUrl }}
           style={styles.backdropImage}
           blurRadius={48}
         />
@@ -508,10 +779,10 @@ export default function NowPlaying({ onClose }: NowPlayingProps) {
             <View style={styles.metaCardRow}>
               <View style={styles.metaMain}>
                 <Text style={[styles.trackTitle, { color: colors.text }]} numberOfLines={2}>
-                  {currentTrack.title}
+                  {renderTrack.title || '未知歌曲'}
                 </Text>
                 <Text style={[styles.trackArtist, { color: colors.textSecondary }]} numberOfLines={1}>
-                  {currentTrack.artist}
+                  {renderTrack.artist || '未知歌手'}
                 </Text>
                 <Text style={[styles.trackMeta, { color: colors.textTertiary }]} numberOfLines={1}>
                   {subMeta}
@@ -639,9 +910,9 @@ export default function NowPlaying({ onClose }: NowPlayingProps) {
                     },
                   ]}
                 >
-                  {currentTrack.coverUrl ? (
+                  {renderTrack.coverUrl ? (
                     <Image
-                      source={{ uri: currentTrack.coverUrl }}
+                      source={{ uri: renderTrack.coverUrl }}
                       style={styles.cover}
                     />
                   ) : (
@@ -937,66 +1208,97 @@ export default function NowPlaying({ onClose }: NowPlayingProps) {
                 当前播放列表
               </Text>
               <Text style={[styles.queueSheetCount, { color: colors.textSecondary }]}>
-                共 {queue.length} 首
+                共 {queueDraft.length} 首
               </Text>
             </View>
 
-            <ScrollView
-              showsVerticalScrollIndicator={false}
-              contentContainerStyle={styles.queueSheetList}
+            <View
+              style={styles.queueListGestureLayer}
+              {...queueDragResponder.panHandlers}
             >
-              {queue.map((track, index) => {
-                const isCurrent = index === queueCurrentIndex
-                return (
-                  <TouchableOpacity
-                    key={`${track.id}-${index}`}
-                    activeOpacity={0.72}
-                    onPress={() => void handleQueueTrackPress(index)}
-                    style={[
-                      styles.queueItem,
-                      {
-                        borderBottomColor: colors.separator,
-                        backgroundColor: isCurrent
-                          ? (isDark ? 'rgba(10,132,255,0.16)' : 'rgba(0,122,255,0.1)')
-                          : 'transparent',
-                      },
-                    ]}
-                  >
-                    <View style={styles.queueItemIndex}>
-                      <Text
-                        style={[
-                          styles.queueIndexText,
-                          { color: isCurrent ? colors.accent : colors.textTertiary },
-                        ]}
-                      >
-                        {index + 1}
-                      </Text>
-                    </View>
-                    <View style={styles.queueItemInfo}>
-                      <Text
-                        numberOfLines={1}
-                        style={[
-                          styles.queueItemTitle,
-                          { color: isCurrent ? colors.accent : colors.text },
-                        ]}
-                      >
-                        {track.title}
-                      </Text>
-                      <Text numberOfLines={1} style={[styles.queueItemArtist, { color: colors.textSecondary }]}>
-                        {track.artist}
-                      </Text>
-                    </View>
-                    {isCurrent && (
-                      <Ionicons
-                        name={isPlaying ? 'volume-high' : 'pause'}
-                        size={18}
-                        color={colors.accent}
-                      />
-                    )}
-                  </TouchableOpacity>
-                )
-              })}
-            </ScrollView>
+              <ScrollView
+                showsVerticalScrollIndicator={false}
+                contentContainerStyle={styles.queueSheetList}
+                scrollEnabled={queueDragFromIndex === null}
+              >
+                {queueDraft.map((track, index) => {
+                  const isCurrent = renderTrack ? getTrackIdentity(track) === getTrackIdentity(renderTrack) : false;
+                  const isDraggingTarget = queueDragFromIndex !== null && index === queueDragToIndex;
+                  return (
+                    <Pressable
+                      key={`${track.source || 'src'}_${track.id}_${index}`}
+                      onPress={() => void handleQueueTrackPress(index)}
+                      onPressOut={() => {
+                        if (queueDragFromRef.current !== null) {
+                          finishQueueDrag();
+                        }
+                      }}
+                      onLongPress={() => handleQueueItemLongPress(index)}
+                      delayLongPress={QUEUE_DRAG_LONG_PRESS_MS}
+                      style={({ pressed }) => [
+                        styles.queueItem,
+                        {
+                          borderBottomColor: colors.separator,
+                          opacity: pressed ? 0.9 : 1,
+                          backgroundColor: isDraggingTarget
+                            ? (isDark ? 'rgba(10,132,255,0.2)' : 'rgba(0,122,255,0.16)')
+                            : (
+                              isCurrent
+                                ? (isDark ? 'rgba(10,132,255,0.16)' : 'rgba(0,122,255,0.1)')
+                                : 'transparent'
+                            ),
+                        },
+                      ]}
+                    >
+                      <View style={styles.queueItemIndex}>
+                        <Text
+                          style={[
+                            styles.queueIndexText,
+                            { color: isCurrent ? colors.accent : colors.textTertiary },
+                          ]}
+                        >
+                          {index + 1}
+                        </Text>
+                      </View>
+                      <View style={styles.queueItemInfo}>
+                        <Text
+                          numberOfLines={1}
+                          style={[
+                            styles.queueItemTitle,
+                            { color: isCurrent ? colors.accent : colors.text },
+                          ]}
+                        >
+                          {track.title || '未知歌曲'}
+                        </Text>
+                        <Text numberOfLines={1} style={[styles.queueItemArtist, { color: colors.textSecondary }]}>
+                          {track.artist || '未知歌手'}
+                        </Text>
+                      </View>
+                      <View style={styles.queueItemActions}>
+                        {isCurrent && (
+                          <Ionicons
+                            name={isPlaying ? 'volume-high' : 'pause'}
+                            size={18}
+                            color={colors.accent}
+                          />
+                        )}
+                        <Ionicons name="reorder-three-outline" size={16} color={colors.textTertiary} />
+                        <Pressable
+                          style={styles.queueMoreButton}
+                          hitSlop={8}
+                          onPress={(event) => {
+                            event.stopPropagation?.();
+                            handleQueueTrackMorePress(track);
+                          }}
+                        >
+                          <Ionicons name="ellipsis-horizontal" size={18} color={colors.textSecondary} />
+                        </Pressable>
+                      </View>
+                    </Pressable>
+                  )
+                })}
+              </ScrollView>
+            </View>
           </Animated.View>
         </View>
       )}
@@ -1325,8 +1627,11 @@ const styles = StyleSheet.create({
   queueSheetList: {
     paddingBottom: spacing.sm,
   },
+  queueListGestureLayer: {
+    flex: 1,
+  },
   queueItem: {
-    minHeight: 56,
+    height: QUEUE_ITEM_HEIGHT,
     flexDirection: 'row',
     alignItems: 'center',
     paddingHorizontal: spacing.md,
@@ -1352,5 +1657,19 @@ const styles = StyleSheet.create({
   queueItemArtist: {
     fontSize: fontSize.caption1,
     marginTop: 2,
+  },
+  queueItemActions: {
+    minWidth: 72,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'flex-end',
+    gap: 8,
+  },
+  queueMoreButton: {
+    width: 24,
+    height: 24,
+    borderRadius: 12,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
 });
