@@ -2,19 +2,25 @@
  * Library screen - user's music collection.
  */
 
-import React, { useCallback, useEffect, useMemo, useState } from 'react'
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
+  AccessibilityInfo,
   ActivityIndicator,
   Alert,
+  Animated,
+  Easing,
+  FlatList,
   Modal,
   PanResponder,
   ScrollView,
+  StyleProp,
   StyleSheet,
   Switch,
   Text,
   TextInput,
   TouchableOpacity,
   View,
+  ViewStyle,
 } from 'react-native'
 import { useSafeAreaInsets } from 'react-native-safe-area-context'
 import { Ionicons } from '@expo/vector-icons'
@@ -42,18 +48,29 @@ interface LibraryScreenProps {
 type LibrarySubPage = 'main' | 'appearance' | 'sources' | 'cache'
 type SourceModalMode = 'manual' | 'url'
 
-interface MenuItemProps {
-  icon: keyof typeof Ionicons.glyphMap
-  label: string
-  count?: number
-  color: string
+interface MotionPressableProps {
+  children: React.ReactNode
+  onPress?: () => void
+  style?: StyleProp<ViewStyle>
+  reducedMotion?: boolean
+  disabled?: boolean
+  activeScale?: number
+  activeOpacity?: number
 }
 
-interface SettingCellProps {
+interface EntryCardProps {
   icon: keyof typeof Ionicons.glyphMap
   title: string
   subtitle: string
   onPress: () => void
+  reducedMotion: boolean
+}
+
+interface OverviewItem {
+  key: string
+  icon: keyof typeof Ionicons.glyphMap
+  label: string
+  value: string
 }
 
 const THEME_OPTIONS: Array<{
@@ -85,35 +102,63 @@ const QUALITY_LABELS: Record<Quality, string> = {
   master: '超清母带 (Master)',
 }
 
-function MenuItem({ icon, label, count, color }: MenuItemProps) {
-  const { colors } = useTheme()
+function MotionPressable({
+  children,
+  onPress,
+  style,
+  reducedMotion = false,
+  disabled = false,
+  activeScale = 0.98,
+  activeOpacity = 0.92,
+}: MotionPressableProps) {
+  const scaleAnim = useRef(new Animated.Value(1)).current
+
+  const animateScale = useCallback((toValue: number, duration: number) => {
+    if (reducedMotion) return
+    Animated.timing(scaleAnim, {
+      toValue,
+      duration,
+      easing: Easing.out(Easing.quad),
+      useNativeDriver: true,
+    }).start()
+  }, [reducedMotion, scaleAnim])
+
   return (
-    <View style={[styles.menuItem, { borderBottomColor: colors.separator }]}> 
-      <View style={[styles.menuIcon, { backgroundColor: color }]}> 
-        <Ionicons name={icon} size={18} color="#FFFFFF" />
-      </View>
-      <Text style={[styles.menuLabel, { color: colors.text }]}>{label}</Text>
-      <View style={styles.menuRight}>
-        {count !== undefined && <Text style={[styles.menuCount, { color: colors.textTertiary }]}>{count}</Text>}
-        <Ionicons name="chevron-forward" size={16} color={colors.textTertiary} />
-      </View>
-    </View>
+    <Animated.View style={[style, reducedMotion ? null : { transform: [{ scale: scaleAnim }] }]}>
+      <TouchableOpacity
+        activeOpacity={activeOpacity}
+        disabled={disabled}
+        onPress={onPress}
+        onPressIn={disabled ? undefined : () => animateScale(activeScale, 90)}
+        onPressOut={disabled ? undefined : () => animateScale(1, 120)}
+      >
+        {children}
+      </TouchableOpacity>
+    </Animated.View>
   )
 }
 
-function SettingCell({ icon, title, subtitle, onPress }: SettingCellProps) {
+function EntryCard({ icon, title, subtitle, onPress, reducedMotion }: EntryCardProps) {
   const { colors } = useTheme()
   return (
-    <TouchableOpacity style={[styles.settingCell, { borderBottomColor: colors.separator }]} onPress={onPress} activeOpacity={0.75}>
-      <View style={[styles.settingCellIcon, { backgroundColor: colors.surfaceSecondary }]}> 
-        <Ionicons name={icon} size={16} color={colors.textSecondary} />
+    <MotionPressable
+      onPress={onPress}
+      reducedMotion={reducedMotion}
+      style={[styles.entryCard, { backgroundColor: colors.surface, borderColor: colors.separator }]}
+    >
+      <View style={styles.entryCardContent}>
+        <View style={[styles.entryIconWrap, { backgroundColor: colors.accentLight }]}>
+          <Ionicons name={icon} size={17} color={colors.accent} />
+        </View>
+        <View style={styles.entryMeta}>
+          <Text style={[styles.entryTitle, { color: colors.text }]}>{title}</Text>
+          <Text style={[styles.entrySubtitle, { color: colors.textSecondary }]} numberOfLines={1}>
+            {subtitle}
+          </Text>
+        </View>
+        <Ionicons name="chevron-forward" size={16} color={colors.textTertiary} />
       </View>
-      <View style={styles.settingCellMeta}>
-        <Text style={[styles.settingCellTitle, { color: colors.text }]}>{title}</Text>
-        <Text style={[styles.settingCellSubtitle, { color: colors.textSecondary }]} numberOfLines={1}>{subtitle}</Text>
-      </View>
-      <Ionicons name="chevron-forward" size={16} color={colors.textTertiary} />
-    </TouchableOpacity>
+    </MotionPressable>
   )
 }
 
@@ -134,6 +179,8 @@ export default function LibraryScreen({ onTrackPress }: LibraryScreenProps) {
   ])
 
   const [subPage, setSubPage] = useState<LibrarySubPage>('main')
+  const [reduceMotionEnabled, setReduceMotionEnabled] = useState(false)
+  const pageAnim = useRef(new Animated.Value(1)).current
 
   const [sourceModalVisible, setSourceModalVisible] = useState(false)
   const [sourceModalMode, setSourceModalMode] = useState<SourceModalMode>('manual')
@@ -144,6 +191,7 @@ export default function LibraryScreen({ onTrackPress }: LibraryScreenProps) {
   const [manualApiUrl, setManualApiUrl] = useState('')
   const [manualApiKey, setManualApiKey] = useState('')
   const [importUrl, setImportUrl] = useState('')
+
   const [cacheLoading, setCacheLoading] = useState(false)
   const [cacheEnabled, setCacheEnabled] = useState(true)
   const [cacheFileCount, setCacheFileCount] = useState(0)
@@ -156,6 +204,19 @@ export default function LibraryScreen({ onTrackPress }: LibraryScreenProps) {
       : subPage === 'sources'
         ? '自定义源管理'
         : '缓存管理'
+
+  const queueCount = playerState.playlist.length
+  const cacheSummaryText = `${cacheEnabled ? '已开启' : '已关闭'} · ${formatCacheSize(cacheSizeBytes)}`
+  const sourceSummaryText = selectedSource
+    ? selectedSource.name
+    : (musicSourceState.currentSourceId ? `内置 ${musicSourceState.currentSourceId.toUpperCase()}` : '未配置')
+
+  const overviewItems = useMemo<OverviewItem[]>(() => [
+    { key: 'theme', icon: 'contrast-outline', label: '主题模式', value: THEME_LABELS[themeMode] },
+    { key: 'source', icon: 'server-outline', label: '当前音源', value: sourceSummaryText },
+    { key: 'cache', icon: 'cloud-download-outline', label: '缓存占用', value: formatCacheSize(cacheSizeBytes) },
+    { key: 'queue', icon: 'list-outline', label: '播放队列', value: `${queueCount} 首` },
+  ], [themeMode, sourceSummaryText, cacheSizeBytes, queueCount])
 
   const ensureSelected = useCallback((id: string) => {
     if (selectedImportedSourceId) return
@@ -362,88 +423,206 @@ export default function LibraryScreen({ onTrackPress }: LibraryScreenProps) {
     void loadAudioCacheStats(true)
   }, [subPage, loadAudioCacheStats])
 
-  const cacheSummaryText = `${cacheEnabled ? '已开启' : '已关闭'} · ${formatCacheSize(cacheSizeBytes)}`
+  useEffect(() => {
+    let mounted = true
+    void AccessibilityInfo.isReduceMotionEnabled()
+      .then((enabled) => {
+        if (mounted) setReduceMotionEnabled(Boolean(enabled))
+      })
+      .catch(() => {})
+
+    const subscription = AccessibilityInfo.addEventListener?.('reduceMotionChanged', (enabled) => {
+      setReduceMotionEnabled(Boolean(enabled))
+    })
+
+    return () => {
+      mounted = false
+      subscription?.remove?.()
+    }
+  }, [])
+
+  useEffect(() => {
+    pageAnim.stopAnimation()
+    pageAnim.setValue(0)
+    Animated.timing(pageAnim, {
+      toValue: 1,
+      duration: reduceMotionEnabled ? 140 : 240,
+      easing: Easing.out(Easing.cubic),
+      useNativeDriver: true,
+    }).start()
+  }, [pageAnim, reduceMotionEnabled, subPage])
 
   const panResponder = useMemo(() => PanResponder.create({
     onStartShouldSetPanResponder: () => false,
     onMoveShouldSetPanResponder: (_, gestureState) => {
       if (subPage === 'main') return false
-      // 仅在左侧边缘触发右滑返回，避免与页面纵向滚动冲突。
-      const fromLeftEdge = gestureState.x0 <= 28
-      const rightSwipeIntent = gestureState.dx > 12
-      const mostlyHorizontal = Math.abs(gestureState.dx) > Math.abs(gestureState.dy)
+      const fromLeftEdge = gestureState.x0 <= 24
+      const rightSwipeIntent = gestureState.dx > 16
+      const mostlyHorizontal = Math.abs(gestureState.dx) > Math.abs(gestureState.dy) * 1.2
       return fromLeftEdge && rightSwipeIntent && mostlyHorizontal
     },
     onMoveShouldSetPanResponderCapture: (_, gestureState) => {
       if (subPage === 'main') return false
-      const fromLeftEdge = gestureState.x0 <= 28
-      const rightSwipeIntent = gestureState.dx > 12
-      const mostlyHorizontal = Math.abs(gestureState.dx) > Math.abs(gestureState.dy)
+      const fromLeftEdge = gestureState.x0 <= 24
+      const rightSwipeIntent = gestureState.dx > 16
+      const mostlyHorizontal = Math.abs(gestureState.dx) > Math.abs(gestureState.dy) * 1.2
       return fromLeftEdge && rightSwipeIntent && mostlyHorizontal
     },
     onPanResponderTerminationRequest: () => false,
     onPanResponderRelease: (_, gestureState) => {
-      // 子页面支持从左侧边缘向右滑返回主页面。
-      if (subPage !== 'main' && gestureState.x0 <= 28 && gestureState.dx > 45) {
+      if (subPage !== 'main' && gestureState.x0 <= 24 && gestureState.dx > 68) {
         setSubPage('main')
       }
     },
   }), [subPage])
 
-  const renderMainPage = () => (
+  const renderHeader = useCallback(() => (
+    <View style={[styles.header, { paddingTop: insets.top + spacing.sm }]}>
+      {subPage === 'main' ? (
+        <View style={styles.headerSidePlaceholder} />
+      ) : (
+        <MotionPressable
+          onPress={() => setSubPage('main')}
+          reducedMotion={reduceMotionEnabled}
+          style={[styles.backButtonShell, { backgroundColor: colors.surface }]}
+          activeScale={0.97}
+        >
+          <View style={styles.backButton}>
+            <Ionicons name="chevron-back" size={16} color={colors.textSecondary} />
+            <Text style={[styles.backText, { color: colors.textSecondary }]}>返回</Text>
+          </View>
+        </MotionPressable>
+      )}
+      <Text style={[styles.largeTitle, { color: colors.text }]}>{pageTitle}</Text>
+      <View style={styles.headerSidePlaceholder} />
+    </View>
+  ), [colors.surface, colors.text, colors.textSecondary, insets.top, pageTitle, reduceMotionEnabled, subPage])
+
+  const mainListHeader = useMemo(() => (
     <>
+      {renderHeader()}
+
       <View style={styles.section}>
-        <View style={[styles.card, { backgroundColor: colors.surface, marginHorizontal: spacing.md }]}> 
-          <SettingCell
+        <View style={styles.sectionHeader}>
+          <Text style={[styles.sectionTitle, { color: colors.text }]}>状态总览</Text>
+          <Text style={[styles.sectionSubtitle, { color: colors.textSecondary }]}>实时同步</Text>
+        </View>
+        <View style={[styles.overviewCard, { backgroundColor: colors.surface, borderColor: colors.separator }]}>
+          <View style={styles.overviewGrid}>
+            {overviewItems.map((item, index) => {
+              const showRightBorder = index % 2 === 0
+              const showBottomBorder = index < 2
+              return (
+                <View
+                  key={item.key}
+                  style={[
+                    styles.overviewItem,
+                    showRightBorder ? { borderRightWidth: StyleSheet.hairlineWidth, borderRightColor: colors.separator } : null,
+                    showBottomBorder ? { borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: colors.separator } : null,
+                  ]}
+                >
+                  <View style={styles.overviewTopRow}>
+                    <View style={[styles.overviewIconWrap, { backgroundColor: colors.surfaceSecondary }]}>
+                      <Ionicons name={item.icon} size={13} color={colors.textSecondary} />
+                    </View>
+                    <Text style={[styles.overviewLabel, { color: colors.textSecondary }]}>{item.label}</Text>
+                  </View>
+                  <Text style={[styles.overviewValue, { color: colors.text }]} numberOfLines={1}>
+                    {item.value}
+                  </Text>
+                </View>
+              )
+            })}
+          </View>
+        </View>
+      </View>
+
+      <View style={styles.section}>
+        <View style={styles.sectionHeader}>
+          <Text style={[styles.sectionTitle, { color: colors.text }]}>功能入口</Text>
+          <Text style={[styles.sectionSubtitle, { color: colors.textSecondary }]}>常用设置</Text>
+        </View>
+        <View style={styles.entryList}>
+          <EntryCard
             icon="color-palette-outline"
             title="外观设置"
             subtitle={THEME_LABELS[themeMode]}
             onPress={() => setSubPage('appearance')}
+            reducedMotion={reduceMotionEnabled}
           />
-          <SettingCell
+          <EntryCard
             icon="server-outline"
             title="自定义源管理"
             subtitle={selectedSource ? `当前：${selectedSource.name}` : '未配置音源'}
             onPress={() => setSubPage('sources')}
+            reducedMotion={reduceMotionEnabled}
           />
-          <SettingCell
+          <EntryCard
             icon="cloud-download-outline"
             title="歌曲缓存"
             subtitle={cacheSummaryText}
             onPress={() => setSubPage('cache')}
+            reducedMotion={reduceMotionEnabled}
           />
         </View>
       </View>
 
-      <View style={[styles.card, { backgroundColor: colors.surface, marginHorizontal: spacing.md, marginBottom: spacing.md }]}> 
-        <MenuItem icon="time" label="最近播放" count={playerState.playlist.length} color="#FF9500" />
-        <MenuItem icon="heart" label="我喜欢的" count={0} color="#FF2D55" />
-        <MenuItem icon="download" label="本地音乐" count={0} color="#5856D6" />
+      <View style={[styles.sectionHeader, styles.playlistSectionHeader]}>
+        <Text style={[styles.sectionTitle, { color: colors.text }]}>当前播放列表</Text>
+        <Text style={[styles.sectionSubtitle, { color: colors.textSecondary }]}>{queueCount} 首</Text>
       </View>
-
-      {playerState.playlist.length > 0 && (
-        <View style={styles.section}>
-          <View style={styles.sectionHeader}>
-            <Text style={[styles.sectionTitle, { color: colors.text }]}>当前播放列表</Text>
-            <Text style={[styles.sectionSubtitle, { color: colors.textSecondary }]}>{playerState.playlist.length} 首</Text>
-          </View>
-          <View style={[styles.card, { backgroundColor: colors.surface, marginHorizontal: spacing.md }]}> 
-            {playerState.playlist.map((track, index) => (
-              <TrackListItem
-                key={`${track.id}_${index}`}
-                track={track}
-                index={index}
-                showIndex
-                isCurrentTrack={currentTrack?.id === track.id}
-                isPlaying={isPlaying && currentTrack?.id === track.id}
-                onPress={onTrackPress}
-              />
-            ))}
-          </View>
-        </View>
-      )}
     </>
-  )
+  ), [
+    cacheSummaryText,
+    colors.separator,
+    colors.surface,
+    colors.surfaceSecondary,
+    colors.text,
+    colors.textSecondary,
+    overviewItems,
+    queueCount,
+    reduceMotionEnabled,
+    renderHeader,
+    selectedSource,
+    themeMode,
+  ])
+
+  const renderPlaylistItem = useCallback(({ item, index }: { item: Track; index: number }) => {
+    const isFirst = index === 0
+    const isLast = index === queueCount - 1
+    return (
+      <View
+        style={[
+          styles.playlistRow,
+          {
+            backgroundColor: colors.surface,
+            borderTopLeftRadius: isFirst ? borderRadius.md : 0,
+            borderTopRightRadius: isFirst ? borderRadius.md : 0,
+            borderBottomLeftRadius: isLast ? borderRadius.md : 0,
+            borderBottomRightRadius: isLast ? borderRadius.md : 0,
+            borderBottomColor: colors.separator,
+            borderBottomWidth: isLast ? 0 : StyleSheet.hairlineWidth,
+          },
+        ]}
+      >
+        <TrackListItem
+          track={item}
+          index={index}
+          showIndex
+          isCurrentTrack={currentTrack?.id === item.id}
+          isPlaying={isPlaying && currentTrack?.id === item.id}
+          onPress={onTrackPress}
+        />
+      </View>
+    )
+  }, [colors.separator, colors.surface, currentTrack?.id, isPlaying, onTrackPress, queueCount])
+
+  const mainListEmpty = useMemo(() => (
+    <View style={[styles.emptyPlaylistCard, { backgroundColor: colors.surface, borderColor: colors.separator }]}>
+      <Ionicons name="musical-notes-outline" size={18} color={colors.textTertiary} />
+      <Text style={[styles.emptyPlaylistText, { color: colors.textSecondary }]}>当前还没有播放队列</Text>
+    </View>
+  ), [colors.separator, colors.surface, colors.textSecondary, colors.textTertiary])
 
   const renderAppearancePage = () => (
     <View style={styles.section}>
@@ -451,29 +630,32 @@ export default function LibraryScreen({ onTrackPress }: LibraryScreenProps) {
         <Text style={[styles.sectionTitle, { color: colors.text }]}>主题模式</Text>
         <Text style={[styles.sectionSubtitle, { color: colors.textSecondary }]}>{THEME_LABELS[themeMode]}</Text>
       </View>
-      <View style={[styles.card, { backgroundColor: colors.surface, marginHorizontal: spacing.md }]}> 
-        {THEME_OPTIONS.map((option) => {
+      <View style={[styles.card, { backgroundColor: colors.surface, borderColor: colors.separator }]}>
+        {THEME_OPTIONS.map((option, index) => {
           const active = themeMode === option.value
+          const isLast = index === THEME_OPTIONS.length - 1
           return (
-            <TouchableOpacity
+            <MotionPressable
               key={option.value}
-              style={[styles.row, { borderBottomColor: colors.separator }]}
               onPress={() => handleThemeChange(option.value)}
-              activeOpacity={0.75}
+              reducedMotion={reduceMotionEnabled}
+              style={!isLast ? { borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: colors.separator } : null}
             >
-              <View style={[styles.themeIconWrap, { backgroundColor: active ? colors.accentLight : colors.surfaceSecondary }]}> 
-                <Ionicons name={option.icon} size={16} color={active ? colors.accent : colors.textSecondary} />
+              <View style={styles.optionRow}>
+                <View style={[styles.themeIconWrap, { backgroundColor: active ? colors.accentLight : colors.surfaceSecondary }]}>
+                  <Ionicons name={option.icon} size={16} color={active ? colors.accent : colors.textSecondary} />
+                </View>
+                <View style={styles.rowMeta}>
+                  <Text style={[styles.rowTitle, { color: colors.text }]}>{option.label}</Text>
+                  <Text style={[styles.rowDesc, { color: colors.textSecondary }]}>{option.description}</Text>
+                </View>
+                {active && <Ionicons name="checkmark-circle" size={20} color={colors.accent} />}
               </View>
-              <View style={styles.rowMeta}>
-                <Text style={[styles.rowTitle, { color: colors.text }]}>{option.label}</Text>
-                <Text style={[styles.rowDesc, { color: colors.textSecondary }]}>{option.description}</Text>
-              </View>
-              {active && <Ionicons name="checkmark-circle" size={20} color={colors.accent} />}
-            </TouchableOpacity>
+            </MotionPressable>
           )
         })}
       </View>
-      <Text style={[styles.swipeHint, { color: colors.textTertiary }]}>左侧边缘右滑可返回</Text>
+      <Text style={[styles.swipeHint, { color: colors.textTertiary }]}>从屏幕最左侧向右滑动可返回</Text>
     </View>
   )
 
@@ -482,30 +664,35 @@ export default function LibraryScreen({ onTrackPress }: LibraryScreenProps) {
       <View style={styles.section}>
         <View style={styles.sectionHeader}>
           <Text style={[styles.sectionTitle, { color: colors.text }]}>播放配置</Text>
-          <Text style={[styles.sectionSubtitle, { color: colors.textSecondary }]}>{selectedSource ? `当前：${selectedSource.name}` : '未选择'}</Text>
+          <Text style={[styles.sectionSubtitle, { color: colors.textSecondary }]}>{selectedSource ? `当前：${selectedSource.name}` : '未选择音源'}</Text>
         </View>
 
-        <View style={[styles.card, { backgroundColor: colors.surface, marginHorizontal: spacing.md }]}> 
-          <View style={[styles.switchRow, { borderBottomColor: colors.separator }]}> 
+        <View style={[styles.card, { backgroundColor: colors.surface, borderColor: colors.separator }]}>
+          <View style={[styles.switchRow, { borderBottomColor: colors.separator }]}>
             <View style={styles.rowMeta}>
               <Text style={[styles.rowTitle, { color: colors.text }]}>自动切换音源</Text>
               <Text style={[styles.rowDesc, { color: colors.textSecondary }]}>当前源失败后自动尝试其它已启用音源</Text>
             </View>
             <Switch value={musicSourceState.autoSwitch} onValueChange={handleAutoSwitchChange} />
           </View>
-          <Text style={[styles.qualityTitle, { color: colors.textSecondary }]}>音乐品质（中英对照）</Text>
+
+          <Text style={[styles.qualityTitle, { color: colors.textSecondary }]}>音源品质</Text>
           <View style={styles.qualityWrap}>
             {ALL_QUALITIES.map((quality) => {
               const active = musicSourceState.preferredQuality === quality
               return (
-                <TouchableOpacity
+                <MotionPressable
                   key={quality}
-                  style={[styles.qualityChip, { backgroundColor: active ? colors.accent : colors.surfaceSecondary }]}
                   onPress={() => handleQualityChange(quality)}
-                  activeOpacity={0.8}
+                  reducedMotion={reduceMotionEnabled}
+                  style={[styles.qualityChip, { backgroundColor: active ? colors.accent : colors.surfaceSecondary }]}
                 >
-                  <Text style={[styles.qualityText, { color: active ? '#FFFFFF' : colors.textSecondary }]}>{QUALITY_LABELS[quality]}</Text>
-                </TouchableOpacity>
+                  <View style={styles.qualityChipInner}>
+                    <Text style={[styles.qualityText, { color: active ? '#FFFFFF' : colors.textSecondary }]}>
+                      {QUALITY_LABELS[quality]}
+                    </Text>
+                  </View>
+                </MotionPressable>
               )
             })}
           </View>
@@ -519,22 +706,36 @@ export default function LibraryScreen({ onTrackPress }: LibraryScreenProps) {
         </View>
 
         <View style={styles.actionsRow}>
-          <TouchableOpacity style={[styles.actionBtn, { backgroundColor: colors.surfaceSecondary }]} onPress={openCreateSourceModal}>
-            <Ionicons name="add-circle-outline" size={14} color={colors.textSecondary} />
-            <Text style={[styles.actionText, { color: colors.textSecondary }]}>添加音源</Text>
-          </TouchableOpacity>
-          <TouchableOpacity style={[styles.actionBtn, { backgroundColor: colors.surfaceSecondary }]} onPress={handleImportLocalJsFile}>
-            <Ionicons name="document-attach-outline" size={14} color={colors.textSecondary} />
-            <Text style={[styles.actionText, { color: colors.textSecondary }]}>导入本地 JS</Text>
-          </TouchableOpacity>
+          <MotionPressable
+            onPress={openCreateSourceModal}
+            reducedMotion={reduceMotionEnabled}
+            style={[styles.actionBtn, { backgroundColor: colors.surfaceSecondary }]}
+          >
+            <View style={styles.actionBtnContent}>
+              <Ionicons name="add-circle-outline" size={15} color={colors.textSecondary} />
+              <Text style={[styles.actionText, { color: colors.textSecondary }]}>添加 / URL 导入</Text>
+            </View>
+          </MotionPressable>
+
+          <MotionPressable
+            onPress={handleImportLocalJsFile}
+            reducedMotion={reduceMotionEnabled}
+            style={[styles.actionBtn, { backgroundColor: colors.surfaceSecondary }]}
+          >
+            <View style={styles.actionBtnContent}>
+              <Ionicons name="document-attach-outline" size={15} color={colors.textSecondary} />
+              <Text style={[styles.actionText, { color: colors.textSecondary }]}>本地 JS 导入</Text>
+            </View>
+          </MotionPressable>
         </View>
 
         <View style={styles.listWrap}>
           {importedSources.length === 0 && (
-            <View style={[styles.emptyCard, { backgroundColor: colors.surface }]}> 
+            <View style={[styles.emptyCard, { backgroundColor: colors.surface, borderColor: colors.separator }]}>
               <Text style={[styles.rowDesc, { color: colors.textSecondary }]}>还没有导入音源</Text>
             </View>
           )}
+
           {importedSources.map((source) => {
             const active = source.id === selectedImportedSourceId
             const enabled = source.enabled
@@ -548,61 +749,86 @@ export default function LibraryScreen({ onTrackPress }: LibraryScreenProps) {
                     borderColor: enabled ? colors.accent : colors.separator,
                   },
                 ]}
-              > 
+              >
                 <View style={styles.sourceHeadRow}>
-                  <Text style={[styles.sourceName, { color: colors.text }]}>{source.name}</Text>
+                  <Text style={[styles.sourceName, { color: colors.text }]} numberOfLines={1}>{source.name}</Text>
                   <View
                     style={[
                       styles.sourceStatusBadge,
-                      {
-                        backgroundColor: enabled ? colors.accent : colors.surfaceSecondary,
-                      },
+                      { backgroundColor: enabled ? colors.accent : colors.surfaceSecondary },
                     ]}
                   >
-                    <Text
-                      style={[
-                        styles.sourceStatusBadgeText,
-                        { color: enabled ? '#FFFFFF' : colors.textSecondary },
-                      ]}
-                    >
+                    <Text style={[styles.sourceStatusBadgeText, { color: enabled ? '#FFFFFF' : colors.textSecondary }]}>
                       {enabled ? '已启用' : '已停用'}
                     </Text>
                   </View>
                 </View>
+
                 {active && (
                   <View style={[styles.sourceCurrentBadge, { backgroundColor: colors.surfaceSecondary }]}>
                     <Text style={[styles.sourceCurrentBadgeText, { color: colors.textSecondary }]}>当前使用中</Text>
                   </View>
                 )}
-                <Text style={[styles.sourceMeta, { color: colors.textSecondary }]}>API: {source.apiUrl || '未配置'}</Text>
+
+                <Text style={[styles.sourceMeta, { color: colors.textSecondary }]} numberOfLines={1}>
+                  API: {source.apiUrl || '未配置'}
+                </Text>
+
                 <View style={styles.sourceActions}>
-                  <TouchableOpacity style={[styles.cardBtn, { backgroundColor: colors.surfaceSecondary }]} onPress={() => handleUseSource(source)}>
-                    <Text style={[styles.cardBtnText, { color: colors.textSecondary }]}>设为当前</Text>
-                  </TouchableOpacity>
-                  <TouchableOpacity
+                  <MotionPressable
+                    onPress={() => handleUseSource(source)}
+                    reducedMotion={reduceMotionEnabled}
+                    style={[styles.cardBtn, { backgroundColor: colors.surfaceSecondary }]}
+                  >
+                    <View style={styles.cardBtnContent}>
+                      <Text style={[styles.cardBtnText, { color: colors.textSecondary }]}>设为当前</Text>
+                    </View>
+                  </MotionPressable>
+
+                  <MotionPressable
+                    onPress={() => handleToggleSource(source)}
+                    reducedMotion={reduceMotionEnabled}
                     style={[
                       styles.cardBtn,
                       {
                         backgroundColor: enabled ? 'rgba(255,59,48,0.14)' : 'rgba(52,199,89,0.16)',
                       },
                     ]}
-                    onPress={() => handleToggleSource(source)}
                   >
-                    <Text style={[styles.cardBtnText, { color: enabled ? '#D70015' : '#16833D' }]}>{enabled ? '停用' : '启用'}</Text>
-                  </TouchableOpacity>
-                  <TouchableOpacity style={[styles.cardBtn, { backgroundColor: colors.surfaceSecondary }]} onPress={() => openEditSourceModal(source)}>
-                    <Text style={[styles.cardBtnText, { color: colors.textSecondary }]}>编辑</Text>
-                  </TouchableOpacity>
-                  <TouchableOpacity style={[styles.cardBtn, { backgroundColor: colors.surfaceSecondary }]} onPress={() => handleDeleteSource(source)}>
-                    <Text style={[styles.cardBtnText, { color: colors.textSecondary }]}>删除</Text>
-                  </TouchableOpacity>
+                    <View style={styles.cardBtnContent}>
+                      <Text style={[styles.cardBtnText, { color: enabled ? '#D70015' : '#16833D' }]}>
+                        {enabled ? '停用' : '启用'}
+                      </Text>
+                    </View>
+                  </MotionPressable>
+
+                  <MotionPressable
+                    onPress={() => openEditSourceModal(source)}
+                    reducedMotion={reduceMotionEnabled}
+                    style={[styles.cardBtn, { backgroundColor: colors.surfaceSecondary }]}
+                  >
+                    <View style={styles.cardBtnContent}>
+                      <Text style={[styles.cardBtnText, { color: colors.textSecondary }]}>编辑</Text>
+                    </View>
+                  </MotionPressable>
+
+                  <MotionPressable
+                    onPress={() => handleDeleteSource(source)}
+                    reducedMotion={reduceMotionEnabled}
+                    style={[styles.cardBtn, { backgroundColor: colors.surfaceSecondary }]}
+                  >
+                    <View style={styles.cardBtnContent}>
+                      <Text style={[styles.cardBtnText, { color: colors.textSecondary }]}>删除</Text>
+                    </View>
+                  </MotionPressable>
                 </View>
               </View>
             )
           })}
         </View>
       </View>
-      <Text style={[styles.swipeHint, { color: colors.textTertiary }]}>左侧边缘右滑可返回</Text>
+
+      <Text style={[styles.swipeHint, { color: colors.textTertiary }]}>从屏幕最左侧向右滑动可返回</Text>
     </>
   )
 
@@ -614,21 +840,21 @@ export default function LibraryScreen({ onTrackPress }: LibraryScreenProps) {
           <Text style={[styles.sectionSubtitle, { color: colors.textSecondary }]}>{cacheEnabled ? '自动缓存中' : '缓存已关闭'}</Text>
         </View>
 
-        <View style={[styles.card, { backgroundColor: colors.surface, marginHorizontal: spacing.md }]}>
+        <View style={[styles.card, { backgroundColor: colors.surface, borderColor: colors.separator }]}>
           <View style={[styles.switchRow, { borderBottomColor: colors.separator }]}>
             <View style={styles.rowMeta}>
               <Text style={[styles.rowTitle, { color: colors.text }]}>开启歌曲缓存</Text>
-              <Text style={[styles.rowDesc, { color: colors.textSecondary }]}>点击播放歌曲后自动下载到本地，下次优先本地播放</Text>
+              <Text style={[styles.rowDesc, { color: colors.textSecondary }]}>点击播放歌曲后自动缓存到本地，下次优先本地播放</Text>
             </View>
             <Switch value={cacheEnabled} onValueChange={handleToggleAudioCache} />
           </View>
 
           <View style={styles.cacheStatsWrap}>
-            <View style={styles.cacheStatItem}>
+            <View style={[styles.cacheStatItem, { backgroundColor: colors.surfaceSecondary }]}>
               <Text style={[styles.cacheStatLabel, { color: colors.textSecondary }]}>已缓存歌曲</Text>
               <Text style={[styles.cacheStatValue, { color: colors.text }]}>{cacheFileCount} 首</Text>
             </View>
-            <View style={styles.cacheStatItem}>
+            <View style={[styles.cacheStatItem, { backgroundColor: colors.surfaceSecondary }]}>
               <Text style={[styles.cacheStatLabel, { color: colors.textSecondary }]}>占用空间</Text>
               <Text style={[styles.cacheStatValue, { color: colors.text }]}>{formatCacheSize(cacheSizeBytes)}</Text>
             </View>
@@ -639,56 +865,76 @@ export default function LibraryScreen({ onTrackPress }: LibraryScreenProps) {
       <View style={styles.section}>
         <View style={styles.sectionHeader}>
           <Text style={[styles.sectionTitle, { color: colors.text }]}>缓存管理</Text>
-          <Text style={[styles.sectionSubtitle, { color: colors.textSecondary }]}>{cacheLoading ? '处理中...' : '可手动清理'}</Text>
+          <Text style={[styles.sectionSubtitle, { color: colors.textSecondary }]}>{cacheLoading ? '处理中...' : '危险操作'}</Text>
         </View>
-        <View style={[styles.card, { backgroundColor: colors.surface, marginHorizontal: spacing.md }]}>
-          <TouchableOpacity
-            style={styles.dangerAction}
-            activeOpacity={0.78}
+        <View style={[styles.card, { backgroundColor: colors.surface, borderColor: colors.separator }]}>
+          <MotionPressable
             onPress={handleClearAudioCache}
+            reducedMotion={reduceMotionEnabled}
             disabled={cacheLoading}
+            style={styles.dangerAction}
           >
-            {cacheLoading
-              ? <ActivityIndicator size="small" color="#FF3B30" />
-              : <Ionicons name="trash-outline" size={16} color="#FF3B30" />}
-            <Text style={styles.dangerActionText}>删除本地缓存</Text>
-          </TouchableOpacity>
+            <View style={styles.dangerActionInner}>
+              {cacheLoading
+                ? <ActivityIndicator size="small" color={colors.danger} />
+                : <Ionicons name="trash-outline" size={17} color={colors.danger} />}
+              <Text style={[styles.dangerActionText, { color: colors.danger }]}>删除本地缓存</Text>
+            </View>
+          </MotionPressable>
         </View>
       </View>
 
-      <Text style={[styles.swipeHint, { color: colors.textTertiary }]}>左侧边缘右滑可返回</Text>
+      <Text style={[styles.swipeHint, { color: colors.textTertiary }]}>从屏幕最左侧向右滑动可返回</Text>
     </>
   )
 
+  const pageAnimatedStyle = {
+    opacity: pageAnim,
+    transform: [
+      {
+        translateY: reduceMotionEnabled
+          ? 0
+          : pageAnim.interpolate({
+            inputRange: [0, 1],
+            outputRange: [10, 0],
+          }),
+      },
+    ],
+  }
+
   return (
     <View style={[styles.container, { backgroundColor: colors.background }]} {...panResponder.panHandlers}>
-      <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={{ paddingBottom: BOTTOM_INSET + spacing.md }}>
-        <View style={[styles.header, { paddingTop: insets.top + spacing.md }]}> 
-          {subPage === 'main' ? (
-            <View style={styles.headerSidePlaceholder} />
-          ) : (
-            <TouchableOpacity style={styles.backButton} onPress={() => setSubPage('main')} activeOpacity={0.75}>
-              <Ionicons name="chevron-back" size={16} color={colors.textSecondary} />
-              <Text style={[styles.backText, { color: colors.textSecondary }]}>返回</Text>
-            </TouchableOpacity>
-          )}
-          <Text style={[styles.largeTitle, { color: colors.text }]}>{pageTitle}</Text>
-          <View style={styles.headerSidePlaceholder} />
-        </View>
-
-        {subPage === 'main' && renderMainPage()}
-        {subPage === 'appearance' && renderAppearancePage()}
-        {subPage === 'sources' && renderSourcesPage()}
-        {subPage === 'cache' && renderCachePage()}
-      </ScrollView>
+      <Animated.View style={[styles.pageContainer, pageAnimatedStyle]}>
+        {subPage === 'main' ? (
+          <FlatList
+            data={playerState.playlist}
+            keyExtractor={(item, index) => `${item.source || 'src'}_${item.id}_${index}`}
+            renderItem={renderPlaylistItem}
+            ListHeaderComponent={mainListHeader}
+            ListEmptyComponent={mainListEmpty}
+            showsVerticalScrollIndicator={false}
+            contentContainerStyle={[styles.mainListContent, { paddingBottom: BOTTOM_INSET + spacing.md }]}
+          />
+        ) : (
+          <ScrollView
+            showsVerticalScrollIndicator={false}
+            contentContainerStyle={{ paddingBottom: BOTTOM_INSET + spacing.md }}
+          >
+            {renderHeader()}
+            {subPage === 'appearance' && renderAppearancePage()}
+            {subPage === 'sources' && renderSourcesPage()}
+            {subPage === 'cache' && renderCachePage()}
+          </ScrollView>
+        )}
+      </Animated.View>
 
       <Modal transparent visible={sourceModalVisible} animationType="fade" onRequestClose={() => setSourceModalVisible(false)}>
         <View style={styles.modalMask}>
-          <View style={[styles.modalCard, { backgroundColor: colors.surface }]}> 
-            <Text style={[styles.modalTitle, { color: colors.text }]}>{editingSourceId ? '编辑音源' : '添加/URL 导入音源'}</Text>
+          <View style={[styles.modalCard, { backgroundColor: colors.surface }]}>
+            <Text style={[styles.modalTitle, { color: colors.text }]}>{editingSourceId ? '编辑音源' : '添加 / URL 导入音源'}</Text>
 
             {!editingSourceId && (
-              <View style={[styles.segmentWrap, { backgroundColor: colors.surfaceSecondary }]}> 
+              <View style={[styles.segmentWrap, { backgroundColor: colors.surfaceSecondary }]}>
                 <TouchableOpacity
                   style={[styles.segmentItem, sourceModalMode === 'manual' ? { backgroundColor: colors.accentLight } : null]}
                   onPress={() => setSourceModalMode('manual')}
@@ -706,9 +952,29 @@ export default function LibraryScreen({ onTrackPress }: LibraryScreenProps) {
 
             {(editingSourceId || sourceModalMode === 'manual') && (
               <>
-                <TextInput value={manualName} onChangeText={setManualName} placeholder="音源名称" placeholderTextColor={colors.textTertiary} style={[styles.input, { color: colors.text, borderColor: colors.separator }]} />
-                <TextInput value={manualApiUrl} onChangeText={setManualApiUrl} placeholder="API 地址" placeholderTextColor={colors.textTertiary} style={[styles.input, { color: colors.text, borderColor: colors.separator }]} />
-                <TextInput value={manualApiKey} onChangeText={setManualApiKey} placeholder="API Key(可选)" placeholderTextColor={colors.textTertiary} style={[styles.input, { color: colors.text, borderColor: colors.separator }]} />
+                <TextInput
+                  value={manualName}
+                  onChangeText={setManualName}
+                  placeholder="音源名称"
+                  placeholderTextColor={colors.textTertiary}
+                  style={[styles.input, { color: colors.text, borderColor: colors.separator }]}
+                />
+                <TextInput
+                  value={manualApiUrl}
+                  onChangeText={setManualApiUrl}
+                  placeholder="API 地址"
+                  placeholderTextColor={colors.textTertiary}
+                  autoCapitalize="none"
+                  style={[styles.input, { color: colors.text, borderColor: colors.separator }]}
+                />
+                <TextInput
+                  value={manualApiKey}
+                  onChangeText={setManualApiKey}
+                  placeholder="API Key（可选）"
+                  placeholderTextColor={colors.textTertiary}
+                  autoCapitalize="none"
+                  style={[styles.input, { color: colors.text, borderColor: colors.separator }]}
+                />
               </>
             )}
 
@@ -742,6 +1008,10 @@ export default function LibraryScreen({ onTrackPress }: LibraryScreenProps) {
 
 const styles = StyleSheet.create({
   container: { flex: 1 },
+  pageContainer: { flex: 1 },
+  mainListContent: {
+    paddingBottom: spacing.md,
+  },
   header: {
     paddingHorizontal: spacing.md,
     paddingBottom: spacing.md,
@@ -749,125 +1019,221 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'space-between',
   },
-  largeTitle: { fontSize: fontSize.largeTitle - 2, fontWeight: '800' },
-  headerSidePlaceholder: { width: 56 },
+  largeTitle: {
+    fontSize: fontSize.largeTitle - 2,
+    fontWeight: '800',
+    letterSpacing: 0.24,
+  },
+  headerSidePlaceholder: { width: 72 },
+  backButtonShell: {
+    width: 72,
+    borderRadius: borderRadius.full,
+    overflow: 'hidden',
+  },
   backButton: {
-    width: 56,
-    height: 30,
+    minHeight: 32,
     flexDirection: 'row',
     alignItems: 'center',
+    paddingHorizontal: 4,
   },
-  backText: { fontSize: fontSize.caption1, marginLeft: 2 },
-  section: { marginBottom: spacing.md },
+  backText: {
+    fontSize: fontSize.caption1,
+    marginLeft: 2,
+    fontWeight: '600',
+  },
+  section: { marginBottom: spacing.lg },
   sectionHeader: {
     flexDirection: 'row',
     justifyContent: 'space-between',
+    alignItems: 'baseline',
     paddingHorizontal: spacing.md,
     marginBottom: spacing.sm,
   },
   sectionTitle: { fontSize: fontSize.headline, fontWeight: '700' },
-  sectionSubtitle: { fontSize: fontSize.footnote, fontWeight: '500' },
-  card: { borderRadius: borderRadius.md, overflow: 'hidden' },
-  settingCell: {
+  sectionSubtitle: { fontSize: fontSize.footnote, fontWeight: '600' },
+
+  overviewCard: {
+    marginHorizontal: spacing.md,
+    borderRadius: borderRadius.lg,
+    borderWidth: StyleSheet.hairlineWidth,
+    overflow: 'hidden',
+  },
+  overviewGrid: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+  },
+  overviewItem: {
+    width: '50%',
+    minHeight: 92,
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.md,
+    justifyContent: 'center',
+  },
+  overviewTopRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: spacing.xs,
+  },
+  overviewIconWrap: {
+    width: 22,
+    height: 22,
+    borderRadius: borderRadius.full,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  overviewLabel: {
+    marginLeft: 6,
+    fontSize: fontSize.caption1,
+    fontWeight: '600',
+  },
+  overviewValue: {
+    fontSize: fontSize.subhead,
+    fontWeight: '700',
+  },
+
+  entryList: {
+    paddingHorizontal: spacing.md,
+    gap: spacing.sm,
+  },
+  entryCard: {
+    borderRadius: borderRadius.lg,
+    borderWidth: StyleSheet.hairlineWidth,
+    overflow: 'hidden',
+  },
+  entryCardContent: {
+    minHeight: 64,
     flexDirection: 'row',
     alignItems: 'center',
     paddingHorizontal: spacing.md,
-    paddingVertical: spacing.md,
-    borderBottomWidth: StyleSheet.hairlineWidth,
+    paddingVertical: spacing.sm,
+  },
+  entryIconWrap: {
+    width: 34,
+    height: 34,
+    borderRadius: 10,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  entryMeta: {
+    flex: 1,
+    marginLeft: spacing.sm,
+    marginRight: spacing.sm,
+  },
+  entryTitle: {
+    fontSize: fontSize.body,
+    fontWeight: '700',
+  },
+  entrySubtitle: {
+    marginTop: 2,
+    fontSize: fontSize.caption1,
+    fontWeight: '500',
+  },
+  playlistSectionHeader: {
+    marginBottom: spacing.sm,
+  },
+  playlistRow: {
+    marginHorizontal: spacing.md,
+    overflow: 'hidden',
+  },
+  emptyPlaylistCard: {
+    marginHorizontal: spacing.md,
+    borderRadius: borderRadius.lg,
+    borderWidth: StyleSheet.hairlineWidth,
+    paddingVertical: spacing.lg,
+    paddingHorizontal: spacing.md,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  emptyPlaylistText: {
+    marginTop: spacing.xs,
+    fontSize: fontSize.footnote,
+    fontWeight: '600',
+  },
+
+  card: {
+    marginHorizontal: spacing.md,
+    borderRadius: borderRadius.lg,
+    borderWidth: StyleSheet.hairlineWidth,
+    overflow: 'hidden',
+  },
+  optionRow: {
+    minHeight: 64,
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: spacing.md,
     gap: spacing.sm,
   },
-  settingCellIcon: {
+  themeIconWrap: {
     width: 30,
     height: 30,
     borderRadius: borderRadius.sm,
     alignItems: 'center',
     justifyContent: 'center',
   },
-  settingCellMeta: { flex: 1 },
-  settingCellTitle: { fontSize: fontSize.body, fontWeight: '600' },
-  settingCellSubtitle: { marginTop: 2, fontSize: fontSize.caption1 },
-  row: {
+  rowMeta: { flex: 1 },
+  rowTitle: { fontSize: fontSize.body, fontWeight: '700' },
+  rowDesc: { marginTop: 2, fontSize: fontSize.caption1 },
+  switchRow: {
+    minHeight: 76,
     flexDirection: 'row',
     alignItems: 'center',
     paddingHorizontal: spacing.md,
     paddingVertical: spacing.sm,
-    gap: spacing.sm,
     borderBottomWidth: StyleSheet.hairlineWidth,
   },
-  themeIconWrap: {
-    width: 28,
-    height: 28,
-    borderRadius: borderRadius.sm,
-    alignItems: 'center',
-    justifyContent: 'center',
+  qualityTitle: {
+    paddingHorizontal: spacing.md,
+    paddingTop: spacing.md,
+    fontSize: fontSize.caption1,
+    fontWeight: '600',
   },
-  rowMeta: { flex: 1 },
-  rowTitle: { fontSize: fontSize.body, fontWeight: '600' },
-  rowDesc: { marginTop: 2, fontSize: fontSize.caption1 },
-  switchRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    padding: spacing.md,
-    borderBottomWidth: StyleSheet.hairlineWidth,
-  },
-  qualityTitle: { paddingHorizontal: spacing.md, paddingTop: spacing.md, fontSize: fontSize.caption1 },
   qualityWrap: {
     flexDirection: 'row',
     flexWrap: 'wrap',
     paddingHorizontal: spacing.md,
-    marginTop: spacing.sm,
+    paddingTop: spacing.md,
     paddingBottom: spacing.md,
     gap: spacing.xs,
   },
   qualityChip: {
-    minHeight: 28,
-    borderRadius: 14,
+    borderRadius: borderRadius.full,
+    overflow: 'hidden',
+  },
+  qualityChipInner: {
+    minHeight: 30,
     paddingHorizontal: spacing.sm,
-    paddingVertical: 4,
-    alignItems: 'center',
     justifyContent: 'center',
+    alignItems: 'center',
   },
-  qualityText: { fontSize: fontSize.caption2, fontWeight: '600' },
-  cacheStatsWrap: {
-    flexDirection: 'row',
-    gap: spacing.sm,
-    paddingHorizontal: spacing.md,
-    paddingBottom: spacing.md,
-    paddingTop: spacing.sm,
-  },
-  cacheStatItem: {
-    flex: 1,
-    borderRadius: borderRadius.sm,
-    paddingHorizontal: spacing.sm,
-    paddingVertical: spacing.sm,
-    backgroundColor: 'rgba(120,120,128,0.12)',
-  },
-  cacheStatLabel: {
-    fontSize: fontSize.caption2,
-    marginBottom: 4,
-  },
-  cacheStatValue: {
-    fontSize: fontSize.subhead,
-    fontWeight: '700',
-  },
+  qualityText: { fontSize: fontSize.caption2, fontWeight: '700' },
+
   actionsRow: {
     flexDirection: 'row',
-    gap: spacing.xs,
-    marginTop: spacing.sm,
+    gap: spacing.sm,
     marginHorizontal: spacing.md,
+    marginBottom: spacing.sm,
   },
   actionBtn: {
     flex: 1,
-    height: 36,
-    borderRadius: borderRadius.sm,
+    borderRadius: borderRadius.md,
+    overflow: 'hidden',
+  },
+  actionBtnContent: {
+    minHeight: 42,
+    flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
-    flexDirection: 'row',
-    gap: 4,
+    gap: spacing.xs,
   },
-  actionText: { fontSize: fontSize.caption1, fontWeight: '600' },
-  listWrap: { gap: spacing.sm, marginHorizontal: spacing.md, marginTop: spacing.sm },
-  emptyCard: { borderRadius: borderRadius.md, padding: spacing.md, alignItems: 'center' },
+  actionText: { fontSize: fontSize.caption1, fontWeight: '700' },
+
+  listWrap: { gap: spacing.sm, marginHorizontal: spacing.md },
+  emptyCard: {
+    borderRadius: borderRadius.md,
+    borderWidth: StyleSheet.hairlineWidth,
+    padding: spacing.md,
+    alignItems: 'center',
+  },
   sourceCard: {
     borderRadius: borderRadius.md,
     padding: spacing.md,
@@ -880,7 +1246,11 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
     gap: spacing.sm,
   },
-  sourceName: { fontSize: fontSize.body, fontWeight: '700' },
+  sourceName: {
+    flex: 1,
+    fontSize: fontSize.body,
+    fontWeight: '700',
+  },
   sourceStatusBadge: {
     minHeight: 22,
     borderRadius: borderRadius.full,
@@ -898,36 +1268,70 @@ const styles = StyleSheet.create({
   },
   sourceCurrentBadgeText: { fontSize: fontSize.caption2, fontWeight: '600' },
   sourceMeta: { fontSize: fontSize.caption1 },
-  sourceActions: { flexDirection: 'row', gap: spacing.xs, marginTop: spacing.xs },
+  sourceActions: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: spacing.xs,
+    marginTop: spacing.xs,
+  },
   cardBtn: {
-    flex: 1,
-    height: 30,
+    flexGrow: 1,
+    minWidth: 64,
     borderRadius: borderRadius.sm,
+    overflow: 'hidden',
+  },
+  cardBtnContent: {
+    height: 32,
     alignItems: 'center',
     justifyContent: 'center',
+    paddingHorizontal: spacing.sm,
   },
-  cardBtnText: { fontSize: fontSize.caption1, fontWeight: '600' },
-  menuItem: {
+  cardBtnText: { fontSize: fontSize.caption1, fontWeight: '700' },
+
+  cacheStatsWrap: {
+    flexDirection: 'row',
+    gap: spacing.sm,
+    paddingHorizontal: spacing.md,
+    paddingTop: spacing.sm,
+    paddingBottom: spacing.md,
+  },
+  cacheStatItem: {
+    flex: 1,
+    borderRadius: borderRadius.sm,
+    paddingHorizontal: spacing.sm,
+    paddingVertical: spacing.sm,
+  },
+  cacheStatLabel: {
+    fontSize: fontSize.caption2,
+    marginBottom: 4,
+  },
+  cacheStatValue: {
+    fontSize: fontSize.subhead,
+    fontWeight: '700',
+  },
+  dangerAction: {
+    borderRadius: borderRadius.sm,
+    overflow: 'hidden',
+  },
+  dangerActionInner: {
+    minHeight: 46,
     flexDirection: 'row',
     alignItems: 'center',
-    padding: spacing.md,
-    borderBottomWidth: StyleSheet.hairlineWidth,
-  },
-  menuIcon: {
-    width: 28,
-    height: 28,
-    borderRadius: borderRadius.sm,
-    alignItems: 'center',
     justifyContent: 'center',
+    gap: spacing.xs,
   },
-  menuLabel: { flex: 1, marginLeft: spacing.md, fontSize: fontSize.body, fontWeight: '500' },
-  menuRight: { flexDirection: 'row', alignItems: 'center', gap: spacing.xs },
-  menuCount: { fontSize: fontSize.subhead },
+  dangerActionText: {
+    fontSize: fontSize.subhead,
+    fontWeight: '700',
+  },
+
   swipeHint: {
     textAlign: 'center',
-    marginTop: spacing.xs,
+    marginTop: spacing.md,
     fontSize: fontSize.caption2,
+    fontWeight: '500',
   },
+
   modalMask: {
     flex: 1,
     backgroundColor: 'rgba(0,0,0,0.38)',
@@ -935,11 +1339,19 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     paddingHorizontal: spacing.md,
   },
-  modalCard: { width: '100%', borderRadius: borderRadius.md, padding: spacing.md },
-  modalTitle: { fontSize: fontSize.headline, fontWeight: '700', marginBottom: spacing.sm },
+  modalCard: {
+    width: '100%',
+    borderRadius: borderRadius.md,
+    padding: spacing.md,
+  },
+  modalTitle: {
+    fontSize: fontSize.headline,
+    fontWeight: '700',
+    marginBottom: spacing.sm,
+  },
   segmentWrap: {
     height: 34,
-    borderRadius: 8,
+    borderRadius: borderRadius.sm,
     padding: 2,
     flexDirection: 'row',
     marginBottom: spacing.sm,
@@ -952,7 +1364,7 @@ const styles = StyleSheet.create({
   },
   segmentText: {
     fontSize: fontSize.caption1,
-    fontWeight: '600',
+    fontWeight: '700',
   },
   input: {
     height: 42,
@@ -968,17 +1380,5 @@ const styles = StyleSheet.create({
     borderRadius: borderRadius.sm,
     alignItems: 'center',
     justifyContent: 'center',
-  },
-  dangerAction: {
-    minHeight: 44,
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: spacing.xs,
-  },
-  dangerActionText: {
-    color: '#FF3B30',
-    fontSize: fontSize.subhead,
-    fontWeight: '700',
   },
 })
