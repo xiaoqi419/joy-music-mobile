@@ -2,7 +2,7 @@
  * Track list detail screen for leaderboard/playlist detail views
  */
 
-import React from 'react'
+import React, { useCallback, useEffect, useRef } from 'react'
 import {
   View,
   Text,
@@ -12,6 +12,8 @@ import {
   Image,
   Dimensions,
   Animated,
+  NativeScrollEvent,
+  NativeSyntheticEvent,
 } from 'react-native'
 import { LinearGradient } from 'expo-linear-gradient'
 import { useSafeAreaInsets } from 'react-native-safe-area-context'
@@ -21,6 +23,7 @@ import TrackListItem from '../../components/common/TrackListItem'
 import { usePlayerStatus } from '../../hooks/usePlayerStatus'
 import { useSwipeBack } from '../../hooks/useSwipeBack'
 import { Track, type TrackMoreActionHandler } from '../../types/music'
+import { emitScrollTopState, subscribeScrollToTop } from '../../core/ui/scrollToTopBus'
 
 const SCREEN_WIDTH = Dimensions.get('window').width
 const HEADER_HEIGHT = 280
@@ -52,6 +55,21 @@ export default function TrackListDetail({
   const insets = useSafeAreaInsets()
   const { isPlaying, currentTrack } = usePlayerStatus()
   const { panX, panHandlers } = useSwipeBack(onBack)
+  const listRef = useRef<FlatList<Track> | null>(null)
+
+  useEffect(() => {
+    return subscribeScrollToTop(() => {
+      listRef.current?.scrollToOffset({ offset: 0, animated: true })
+    })
+  }, [])
+
+  const handleScroll = useCallback((event: NativeSyntheticEvent<NativeScrollEvent>) => {
+    emitScrollTopState(event.nativeEvent.contentOffset.y <= 4)
+  }, [])
+
+  useEffect(() => {
+    emitScrollTopState(true)
+  }, [])
 
   const renderHeader = () => (
     <View>
@@ -117,6 +135,9 @@ export default function TrackListDetail({
       {...panHandlers}
     >
       <FlatList
+        ref={listRef}
+        onScroll={handleScroll}
+        scrollEventThrottle={16}
         data={tracks}
         keyExtractor={(item) => item.id}
         ListHeaderComponent={renderHeader}

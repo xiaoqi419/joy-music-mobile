@@ -2,12 +2,15 @@
  * Playlist screen - create/import/manage local playlists.
  */
 
-import React, { useCallback, useMemo, useState } from 'react'
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
   ActivityIndicator,
   Alert,
   Animated,
   FlatList,
+  Image,
+  NativeScrollEvent,
+  NativeSyntheticEvent,
   Modal,
   Pressable,
   StyleSheet,
@@ -25,6 +28,8 @@ import { RootState } from '../../store'
 import { Playlist, Track, type TrackMoreActionHandler } from '../../types/music'
 import { DiscoverSourceId } from '../../types/discover'
 import { getSongListDetail } from '../../core/discover'
+import { httpRequest } from '../../core/discover/http'
+import { emitScrollTopState, subscribeScrollToTop } from '../../core/ui/scrollToTopBus'
 import TrackListItem from '../../components/common/TrackListItem'
 import { useSwipeBack } from '../../hooks/useSwipeBack'
 
@@ -58,6 +63,19 @@ function createPlaylistId() {
 function formatUpdatedAt(updatedAt: number): string {
   const date = new Date(updatedAt)
   return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`
+}
+
+function getPlaylistCover(playlist: Playlist): string | undefined {
+  const coverUrl = String(playlist.coverUrl || '').trim()
+  if (coverUrl) return coverUrl
+
+  const trackCover = playlist.tracks.find((item) => String(item.coverUrl || '').trim())?.coverUrl
+  if (trackCover) return String(trackCover).trim()
+
+  const trackPic = playlist.tracks.find((item) => String(item.picUrl || '').trim())?.picUrl
+  if (trackPic) return String(trackPic).trim()
+
+  return undefined
 }
 
 function normalizeTrack(raw: any, index: number): Track {
@@ -121,11 +139,78 @@ function parsePlaylistCandidates(raw: unknown): ImportCandidate[] {
   return []
 }
 
-function parseSongListId(source: DiscoverSourceId, input: string): string | null {
+function collectSongListInputCandidates(input: string): string[] {
   const value = input.trim()
-  if (/^\d+$/.test(value)) return value
+  if (!value) return []
 
-  const extract = (regexes: RegExp[]): string | null => {
+  const candidates: string[] = [value]
+  const urlMatches = value.match(/https?:\/\/[^\s]+/ig) || []
+  for (const rawUrl of urlMatches) {
+    const url = rawUrl
+      .replace(/^[\s"'`([{<【（]+/, '')
+      .replace(/[\s"'`)\]}>，。！？!?,.;:】）]+$/, '')
+    if (url && !candidates.includes(url)) {
+      candidates.push(url)
+    }
+  }
+  return candidates
+}
+
+function getSongListIdRegexes(source: DiscoverSourceId): RegExp[] {
+  switch (source) {
+    case 'wy':
+      return [
+        /music\.163\.com\/playlist\?id=(\d+)/i,
+        /music\.163\.com\/.*[?&]id=(\d+)/i,
+        /playlist\/(\d+)/i,
+        /[?&]id=(\d+)/i,
+      ]
+    case 'tx':
+      return [
+        /y\.qq\.com\/n\/ryqq\/playlist\/(\d+)/i,
+        /music\.qq\.com\/.*[?&]id=(\d+)/i,
+        /i\.y\.qq\.com\/v8\/playsquare\/playlist\.html.*[?&]id=(\d+)/i,
+        /i\.y\.qq\.com\/n2\/m\/share\/details\/taoge\.html.*[?&]id=(\d+)/i,
+        /playlist[?&]id=(\d+)/i,
+        /i\.y\.qq\.com\/.*[?&]id=(\d+)/i,
+        /[?&]id=(\d+)/i,
+      ]
+    case 'kw':
+      return [
+        /kuwo\.cn\/playlist_detail\/(\d+)/i,
+        /m\.kuwo\.cn\/h5app\/playlist\/(\d+)/i,
+        /h5app\.kuwo\.cn\/m\/bodian\/collection\.html.*[?&]playlistId=(\d+)/i,
+        /[?&]playlistId=(\d+)/i,
+        /[?&](?:pid|id)=(\d+)/i,
+      ]
+    case 'kg':
+      return [
+        /kugou\.com\/yy\/special\/single\/(\d+)/i,
+        /m\.kugou\.com\/playlist\?id=(\d+)/i,
+        /[?&]id=(\d+)/i,
+        /kugou\.com\/.*[?&]specialid=(\d+)/i,
+        /[?&]specialid=(\d+)/i,
+      ]
+    case 'mg':
+      return [
+        /music\.migu\.cn\/v3\/music\/playlist\/(\d+)/i,
+        /m\.music\.migu\.cn\/playlist\?id=(\d+)/i,
+        /music\.migu\.cn\/playlist\?id=(\d+)/i,
+        /[?&]playlistId=(\d+)/i,
+        /[?&]id=(\d+)/i,
+      ]
+    default:
+      return []
+  }
+}
+
+function parseSongListId(source: DiscoverSourceId, input: string): string | null {
+  const candidates = collectSongListInputCandidates(input)
+  if (!candidates.length) return null
+  const regexes = getSongListIdRegexes(source)
+  if (!regexes.length) return null
+
+  const extract = (value: string): string | null => {
     for (const regex of regexes) {
       const match = value.match(regex)
       if (match?.[1]) return match[1]
@@ -133,37 +218,36 @@ function parseSongListId(source: DiscoverSourceId, input: string): string | null
     return null
   }
 
-  switch (source) {
-    case 'wy':
-      return extract([
-        /music\.163\.com\/playlist\?id=(\d+)/i,
-        /music\.163\.com\/.*[?&]id=(\d+)/i,
-        /playlist\/(\d+)/i,
-      ])
-    case 'tx':
-      return extract([
-        /y\.qq\.com\/n\/ryqq\/playlist\/(\d+)/i,
-        /i\.y\.qq\.com\/.*[?&]id=(\d+)/i,
-        /[?&]id=(\d+)/i,
-      ])
-    case 'kw':
-      return extract([
-        /kuwo\.cn\/playlist_detail\/(\d+)/i,
-        /[?&](?:pid|id)=(\d+)/i,
-      ])
-    case 'kg':
-      return extract([
-        /kugou\.com\/yy\/special\/single\/(\d+)/i,
-        /kugou\.com\/.*[?&]specialid=(\d+)/i,
-      ])
-    case 'mg':
-      return extract([
-        /music\.migu\.cn\/v3\/music\/playlist\/(\d+)/i,
-        /[?&]id=(\d+)/i,
-      ])
-    default:
-      return null
+  for (const value of candidates) {
+    if (/^\d+$/.test(value)) return value
+    const songListId = extract(value)
+    if (songListId) return songListId
   }
+  return null
+}
+
+async function resolveSongListShareUrl(url: string): Promise<string | null> {
+  try {
+    const response = await httpRequest<string>(url, { timeoutMs: 8000 })
+    return response.url || url
+  } catch {
+    return null
+  }
+}
+
+async function parseSongListIdWithShareUrl(source: DiscoverSourceId, input: string): Promise<string | null> {
+  const parsedDirect = parseSongListId(source, input)
+  if (parsedDirect) return parsedDirect
+
+  const urlCandidates = collectSongListInputCandidates(input)
+    .filter((item) => /^https?:\/\//i.test(item))
+  for (const candidateUrl of urlCandidates) {
+    const resolvedUrl = await resolveSongListShareUrl(candidateUrl)
+    if (!resolvedUrl) continue
+    const resolvedId = parseSongListId(source, resolvedUrl)
+    if (resolvedId) return resolvedId
+  }
+  return null
 }
 
 export default function PlaylistScreen({ onTrackPress, onTrackMorePress, onPlayAll }: PlaylistScreenProps) {
@@ -184,7 +268,49 @@ export default function PlaylistScreen({ onTrackPress, onTrackMorePress, onPlayA
     () => playlists.find((item) => item.id === selectedPlaylistId) || null,
     [playlists, selectedPlaylistId],
   )
+  const mainListRef = useRef<FlatList<Playlist> | null>(null)
+  const detailListRef = useRef<FlatList<Track> | null>(null)
   const { panX, panHandlers } = useSwipeBack(() => setSelectedPlaylistId(null))
+
+  useEffect(() => {
+    if (!selectedPlaylistId) {
+      panX.setValue(0)
+    }
+  }, [panX, selectedPlaylistId])
+
+  useEffect(() => {
+    return subscribeScrollToTop(() => {
+      if (selectedPlaylist) {
+        detailListRef.current?.scrollToOffset({ offset: 0, animated: true })
+        return
+      }
+      mainListRef.current?.scrollToOffset({ offset: 0, animated: true })
+    })
+  }, [selectedPlaylist])
+
+  const handleMainListScroll = useCallback((event: NativeSyntheticEvent<NativeScrollEvent>) => {
+    if (selectedPlaylist) return
+    emitScrollTopState(event.nativeEvent.contentOffset.y <= 4)
+  }, [selectedPlaylist])
+
+  const handleDetailListScroll = useCallback((event: NativeSyntheticEvent<NativeScrollEvent>) => {
+    if (!selectedPlaylist) return
+    emitScrollTopState(event.nativeEvent.contentOffset.y <= 4)
+  }, [selectedPlaylist])
+
+  useEffect(() => {
+    emitScrollTopState(true)
+  }, [selectedPlaylistId])
+
+  const openPlaylistDetail = useCallback((playlistId: string) => {
+    panX.setValue(0)
+    setSelectedPlaylistId(playlistId)
+  }, [panX])
+
+  const closePlaylistDetail = useCallback(() => {
+    panX.setValue(0)
+    setSelectedPlaylistId(null)
+  }, [panX])
 
   const [showCreateModal, setShowCreateModal] = useState(false)
   const [createName, setCreateName] = useState('')
@@ -197,8 +323,9 @@ export default function PlaylistScreen({ onTrackPress, onTrackMorePress, onPlayA
   const [importLoading, setImportLoading] = useState(false)
 
   const closeNetworkImportModal = useCallback(() => {
+    if (importLoading) return
     setShowNetworkImportModal(false)
-  }, [])
+  }, [importLoading])
 
   const openNetworkImportModal = useCallback(() => {
     // 先关闭导入方式弹窗，再打开网络导入，避免双 Modal 叠加导致点击无响应。
@@ -328,7 +455,7 @@ export default function PlaylistScreen({ onTrackPress, onTrackMorePress, onPlayA
       return
     }
 
-    const playlistId = parseSongListId(networkSource, input)
+    const playlistId = await parseSongListIdWithShareUrl(networkSource, input)
     if (!playlistId) {
       Alert.alert('识别失败', '未识别到有效歌单 ID，请检查链接或直接输入纯数字 ID')
       return
@@ -399,27 +526,25 @@ export default function PlaylistScreen({ onTrackPress, onTrackMorePress, onPlayA
             dispatch({ type: 'PLAYLIST_SET_CURRENT', payload: null })
           }
           if (selectedPlaylistId === playlist.id) {
-            setSelectedPlaylistId(null)
+            closePlaylistDetail()
           }
         },
       },
     ])
-  }, [currentPlaylistId, dispatch, selectedPlaylistId])
-
-  const handleSetCurrentPlaylist = useCallback((playlistId: string) => {
-    dispatch({ type: 'PLAYLIST_SET_CURRENT', payload: playlistId })
-  }, [dispatch])
+  }, [closePlaylistDetail, currentPlaylistId, dispatch, selectedPlaylistId])
 
   const handlePlayAll = useCallback((playlist: Playlist) => {
     if (!playlist.tracks.length) {
       Alert.alert('歌单为空', '请先导入或添加歌曲')
       return
     }
+    dispatch({ type: 'PLAYLIST_SET_CURRENT', payload: playlist.id })
     onPlayAll?.(playlist.tracks)
-  }, [onPlayAll])
+  }, [dispatch, onPlayAll])
 
   const renderPlaylistCard = useCallback(({ item }: { item: Playlist }) => {
     const isCurrent = item.id === currentPlaylistId
+    const coverUrl = getPlaylistCover(item)
     return (
       <Pressable
         style={({ pressed }) => [
@@ -430,11 +555,13 @@ export default function PlaylistScreen({ onTrackPress, onTrackMorePress, onPlayA
             opacity: pressed ? 0.92 : 1,
           },
         ]}
-        onPress={() => setSelectedPlaylistId(item.id)}
+        onPress={() => openPlaylistDetail(item.id)}
       >
         <View style={styles.playlistCardHeader}>
           <View style={[styles.coverPlaceholder, { backgroundColor: colors.surfaceSecondary }]}>
-            <Ionicons name="albums-outline" size={18} color={colors.textSecondary} />
+            {coverUrl
+              ? <Image source={{ uri: coverUrl }} style={styles.coverImage} resizeMode="cover" />
+              : <Ionicons name="albums-outline" size={18} color={colors.textSecondary} />}
           </View>
           <View style={styles.playlistMeta}>
             <Text style={[styles.playlistName, { color: colors.text }]} numberOfLines={1}>{item.name}</Text>
@@ -456,22 +583,17 @@ export default function PlaylistScreen({ onTrackPress, onTrackMorePress, onPlayA
           <Pressable
             style={styles.deleteButton}
             hitSlop={8}
-            onPress={() => handleDeletePlaylist(item)}
+            onPressIn={(event) => event.stopPropagation?.()}
+            onPress={(event) => {
+              event.stopPropagation?.()
+              handleDeletePlaylist(item)
+            }}
           >
             <Ionicons name="trash-outline" size={16} color={colors.textTertiary} />
           </Pressable>
         </View>
 
         <View style={styles.playlistActions}>
-          <Pressable
-            style={({ pressed }) => [
-              styles.actionBtn,
-              { backgroundColor: colors.surfaceSecondary, opacity: pressed ? 0.8 : 1 },
-            ]}
-            onPress={() => handleSetCurrentPlaylist(item.id)}
-          >
-            <Text style={[styles.actionBtnText, { color: colors.textSecondary }]}>设为当前</Text>
-          </Pressable>
           <Pressable
             style={({ pressed }) => [
               styles.actionBtn,
@@ -485,10 +607,13 @@ export default function PlaylistScreen({ onTrackPress, onTrackMorePress, onPlayA
         </View>
       </Pressable>
     )
-  }, [colors.accent, colors.accentLight, colors.separator, colors.surface, colors.surfaceSecondary, colors.text, colors.textSecondary, colors.textTertiary, currentPlaylistId, handleDeletePlaylist, handlePlayAll, handleSetCurrentPlaylist])
+  }, [colors.accent, colors.accentLight, colors.separator, colors.surface, colors.surfaceSecondary, colors.text, colors.textSecondary, colors.textTertiary, currentPlaylistId, handleDeletePlaylist, handlePlayAll, openPlaylistDetail])
 
   const renderMain = () => (
     <FlatList
+      ref={mainListRef}
+      onScroll={handleMainListScroll}
+      scrollEventThrottle={16}
       data={playlists}
       keyExtractor={(item) => item.id}
       renderItem={renderPlaylistCard}
@@ -548,6 +673,7 @@ export default function PlaylistScreen({ onTrackPress, onTrackMorePress, onPlayA
 
   const renderDetail = () => {
     if (!selectedPlaylist) return null
+    const detailCover = getPlaylistCover(selectedPlaylist)
 
     return (
       <Animated.View
@@ -561,6 +687,9 @@ export default function PlaylistScreen({ onTrackPress, onTrackMorePress, onPlayA
         {...panHandlers}
       >
         <FlatList
+          ref={detailListRef}
+          onScroll={handleDetailListScroll}
+          scrollEventThrottle={16}
           data={selectedPlaylist.tracks}
           keyExtractor={(item, index) => `${item.id}_${index}`}
           ListHeaderComponent={(
@@ -571,7 +700,7 @@ export default function PlaylistScreen({ onTrackPress, onTrackMorePress, onPlayA
                     styles.backButton,
                     { backgroundColor: colors.surface, opacity: pressed ? 0.8 : 1 },
                   ]}
-                  onPress={() => setSelectedPlaylistId(null)}
+                  onPress={closePlaylistDetail}
                 >
                   <Ionicons name="chevron-back" size={16} color={colors.textSecondary} />
                   <Text style={[styles.backText, { color: colors.textSecondary }]}>返回</Text>
@@ -581,10 +710,19 @@ export default function PlaylistScreen({ onTrackPress, onTrackMorePress, onPlayA
               </View>
 
               <View style={[styles.detailInfoCard, { backgroundColor: colors.surface, borderColor: colors.separator }]}>
-                <Text style={[styles.detailPlaylistName, { color: colors.text }]} numberOfLines={2}>{selectedPlaylist.name}</Text>
-                <Text style={[styles.detailPlaylistDesc, { color: colors.textSecondary }]} numberOfLines={2}>
-                  {selectedPlaylist.description || '未填写描述'}
-                </Text>
+                <View style={styles.detailInfoTopRow}>
+                  <View style={[styles.detailCover, { backgroundColor: colors.surfaceSecondary }]}>
+                    {detailCover
+                      ? <Image source={{ uri: detailCover }} style={styles.detailCoverImage} resizeMode="cover" />
+                      : <Ionicons name="albums-outline" size={20} color={colors.textSecondary} />}
+                  </View>
+                  <View style={styles.detailInfoText}>
+                    <Text style={[styles.detailPlaylistName, { color: colors.text }]} numberOfLines={2}>{selectedPlaylist.name}</Text>
+                    <Text style={[styles.detailPlaylistDesc, { color: colors.textSecondary }]} numberOfLines={2}>
+                      {selectedPlaylist.description || '未填写描述'}
+                    </Text>
+                  </View>
+                </View>
                 <View style={styles.detailMetaRow}>
                   <Text style={[styles.detailMetaText, { color: colors.textSecondary }]}>{selectedPlaylist.tracks.length} 首歌曲</Text>
                   <Text style={[styles.playlistMetaDot, { color: colors.textTertiary }]}>·</Text>
@@ -751,9 +889,10 @@ export default function PlaylistScreen({ onTrackPress, onTrackMorePress, onPlayA
                       styles.sourceChip,
                       {
                         backgroundColor: active ? colors.accent : colors.surfaceSecondary,
-                        opacity: pressed ? 0.86 : 1,
+                        opacity: importLoading ? 0.55 : (pressed ? 0.86 : 1),
                       },
                     ]}
+                    disabled={importLoading}
                     onPress={() => setNetworkSource(option.id)}
                   >
                     <Text style={[styles.sourceChipText, { color: active ? '#FFFFFF' : colors.textSecondary }]}>
@@ -770,6 +909,7 @@ export default function PlaylistScreen({ onTrackPress, onTrackMorePress, onPlayA
               placeholder="粘贴歌单链接或输入纯数字 ID"
               placeholderTextColor={colors.textTertiary}
               autoCapitalize="none"
+              editable={!importLoading}
               style={[styles.input, { color: colors.text, borderColor: colors.separator }]}
             />
 
@@ -777,9 +917,10 @@ export default function PlaylistScreen({ onTrackPress, onTrackMorePress, onPlayA
               <Pressable
                 style={({ pressed }) => [
                   styles.modalBtn,
-                  { backgroundColor: colors.surfaceSecondary, opacity: pressed ? 0.84 : 1 },
+                  { backgroundColor: colors.surfaceSecondary, opacity: importLoading ? 0.55 : (pressed ? 0.84 : 1) },
                 ]}
                 onPress={closeNetworkImportModal}
+                disabled={importLoading}
               >
                 <Text style={[styles.modalBtnText, { color: colors.textSecondary }]}>取消</Text>
               </Pressable>
@@ -797,11 +938,19 @@ export default function PlaylistScreen({ onTrackPress, onTrackMorePress, onPlayA
               </Pressable>
             </View>
           </View>
+          {importLoading && (
+            <View style={styles.importGuardMask}>
+              <View style={[styles.importGuardCard, { backgroundColor: colors.surfaceElevated, borderColor: colors.separator }]}>
+                <ActivityIndicator size="small" color={colors.accent} />
+                <Text style={[styles.importGuardText, { color: colors.textSecondary }]}>歌单导入中，请勿退出</Text>
+              </View>
+            </View>
+          )}
         </View>
       </Modal>
 
       {importLoading && (
-        <View style={styles.loadingMask} pointerEvents="none">
+        <View style={styles.loadingMask} pointerEvents="auto">
           <View style={[styles.loadingCard, { backgroundColor: colors.surfaceElevated, borderColor: colors.separator }]}>
             <ActivityIndicator size="small" color={colors.accent} />
             <Text style={[styles.loadingText, { color: colors.textSecondary }]}>歌单导入中...</Text>
@@ -923,6 +1072,11 @@ const styles = StyleSheet.create({
     borderRadius: borderRadius.sm,
     alignItems: 'center',
     justifyContent: 'center',
+    overflow: 'hidden',
+  },
+  coverImage: {
+    width: '100%',
+    height: '100%',
   },
   playlistMeta: {
     flex: 1,
@@ -1019,6 +1173,28 @@ const styles = StyleSheet.create({
     borderWidth: StyleSheet.hairlineWidth,
     padding: spacing.md,
     marginBottom: spacing.md,
+  },
+  detailInfoTopRow: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: spacing.sm,
+  },
+  detailCover: {
+    width: 68,
+    height: 68,
+    borderRadius: borderRadius.md,
+    alignItems: 'center',
+    justifyContent: 'center',
+    overflow: 'hidden',
+  },
+  detailCoverImage: {
+    width: '100%',
+    height: '100%',
+  },
+  detailInfoText: {
+    flex: 1,
+    minHeight: 68,
+    justifyContent: 'center',
   },
   detailPlaylistName: {
     fontSize: fontSize.title3,
@@ -1138,15 +1314,35 @@ const styles = StyleSheet.create({
     fontSize: fontSize.footnote,
     marginBottom: spacing.sm,
   },
+  importGuardMask: {
+    ...StyleSheet.absoluteFillObject,
+    backgroundColor: 'rgba(0, 0, 0, 0.28)',
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: spacing.lg,
+  },
+  importGuardCard: {
+    minHeight: 44,
+    borderRadius: borderRadius.full,
+    borderWidth: StyleSheet.hairlineWidth,
+    paddingHorizontal: spacing.md,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.xs,
+  },
+  importGuardText: {
+    fontSize: fontSize.caption1,
+    fontWeight: '700',
+  },
   loadingMask: {
     ...StyleSheet.absoluteFillObject,
+    backgroundColor: 'rgba(0, 0, 0, 0.14)',
     alignItems: 'center',
-    justifyContent: 'flex-end',
-    paddingBottom: BOTTOM_INSET + spacing.lg,
-    pointerEvents: 'none',
+    justifyContent: 'center',
+    paddingHorizontal: spacing.lg,
   },
   loadingCard: {
-    minHeight: 36,
+    minHeight: 44,
     borderRadius: borderRadius.full,
     borderWidth: StyleSheet.hairlineWidth,
     paddingHorizontal: spacing.md,

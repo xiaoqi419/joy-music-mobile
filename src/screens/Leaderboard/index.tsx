@@ -3,8 +3,16 @@
  * 从 Discover 页面拆分而来，作为独立 tab 页。
  */
 
-import React, { useCallback, useEffect, useMemo, useState } from 'react'
-import { View, Text, ScrollView, StyleSheet, TouchableOpacity } from 'react-native'
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import {
+  View,
+  Text,
+  ScrollView,
+  StyleSheet,
+  TouchableOpacity,
+  NativeScrollEvent,
+  NativeSyntheticEvent,
+} from 'react-native'
 import { LinearGradient } from 'expo-linear-gradient'
 import { Ionicons } from '@expo/vector-icons'
 import { useSafeAreaInsets } from 'react-native-safe-area-context'
@@ -18,6 +26,7 @@ import {
   getLeaderboardSetting,
   saveLeaderboardSetting,
 } from '../../core/discover'
+import { emitScrollTopState, subscribeScrollToTop } from '../../core/ui/scrollToTopBus'
 
 interface LeaderboardScreenProps {
   onLeaderboardPress?: (board: LeaderboardBoardItem) => void
@@ -36,6 +45,7 @@ export default function LeaderboardScreen({
   const [topSource, setTopSource] = useState<DiscoverSourceId>('kw')
   const [boards, setBoards] = useState<LeaderboardBoardItem[]>([])
   const [lastUpdatedAt, setLastUpdatedAt] = useState<Date | null>(null)
+  const scrollRef = useRef<ScrollView | null>(null)
 
   const [topLoading, setTopLoading] = useState(false)
   const [topError, setTopError] = useState<string | null>(null)
@@ -83,6 +93,12 @@ export default function LeaderboardScreen({
     void loadLeaderboard(topSource)
   }, [topSource, loadLeaderboard])
 
+  useEffect(() => {
+    return subscribeScrollToTop(() => {
+      scrollRef.current?.scrollTo({ y: 0, animated: true })
+    })
+  }, [])
+
   const handleRefresh = useCallback(() => {
     void loadLeaderboard(topSource)
   }, [topSource, loadLeaderboard])
@@ -91,6 +107,10 @@ export default function LeaderboardScreen({
     () => <SourceChips value={topSource} onChange={setTopSource} />,
     [topSource]
   )
+
+  const handleScroll = useCallback((event: NativeSyntheticEvent<NativeScrollEvent>) => {
+    emitScrollTopState(event.nativeEvent.contentOffset.y <= 4)
+  }, [])
 
   const lastUpdatedLabel = useMemo(() => {
     if (!lastUpdatedAt) return '数据准备中'
@@ -108,6 +128,9 @@ export default function LeaderboardScreen({
   return (
     <View style={[styles.container, { backgroundColor: colors.background }]}>
       <ScrollView
+        ref={scrollRef}
+        onScroll={handleScroll}
+        scrollEventThrottle={16}
         showsVerticalScrollIndicator={false}
         contentContainerStyle={{ paddingBottom: BOTTOM_INSET + spacing.md }}
       >

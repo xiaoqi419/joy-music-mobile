@@ -17,6 +17,7 @@ import { DiscoverSourceAdapter } from './types'
 
 const SONG_LIMIT = 30
 const DETAIL_LIMIT = 1000
+const SONG_DETAIL_BATCH_SIZE = 200
 
 const sortList = [{ id: 'hot', tid: 'hot', name: 'Hot' }]
 
@@ -70,6 +71,36 @@ function mapTrack(item: any): Track {
     // @ts-expect-error keep runtime metadata for URL resolver fallback
     _types: qualitys,
   }
+}
+
+async function fetchTrackDetailsByIds(ids: string[]): Promise<Track[]> {
+  const validIds = ids
+    .map((id) => String(id || '').trim())
+    .filter((id) => /^\d+$/.test(id))
+  if (!validIds.length) return []
+
+  const tracks: Track[] = []
+  for (let index = 0; index < validIds.length; index += SONG_DETAIL_BATCH_SIZE) {
+    const batchIds = validIds.slice(index, index + SONG_DETAIL_BATCH_SIZE)
+    const c = `[${batchIds.map((id) => `{"id":${id}}`).join(',')}]`
+    const idsText = `[${batchIds.join(',')}]`
+    try {
+      const detailResp = await withRetry(() =>
+        wyRequest('https://music.163.com/api/v3/song/detail', {
+          c,
+          ids: idsText,
+        })
+      )
+      const songs = Array.isArray(detailResp.data?.songs) ? detailResp.data.songs : []
+      tracks.push(...songs.map((item: any) => mapTrack(item)))
+    } catch (error) {
+      console.warn(
+        `[Discover][WY] fetch song detail batch failed: ${batchIds[0]} - ${batchIds[batchIds.length - 1]}`,
+        error
+      )
+    }
+  }
+  return tracks
 }
 
 /** 从 URL 或字符串中解析歌单 ID */
@@ -160,11 +191,45 @@ async function getListDetail(id: string, page: number): Promise<SongListDetail> 
     })
   )
   const playlist = resp.data?.playlist || {}
-  const allTracks = (playlist.tracks || []).map((item: any) => mapTrack(item))
+  const baseTracks = (playlist.tracks || []).map((item: any) => mapTrack(item))
+  const trackIds = Array.isArray(playlist.trackIds)
+    ? playlist.trackIds
+      .map((item: any) => String(item?.id || '').trim())
+      .filter((item: string) => /^\d+$/.test(item))
+    : []
+  const total = Number(playlist.trackCount || baseTracks.length)
+
+  let allTracks = baseTracks
+  if (trackIds.length > baseTracks.length) {
+    const trackMap = new Map<string, Track>()
+    for (const track of baseTracks) {
+      const songId = String(track.songmid || '').trim()
+      if (songId) trackMap.set(songId, track)
+    }
+
+    const missingIds = trackIds.filter((trackId) => !trackMap.has(trackId))
+    if (missingIds.length) {
+      const extraTracks = await fetchTrackDetailsByIds(missingIds)
+      for (const track of extraTracks) {
+        const songId = String(track.songmid || '').trim()
+        if (songId && !trackMap.has(songId)) {
+          trackMap.set(songId, track)
+        }
+      }
+    }
+
+    const orderedTracks = trackIds
+      .map((trackId) => trackMap.get(trackId))
+      .filter((item): item is Track => Boolean(item))
+
+    if (orderedTracks.length) {
+      allTracks = orderedTracks
+    }
+  }
+
   const limit = DETAIL_LIMIT
   const start = (page - 1) * limit
   const list = allTracks.slice(start, start + limit)
-  const total = Number(playlist.trackCount || allTracks.length)
 
   return {
     id: playlistId,

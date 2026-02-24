@@ -1,7 +1,9 @@
-import React, { useCallback, useEffect, useMemo, useState } from 'react'
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
   ActivityIndicator,
   Animated,
+  NativeScrollEvent,
+  NativeSyntheticEvent,
   RefreshControl,
   ScrollView,
   StyleSheet,
@@ -13,6 +15,7 @@ import { Ionicons } from '@expo/vector-icons'
 import { useSafeAreaInsets } from 'react-native-safe-area-context'
 import { borderRadius, BOTTOM_INSET, fontSize, spacing, useTheme } from '../../theme'
 import { discoverSourceList, getSongListPage, getSongListSortList, getSongListTags } from '../../core/discover'
+import { emitScrollTopState, subscribeScrollToTop } from '../../core/ui/scrollToTopBus'
 import { DiscoverSourceId, SongListItem, SongListTagInfo } from '../../types/discover'
 import { useSwipeBack } from '../../hooks/useSwipeBack'
 import PlaylistSection from './PlaylistSection'
@@ -70,6 +73,7 @@ export default function SongListMorePage({
   const [showTagDropdown, setShowTagDropdown] = useState(false)
   const [showSourceDropdown, setShowSourceDropdown] = useState(false)
   const [reloadSeed, setReloadSeed] = useState(0)
+  const contentScrollRef = useRef<ScrollView | null>(null)
 
   const sortList = useMemo(() => getSongListSortList(source), [source])
   const safeSortId = localSortId || sortList[0]?.id || 'new'
@@ -154,6 +158,16 @@ export default function SongListMorePage({
   useEffect(() => {
     void loadPlaylists()
   }, [loadPlaylists])
+
+  useEffect(() => {
+    return subscribeScrollToTop(() => {
+      contentScrollRef.current?.scrollTo({ y: 0, animated: true })
+    })
+  }, [])
+
+  const handleContentScroll = useCallback((event: NativeSyntheticEvent<NativeScrollEvent>) => {
+    emitScrollTopState(event.nativeEvent.contentOffset.y <= 4)
+  }, [])
 
   const handleSortSelect = useCallback((nextSortId: string) => {
     const resolvedSortId = nextSortId || sortList[0]?.id || 'new'
@@ -338,6 +352,9 @@ export default function SongListMorePage({
       </View>
 
       <ScrollView
+        ref={contentScrollRef}
+        onScroll={handleContentScroll}
+        scrollEventThrottle={16}
         style={styles.content}
         contentContainerStyle={{
           paddingBottom: BOTTOM_INSET + spacing.xxl,

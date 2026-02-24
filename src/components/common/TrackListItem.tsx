@@ -2,20 +2,33 @@
  * Single track list item component
  */
 
-import React from 'react'
-import { View, Text, TouchableOpacity, StyleSheet, Image, GestureResponderEvent } from 'react-native'
-import { Ionicons } from '@expo/vector-icons'
-import { useTheme, spacing, fontSize, borderRadius, TRACK_ITEM_HEIGHT } from '../../theme'
-import { Track } from '../../types/music'
+import React from 'react';
+import {
+  View,
+  Text,
+  TouchableOpacity,
+  StyleSheet,
+  Image,
+  GestureResponderEvent,
+} from 'react-native';
+import { Ionicons } from '@expo/vector-icons';
+import {
+  useTheme,
+  spacing,
+  fontSize,
+  borderRadius,
+  TRACK_ITEM_HEIGHT,
+} from '../../theme';
+import { Track } from '../../types/music';
 
 interface TrackListItemProps {
-  track: Track
-  index?: number
-  isPlaying?: boolean
-  isCurrentTrack?: boolean
-  showIndex?: boolean
-  onPress?: (track: Track) => void
-  onMorePress?: (track: Track) => void
+  track: Track;
+  index?: number;
+  isPlaying?: boolean;
+  isCurrentTrack?: boolean;
+  showIndex?: boolean;
+  onPress?: (track: Track) => void;
+  onMorePress?: (track: Track) => void;
 }
 
 export default function TrackListItem({
@@ -27,7 +40,7 @@ export default function TrackListItem({
   onPress,
   onMorePress,
 }: TrackListItemProps) {
-  const { colors } = useTheme()
+  const { colors } = useTheme();
 
   return (
     <TouchableOpacity
@@ -45,7 +58,12 @@ export default function TrackListItem({
               color={colors.accent}
             />
           ) : (
-            <Text style={[styles.index, { color: colors.textTertiary }]}>
+            <Text
+              allowFontScaling={false}
+              numberOfLines={1}
+              ellipsizeMode="clip"
+              style={[styles.index, { color: colors.textTertiary }]}
+            >
               {(index ?? 0) + 1}
             </Text>
           )}
@@ -54,11 +72,17 @@ export default function TrackListItem({
 
       {/* Cover art (shown when index is hidden) */}
       {!showIndex && (
-        <View style={[styles.cover, { backgroundColor: colors.surfaceElevated }]}>
+        <View
+          style={[styles.cover, { backgroundColor: colors.surfaceElevated }]}
+        >
           {track.coverUrl ? (
             <Image source={{ uri: track.coverUrl }} style={styles.coverImage} />
           ) : (
-            <Ionicons name="musical-note" size={16} color={colors.textTertiary} />
+            <Ionicons
+              name="musical-note"
+              size={16}
+              color={colors.textTertiary}
+            />
           )}
         </View>
       )}
@@ -74,7 +98,10 @@ export default function TrackListItem({
         >
           {track.title}
         </Text>
-        <Text style={[styles.artist, { color: colors.textSecondary }]} numberOfLines={1}>
+        <Text
+          style={[styles.artist, { color: colors.textSecondary }]}
+          numberOfLines={1}
+        >
           {track.artist}
           {track.album ? ` - ${track.album}` : ''}
         </Text>
@@ -85,14 +112,18 @@ export default function TrackListItem({
         style={styles.moreButton}
         activeOpacity={0.6}
         onPress={(event: GestureResponderEvent) => {
-          event.stopPropagation?.()
-          onMorePress?.(track)
+          event.stopPropagation?.();
+          onMorePress?.(track);
         }}
       >
-        <Ionicons name="ellipsis-horizontal" size={18} color={colors.textTertiary} />
+        <Ionicons
+          name="ellipsis-horizontal"
+          size={18}
+          color={colors.textTertiary}
+        />
       </TouchableOpacity>
     </TouchableOpacity>
-  )
+  );
 }
 
 const styles = StyleSheet.create({
@@ -102,13 +133,15 @@ const styles = StyleSheet.create({
     paddingHorizontal: spacing.md,
   },
   indexContainer: {
-    width: 32,
+    width: 40,
     alignItems: 'center',
     justifyContent: 'center',
+    paddingRight: 0,
   },
   index: {
     fontSize: fontSize.subhead,
     fontWeight: '500',
+    textAlign: 'center',
   },
   cover: {
     width: 46,
@@ -144,4 +177,4 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
-})
+});

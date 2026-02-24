@@ -4,12 +4,23 @@
  */
 
 import React, { useCallback, useEffect, useState } from 'react'
-import { ActivityIndicator, Alert, StatusBar, StyleSheet, Text, View, type AlertButton } from 'react-native'
+import {
+  ActivityIndicator,
+  Alert,
+  Pressable,
+  StatusBar,
+  StyleSheet,
+  Text,
+  View,
+  type AlertButton,
+} from 'react-native'
 import { SafeAreaProvider, useSafeAreaInsets } from 'react-native-safe-area-context'
 import { Provider as ReduxProvider, useDispatch, useSelector } from 'react-redux'
 import * as SplashScreen from 'expo-splash-screen'
+import { Ionicons } from '@expo/vector-icons'
+import { LinearGradient } from 'expo-linear-gradient'
 import store from './src/store'
-import { useTheme, CAPSULE_BOTTOM_MARGIN, CAPSULE_TAB_HEIGHT } from './src/theme'
+import { useTheme, borderRadius, CAPSULE_BOTTOM_MARGIN, CAPSULE_TAB_HEIGHT } from './src/theme'
 import TabBar, { TabName } from './src/components/common/TabBar'
 import MiniPlayer from './src/components/common/MiniPlayer'
 import DiscoverScreen from './src/screens/Discover'
@@ -34,6 +45,7 @@ import {
   savePlaylistSettings,
 } from './src/core/config/playlist'
 import { applyJoyRuntimeConfig, hasConfiguredJoySource } from './src/core/music/sources/joy'
+import { emitScrollToTop, subscribeScrollTopState } from './src/core/ui/scrollToTopBus'
 
 // Keep the splash screen visible while we fetch resources
 SplashScreen.preventAutoHideAsync()
@@ -45,6 +57,8 @@ interface DetailView {
   gradientColors?: [string, string]
   tracks: Track[]
 }
+
+const SCROLL_FAB_SIZE = 52
 
 function App() {
   return (
@@ -73,7 +87,14 @@ function AppContent() {
   const [playlistHydrated, setPlaylistHydrated] = useState(false)
   const [isResolvingTrack, setIsResolvingTrack] = useState(() => playerController.isResolvingTrack())
   const [resolvingHint, setResolvingHint] = useState(() => playerController.getResolvingHint())
+  const [isScrollAtTop, setIsScrollAtTop] = useState(true)
+  const [isFabPressed, setIsFabPressed] = useState(false)
   const shouldHideTabBar = activeTab === 'discover' && isDiscoverMoreVisible
+  const miniPlayerBottom = Math.max(insets.bottom, 16) + (
+    shouldHideTabBar ? 10 : CAPSULE_BOTTOM_MARGIN + CAPSULE_TAB_HEIGHT + 10
+  )
+  const scrollTopFabBottom = miniPlayerBottom + 74
+  const showScrollFab = !showNowPlaying && !detailLoading && !isScrollAtTop
 
   const getReadablePlayError = useCallback((error: unknown) => {
     const message = error instanceof Error ? error.message : '获取歌曲链接失败'
@@ -127,7 +148,7 @@ function AppContent() {
 
     const init = async () => {
       try {
-        // 启动时先恢复主题，避免用户每次重启都回到默认主题。
+        // 启动时先恢复主题，避免用户每次重启都回到默认主题�?
         const savedTheme = await loadThemeMode()
         if (active) {
           dispatch({
@@ -137,7 +158,7 @@ function AppContent() {
         }
         if (active) setThemeHydrated(true)
 
-        // 启动时恢复自定义音源配置，并注入播放运行时。
+        // 启动时恢复自定义音源配置，并注入播放运行时�?
         const sourceSettings = await loadMusicSourceSettings()
         if (active) {
           dispatch({
@@ -149,7 +170,7 @@ function AppContent() {
           setMusicSourceHydrated(true)
         }
 
-        // 启动时恢复本地歌单配置。
+        // 启动时恢复本地歌单配置�?
         const playlistSettings = await loadPlaylistSettings()
         if (active) {
           dispatch({
@@ -221,10 +242,23 @@ function AppContent() {
     })
   }, [playlistHydrated, playlistState.currentPlaylistId, playlistState.playlists])
 
+  useEffect(() => {
+    return subscribeScrollTopState((isAtTop) => {
+      setIsScrollAtTop(isAtTop)
+    })
+  }, [])
+
+  useEffect(() => {
+    if (activeTab !== 'discover' && isDiscoverMoreVisible) {
+      setIsDiscoverMoreVisible(false)
+    }
+    setIsScrollAtTop(true)
+  }, [activeTab, isDiscoverMoreVisible])
+
   const handleTrackPress = useCallback(async (track: Track) => {
     try {
       const currentTrack = playerController.getCurrentTrack()
-      // 如果点击的是当前正在播放的歌曲，直接打开播放页继续播放
+      // 如果点击的是当前正在播放的歌曲，直接打开播放页继续播�?
       if (currentTrack?.id === track.id) {
         setShowNowPlaying(true)
         return
@@ -272,7 +306,7 @@ function AppContent() {
   const handleAddTrackToPlaylist = useCallback((track: Track) => {
     const customPlaylists = playlistState.playlists
     if (!customPlaylists.length) {
-      Alert.alert('暂无自定义歌单', '请先在「歌单」页新建歌单后再添加歌曲。')
+      Alert.alert('暂无自定义歌单', '请先在「歌单」页新建歌单后再添加歌曲')
       return
     }
 
@@ -326,7 +360,7 @@ function AppContent() {
       }
       const playbackStatus = await playerController.getPlaybackStatus()
       syncPlayerStateToStore(playbackStatus)
-      Alert.alert('已移除', `「${track.title}」已从播放列表移除`)
+      Alert.alert('已移除', `「${track.title}」已从播放队列移除`)
     } catch (error) {
       Alert.alert('移除失败', getReadablePlayError(error))
     }
@@ -337,6 +371,9 @@ function AppContent() {
       {
         text: '下一首播放',
         onPress: () => {
+          if (!ensureTracksHaveConfiguredSource([track])) {
+            return
+          }
           try {
             playerController.insertTrackNext(track)
             syncPlayerStateToStore()
@@ -380,6 +417,7 @@ function AppContent() {
       actionButtons,
     )
   }, [
+    ensureTracksHaveConfiguredSource,
     getReadablePlayError,
     handleAddTrackToPlaylist,
     handleRemoveTrackFromPlaylist,
@@ -514,11 +552,9 @@ function AppContent() {
     setDetailView(null)
   }, [])
 
-  useEffect(() => {
-    if (activeTab !== 'discover' && isDiscoverMoreVisible) {
-      setIsDiscoverMoreVisible(false)
-    }
-  }, [activeTab, isDiscoverMoreVisible])
+  const handleScrollToTopPress = useCallback(() => {
+    emitScrollToTop()
+  }, [])
 
   return (
     <View style={[styles.container, { backgroundColor: colors.background }]}>
@@ -570,7 +606,7 @@ function AppContent() {
       {detailLoading && (
         <View style={styles.loadingOverlay}>
           <ActivityIndicator size="large" color={colors.accent} />
-          <Text style={[styles.loadingText, { color: colors.text }]}>加载中...</Text>
+          <Text style={[styles.loadingText, { color: colors.text }]}>加载�?..</Text>
         </View>
       )}
 
@@ -603,19 +639,51 @@ function AppContent() {
         </View>
       )}
 
-      {/* 条形 Mini 播放器 - 位于 TabBar 上方 */}
+      {/* 条形 Mini 播放�?- 位于 TabBar 上方 */}
       <View
         style={{
           position: 'absolute',
           left: 16,
           right: 16,
-          bottom: Math.max(insets.bottom, 16) + (
-            shouldHideTabBar ? 10 : CAPSULE_BOTTOM_MARGIN + CAPSULE_TAB_HEIGHT + 10
-          ),
+          bottom: miniPlayerBottom,
         }}
       >
         <MiniPlayer onOpenPlayer={() => setShowNowPlaying(true)} />
       </View>
+
+      {showScrollFab && (
+        <Pressable
+          style={[
+            styles.scrollTopFab,
+            {
+              width: SCROLL_FAB_SIZE,
+              height: SCROLL_FAB_SIZE,
+              right: 10,
+              bottom: scrollTopFabBottom,
+              borderColor: colors.separator,
+              opacity: isFabPressed ? 0.88 : 1,
+            },
+          ]}
+          onPress={handleScrollToTopPress}
+          onPressIn={() => setIsFabPressed(true)}
+          onPressOut={() => setIsFabPressed(false)}
+          accessibilityRole="button"
+          accessibilityLabel="回到顶部"
+        >
+          <LinearGradient
+            colors={
+              isDark
+                ? ['rgba(92, 173, 255, 0.95)', 'rgba(38, 120, 230, 0.94)']
+                : ['rgba(140, 218, 255, 0.98)', 'rgba(60, 151, 255, 0.95)']
+            }
+            start={{ x: 0, y: 0 }}
+            end={{ x: 1, y: 1 }}
+            style={styles.scrollTopFabInner}
+          >
+            <Ionicons name="chevron-up" size={20} color="#FFFFFF" />
+          </LinearGradient>
+        </Pressable>
+      )}
 
       {showNowPlaying && (
         <NowPlaying onClose={() => setShowNowPlaying(false)} />
@@ -670,6 +738,23 @@ const styles = StyleSheet.create({
     flex: 1,
     fontSize: 12,
     fontWeight: '600',
+  },
+  scrollTopFab: {
+    position: 'absolute',
+    borderRadius: borderRadius.full,
+    overflow: 'hidden',
+    borderWidth: StyleSheet.hairlineWidth,
+    zIndex: 95,
+    shadowColor: '#071B36',
+    shadowOffset: { width: 0, height: 8 },
+    shadowOpacity: 0.24,
+    shadowRadius: 14,
+    elevation: 10,
+  },
+  scrollTopFabInner: {
+    flex: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
 })
 

@@ -11,6 +11,8 @@ import {
   Easing,
   FlatList,
   Modal,
+  NativeScrollEvent,
+  NativeSyntheticEvent,
   PanResponder,
   ScrollView,
   StyleProp,
@@ -40,6 +42,7 @@ import {
   ImportedMusicSource,
 } from '../../core/config/musicSource'
 import { audioFileCache, formatCacheSize } from '../../core/music/audioCache'
+import { emitScrollTopState, subscribeScrollToTop } from '../../core/ui/scrollToTopBus'
 
 interface LibraryScreenProps {
   onTrackPress?: (track: Track) => void
@@ -182,6 +185,8 @@ export default function LibraryScreen({ onTrackPress, onTrackMorePress }: Librar
   const [subPage, setSubPage] = useState<LibrarySubPage>('main')
   const [reduceMotionEnabled, setReduceMotionEnabled] = useState(false)
   const pageAnim = useRef(new Animated.Value(1)).current
+  const mainListRef = useRef<FlatList<Track> | null>(null)
+  const subPageScrollRef = useRef<ScrollView | null>(null)
 
   const [sourceModalVisible, setSourceModalVisible] = useState(false)
   const [sourceModalMode, setSourceModalMode] = useState<SourceModalMode>('manual')
@@ -423,6 +428,30 @@ export default function LibraryScreen({ onTrackPress, onTrackMorePress }: Librar
     if (subPage !== 'cache') return
     void loadAudioCacheStats(true)
   }, [subPage, loadAudioCacheStats])
+
+  useEffect(() => {
+    return subscribeScrollToTop(() => {
+      if (subPage === 'main') {
+        mainListRef.current?.scrollToOffset({ offset: 0, animated: true })
+        return
+      }
+      subPageScrollRef.current?.scrollTo({ y: 0, animated: true })
+    })
+  }, [subPage])
+
+  const handleMainListScroll = useCallback((event: NativeSyntheticEvent<NativeScrollEvent>) => {
+    if (subPage !== 'main') return
+    emitScrollTopState(event.nativeEvent.contentOffset.y <= 4)
+  }, [subPage])
+
+  const handleSubPageScroll = useCallback((event: NativeSyntheticEvent<NativeScrollEvent>) => {
+    if (subPage === 'main') return
+    emitScrollTopState(event.nativeEvent.contentOffset.y <= 4)
+  }, [subPage])
+
+  useEffect(() => {
+    emitScrollTopState(true)
+  }, [subPage])
 
   useEffect(() => {
     let mounted = true
@@ -909,6 +938,9 @@ export default function LibraryScreen({ onTrackPress, onTrackMorePress }: Librar
       <Animated.View style={[styles.pageContainer, pageAnimatedStyle]}>
         {subPage === 'main' ? (
           <FlatList
+            ref={mainListRef}
+            onScroll={handleMainListScroll}
+            scrollEventThrottle={16}
             data={playerState.playlist}
             keyExtractor={(item, index) => `${item.source || 'src'}_${item.id}_${index}`}
             renderItem={renderPlaylistItem}
@@ -919,6 +951,9 @@ export default function LibraryScreen({ onTrackPress, onTrackMorePress }: Librar
           />
         ) : (
           <ScrollView
+            ref={subPageScrollRef}
+            onScroll={handleSubPageScroll}
+            scrollEventThrottle={16}
             showsVerticalScrollIndicator={false}
             contentContainerStyle={{ paddingBottom: BOTTOM_INSET + spacing.md }}
           >

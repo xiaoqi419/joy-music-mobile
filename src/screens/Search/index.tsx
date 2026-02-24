@@ -14,6 +14,8 @@ import {
   FlatList,
   ActivityIndicator,
   RefreshControl,
+  NativeScrollEvent,
+  NativeSyntheticEvent,
 } from 'react-native'
 import { useSafeAreaInsets } from 'react-native-safe-area-context'
 import { Ionicons } from '@expo/vector-icons'
@@ -23,6 +25,7 @@ import TrackListItem from '../../components/common/TrackListItem'
 import SourceChips from '../../components/common/SourceChips'
 import { usePlayerStatus } from '../../hooks/usePlayerStatus'
 import musicSearch from '../../core/search'
+import { emitScrollTopState, subscribeScrollToTop } from '../../core/ui/scrollToTopBus'
 import { DiscoverSourceId } from '../../types/discover'
 import { Track, type TrackMoreActionHandler } from '../../types/music'
 
@@ -78,6 +81,8 @@ export default function SearchScreen({ onTrackPress, onTrackMorePress }: SearchS
   const requestTokenRef = useRef(0)
   const skipDebounceRef = useRef(false)
   const debounceTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const hotScrollRef = useRef<ScrollView | null>(null)
+  const resultListRef = useRef<FlatList<Track> | null>(null)
 
   const trimmedQuery = query.trim()
 
@@ -206,6 +211,28 @@ export default function SearchScreen({ onTrackPress, onTrackMorePress }: SearchS
     }
   }, [trimmedQuery, source, runSearch])
 
+  useEffect(() => {
+    return subscribeScrollToTop(() => {
+      if (trimmedQuery) {
+        resultListRef.current?.scrollToOffset({ offset: 0, animated: true })
+        return
+      }
+      hotScrollRef.current?.scrollTo({ y: 0, animated: true })
+    })
+  }, [trimmedQuery])
+
+  const handleHotScroll = useCallback((event: NativeSyntheticEvent<NativeScrollEvent>) => {
+    emitScrollTopState(event.nativeEvent.contentOffset.y <= 4)
+  }, [])
+
+  const handleResultScroll = useCallback((event: NativeSyntheticEvent<NativeScrollEvent>) => {
+    emitScrollTopState(event.nativeEvent.contentOffset.y <= 4)
+  }, [])
+
+  useEffect(() => {
+    emitScrollTopState(true)
+  }, [trimmedQuery])
+
   const handleSubmitSearch = useCallback(() => {
     if (!trimmedQuery) return
     if (debounceTimerRef.current) {
@@ -333,6 +360,9 @@ export default function SearchScreen({ onTrackPress, onTrackMorePress }: SearchS
 
       {!trimmedQuery ? (
         <ScrollView
+          ref={hotScrollRef}
+          onScroll={handleHotScroll}
+          scrollEventThrottle={16}
           showsVerticalScrollIndicator={false}
           contentContainerStyle={{ paddingBottom: BOTTOM_INSET + spacing.md }}
         >
@@ -355,6 +385,9 @@ export default function SearchScreen({ onTrackPress, onTrackMorePress }: SearchS
         </ScrollView>
       ) : (
         <FlatList
+          ref={resultListRef}
+          onScroll={handleResultScroll}
+          scrollEventThrottle={16}
           data={tracks}
           keyExtractor={item => item.id}
           renderItem={renderTrackItem}

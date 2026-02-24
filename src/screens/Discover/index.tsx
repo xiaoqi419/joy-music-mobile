@@ -3,8 +3,17 @@
  * 排行榜已拆分至独立 tab 页。
  */
 
-import React, { useCallback, useEffect, useMemo, useState } from 'react'
-import { View, Text, ScrollView, RefreshControl, ActivityIndicator, StyleSheet } from 'react-native'
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import {
+  View,
+  Text,
+  ScrollView,
+  RefreshControl,
+  ActivityIndicator,
+  StyleSheet,
+  NativeScrollEvent,
+  NativeSyntheticEvent,
+} from 'react-native'
 import { useSafeAreaInsets } from 'react-native-safe-area-context'
 import { useTheme, spacing, fontSize, BOTTOM_INSET } from '../../theme'
 import SectionHeader from '../../components/common/SectionHeader'
@@ -18,6 +27,7 @@ import {
   getSongListSetting,
   saveSongListSetting,
 } from '../../core/discover'
+import { emitScrollTopState, subscribeScrollToTop } from '../../core/ui/scrollToTopBus'
 
 interface DiscoverScreenProps {
   onPlaylistPress?: (playlist: SongListItem) => void
@@ -43,6 +53,7 @@ export default function DiscoverScreen({
   const [playlistError, setPlaylistError] = useState<string | null>(null)
   const [refreshing, setRefreshing] = useState(false)
   const [showSongListMore, setShowSongListMore] = useState(false)
+  const mainScrollRef = useRef<ScrollView | null>(null)
 
   useEffect(() => {
     onMorePageVisibilityChange?.(showSongListMore)
@@ -53,6 +64,13 @@ export default function DiscoverScreen({
       onMorePageVisibilityChange?.(false)
     }
   }, [onMorePageVisibilityChange])
+
+  useEffect(() => {
+    return subscribeScrollToTop(() => {
+      if (showSongListMore) return
+      mainScrollRef.current?.scrollTo({ y: 0, animated: true })
+    })
+  }, [showSongListMore])
 
   /** 加载歌单列表 */
   const loadSongList = useCallback(
@@ -142,6 +160,16 @@ export default function DiscoverScreen({
     void loadSongList(songListSource, songListSort, songListTag, true)
   }, [songListSource, songListSort, songListTag, loadSongList])
 
+  const handleMainScroll = useCallback((event: NativeSyntheticEvent<NativeScrollEvent>) => {
+    emitScrollTopState(event.nativeEvent.contentOffset.y <= 4)
+  }, [])
+
+  useEffect(() => {
+    if (showSongListMore) {
+      emitScrollTopState(true)
+    }
+  }, [showSongListMore])
+
   return (
     <View style={[styles.container, { backgroundColor: colors.background }]}>
       {showSongListMore ? (
@@ -156,6 +184,9 @@ export default function DiscoverScreen({
         />
       ) : (
         <ScrollView
+          ref={mainScrollRef}
+          onScroll={handleMainScroll}
+          scrollEventThrottle={16}
           showsVerticalScrollIndicator={false}
           contentContainerStyle={{ paddingBottom: BOTTOM_INSET + spacing.md }}
           refreshControl={
