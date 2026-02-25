@@ -384,6 +384,23 @@ class MusicPlayerController {
   }
 
   /**
+   * Clear current playback queue and stop player.
+   */
+  async clearQueue(): Promise<void> {
+    this.playlist = []
+    this.currentIndex = -1
+    this.currentTrack = null
+    this.isPlaying = false
+    this.currentTimeMillis = 0
+    this.durationMillis = 0
+    this.playRequestId += 1
+    this.clearResolveTrackState()
+    this.setCurrentResolvedQuality(null)
+    await expoAVPlayer.stop().catch(() => {})
+    console.log('[PlayerController] Queue cleared')
+  }
+
+  /**
    * Pause playback
    */
   async pause(): Promise<void> {

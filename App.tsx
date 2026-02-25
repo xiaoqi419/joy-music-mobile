@@ -15,6 +15,7 @@ import {
   type AlertButton,
 } from 'react-native'
 import { SafeAreaProvider, useSafeAreaInsets } from 'react-native-safe-area-context'
+import { GestureHandlerRootView } from 'react-native-gesture-handler'
 import { Provider as ReduxProvider, useDispatch, useSelector } from 'react-redux'
 import * as SplashScreen from 'expo-splash-screen'
 import { Ionicons } from '@expo/vector-icons'
@@ -72,9 +73,11 @@ function createPlaylistId() {
 function App() {
   return (
     <ReduxProvider store={store}>
-      <SafeAreaProvider>
-        <AppContent />
-      </SafeAreaProvider>
+      <GestureHandlerRootView style={styles.gestureRoot}>
+        <SafeAreaProvider>
+          <AppContent />
+        </SafeAreaProvider>
+      </GestureHandlerRootView>
     </ReduxProvider>
   )
 }
@@ -192,7 +195,7 @@ function AppContent() {
 
     const init = async () => {
       try {
-        // 启动时先恢复主题，避免用户每次重启都回到默认主题�?
+        // 启动时先恢复主题，避免用户每次重启都回到默认主题。
         const savedTheme = await loadThemeMode()
         if (active) {
           dispatch({
@@ -202,7 +205,7 @@ function AppContent() {
         }
         if (active) setThemeHydrated(true)
 
-        // 启动时恢复自定义音源配置，并注入播放运行时�?
+        // 启动时恢复自定义音源配置，并注入播放运行时。
         const sourceSettings = await loadMusicSourceSettings()
         if (active) {
           dispatch({
@@ -214,7 +217,7 @@ function AppContent() {
           setMusicSourceHydrated(true)
         }
 
-        // 启动时恢复本地歌单配置�?
+        // 启动时恢复本地歌单配置。
         const playlistSettings = await loadPlaylistSettings()
         if (active) {
           dispatch({
@@ -302,7 +305,7 @@ function AppContent() {
   const handleTrackPress = useCallback(async (track: Track) => {
     try {
       const currentTrack = playerController.getCurrentTrack()
-      // 如果点击的是当前正在播放的歌曲，直接打开播放页继续播�?
+      // 如果点击的是当前正在播放的歌曲，直接打开播放页继续播放。
       if (currentTrack?.id === track.id) {
         setShowNowPlaying(true)
         return
@@ -791,7 +794,7 @@ function AppContent() {
       {detailLoading && (
         <View style={styles.loadingOverlay}>
           <ActivityIndicator size="large" color={colors.accent} />
-          <Text style={[styles.loadingText, { color: colors.text }]}>加载�?..</Text>
+          <Text style={[styles.loadingText, { color: colors.text }]}>加载中...</Text>
         </View>
       )}
 
@@ -824,7 +827,7 @@ function AppContent() {
         </View>
       )}
 
-      {/* 条形 Mini 播放�?- 位于 TabBar 上方 */}
+      {/* 条形 Mini 播放器 - 位于 TabBar 上方 */}
       <View
         style={{
           position: 'absolute',
@@ -883,6 +886,9 @@ function AppContent() {
 }
 
 const styles = StyleSheet.create({
+  gestureRoot: {
+    flex: 1,
+  },
   container: {
     flex: 1,
   },

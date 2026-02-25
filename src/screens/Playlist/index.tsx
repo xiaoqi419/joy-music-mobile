@@ -67,6 +67,16 @@ const IMPORT_SOURCE_OPTIONS: Array<{
 const DETAIL_TRACK_INITIAL_COUNT = 80
 const DETAIL_TRACK_BATCH_SIZE = 80
 
+type DetailTrackSortMode = 'default' | 'titleAsc' | 'artistAsc' | 'durationDesc' | 'durationAsc'
+
+const DETAIL_TRACK_SORT_LABEL: Record<DetailTrackSortMode, string> = {
+  default: '默认顺序',
+  titleAsc: '标题 A-Z',
+  artistAsc: '歌手 A-Z',
+  durationDesc: '时长从长到短',
+  durationAsc: '时长从短到长',
+}
+
 function createPlaylistId() {
   return `pl_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`
 }
@@ -416,15 +426,57 @@ export default function PlaylistScreen({ onTrackPress, onTrackMorePress, onPlayA
     () => playlists.find((item) => item.id === selectedPlaylistId) || null,
     [playlists, selectedPlaylistId],
   )
+  const [isDetailSearchVisible, setIsDetailSearchVisible] = useState(false)
+  const [detailSearchKeyword, setDetailSearchKeyword] = useState('')
+  const [detailSortMode, setDetailSortMode] = useState<DetailTrackSortMode>('default')
+  const normalizedDetailSearchKeyword = useMemo(
+    () => detailSearchKeyword.trim().toLowerCase(),
+    [detailSearchKeyword],
+  )
+  const detailProcessedTracks = useMemo(() => {
+    if (!selectedPlaylist) return []
+
+    let nextTracks = selectedPlaylist.tracks
+    if (normalizedDetailSearchKeyword) {
+      nextTracks = nextTracks.filter((track) => {
+        const title = String(track.title || '').toLowerCase()
+        const artist = String(track.artist || '').toLowerCase()
+        const album = String(track.album || '').toLowerCase()
+        return title.includes(normalizedDetailSearchKeyword)
+          || artist.includes(normalizedDetailSearchKeyword)
+          || album.includes(normalizedDetailSearchKeyword)
+      })
+    }
+
+    if (detailSortMode === 'default') {
+      return nextTracks
+    }
+
+    const sortedTracks = [...nextTracks]
+    sortedTracks.sort((first, second) => {
+      switch (detailSortMode) {
+        case 'titleAsc':
+          return String(first.title || '').localeCompare(String(second.title || ''), 'zh-Hans-CN')
+        case 'artistAsc':
+          return String(first.artist || '').localeCompare(String(second.artist || ''), 'zh-Hans-CN')
+        case 'durationAsc':
+          return Number(first.duration || 0) - Number(second.duration || 0)
+        case 'durationDesc':
+          return Number(second.duration || 0) - Number(first.duration || 0)
+        default:
+          return 0
+      }
+    })
+    return sortedTracks
+  }, [detailSortMode, normalizedDetailSearchKeyword, selectedPlaylist])
+
   const [detailVisibleTrackCount, setDetailVisibleTrackCount] = useState(DETAIL_TRACK_INITIAL_COUNT)
   const detailVisibleTracks = useMemo(() => {
-    if (!selectedPlaylist) return []
-    return selectedPlaylist.tracks.slice(0, Math.min(detailVisibleTrackCount, selectedPlaylist.tracks.length))
-  }, [detailVisibleTrackCount, selectedPlaylist])
+    return detailProcessedTracks.slice(0, Math.min(detailVisibleTrackCount, detailProcessedTracks.length))
+  }, [detailProcessedTracks, detailVisibleTrackCount])
   const hasMoreDetailTracks = useMemo(() => {
-    if (!selectedPlaylist) return false
-    return detailVisibleTracks.length < selectedPlaylist.tracks.length
-  }, [detailVisibleTracks.length, selectedPlaylist])
+    return detailVisibleTracks.length < detailProcessedTracks.length
+  }, [detailProcessedTracks.length, detailVisibleTracks.length])
 
   const mainListRef = useRef<FlatList<Playlist> | null>(null)
   const detailListRef = useRef<FlatList<Track> | null>(null)
@@ -462,6 +514,12 @@ export default function PlaylistScreen({ onTrackPress, onTrackMorePress, onPlayA
 
   useEffect(() => {
     setDetailVisibleTrackCount(DETAIL_TRACK_INITIAL_COUNT)
+  }, [detailSortMode, normalizedDetailSearchKeyword, selectedPlaylistId])
+
+  useEffect(() => {
+    setIsDetailSearchVisible(false)
+    setDetailSearchKeyword('')
+    setDetailSortMode('default')
   }, [selectedPlaylistId])
 
   const openPlaylistDetail = useCallback((playlistId: string) => {
@@ -475,12 +533,11 @@ export default function PlaylistScreen({ onTrackPress, onTrackMorePress, onPlayA
   }, [panX])
 
   const handleLoadMoreDetailTracks = useCallback(() => {
-    if (!selectedPlaylist) return
     setDetailVisibleTrackCount((prev) => {
-      if (prev >= selectedPlaylist.tracks.length) return prev
-      return Math.min(prev + DETAIL_TRACK_BATCH_SIZE, selectedPlaylist.tracks.length)
+      if (prev >= detailProcessedTracks.length) return prev
+      return Math.min(prev + DETAIL_TRACK_BATCH_SIZE, detailProcessedTracks.length)
     })
-  }, [selectedPlaylist])
+  }, [detailProcessedTracks.length])
 
   const [showCreateModal, setShowCreateModal] = useState(false)
   const [createName, setCreateName] = useState('')
@@ -784,13 +841,34 @@ export default function PlaylistScreen({ onTrackPress, onTrackMorePress, onPlayA
     Alert.alert('收藏成功', `已将「${importedPlaylist.name}」导入为自定义歌单`)
   }, [ensureUniqueName, savePlaylist])
 
-  const handleDetailQuickAction = useCallback((action: 'comment' | 'search') => {
-    if (action === 'search') {
-      Alert.alert('提示', '歌单内搜索功能即将上线')
-      return
-    }
+  const handleDetailQuickAction = useCallback(() => {
     Alert.alert('提示', '评论功能正在规划中')
   }, [])
+
+  const handleToggleDetailSearch = useCallback(() => {
+    setIsDetailSearchVisible((prev) => {
+      const next = !prev
+      if (!next) {
+        setDetailSearchKeyword('')
+      }
+      return next
+    })
+  }, [])
+
+  const handleOpenDetailSortMenu = useCallback(() => {
+    const sortOptions: DetailTrackSortMode[] = ['default', 'titleAsc', 'artistAsc', 'durationDesc', 'durationAsc']
+    Alert.alert(
+      '排序方式',
+      `当前：${DETAIL_TRACK_SORT_LABEL[detailSortMode]}`,
+      [
+        ...sortOptions.map((mode) => ({
+          text: detailSortMode === mode ? `✓ ${DETAIL_TRACK_SORT_LABEL[mode]}` : DETAIL_TRACK_SORT_LABEL[mode],
+          onPress: () => setDetailSortMode(mode),
+        })),
+        { text: '取消', style: 'cancel' as const },
+      ],
+    )
+  }, [detailSortMode])
 
   const renderDetailTrackItem = useCallback(({ item, index }: { item: Track; index: number }) => {
     const isCurrent = currentTrack?.id === item.id
@@ -997,6 +1075,11 @@ export default function PlaylistScreen({ onTrackPress, onTrackMorePress, onPlayA
     const detailCover = getPlaylistCover(selectedPlaylist)
     const sourceLabel = getPlaylistDisplayLabel(selectedPlaylist)
     const canFavoritePlaylist = false
+    const detailFilteredCount = detailProcessedTracks.length
+    const showDetailSearchPanel = isDetailSearchVisible || normalizedDetailSearchKeyword.length > 0
+    const detailListMetaLabel = normalizedDetailSearchKeyword
+      ? `共 ${detailFilteredCount}/${selectedPlaylist.tracks.length} 首 · ${DETAIL_TRACK_SORT_LABEL[detailSortMode]}`
+      : `共 ${detailFilteredCount} 首 · ${DETAIL_TRACK_SORT_LABEL[detailSortMode]}`
     const detailHeroColors = buildCoverGradientColors(detailCover, isDark)
     const normalizedDescription = String(selectedPlaylist.description || '').trim()
     const detailHint = /网络歌单导入/i.test(normalizedDescription) ? '' : normalizedDescription
@@ -1082,7 +1165,7 @@ export default function PlaylistScreen({ onTrackPress, onTrackMorePress, onPlayA
                   </Pressable>
                   <Pressable
                     style={({ pressed }) => [styles.detailActionCapsule, { opacity: pressed ? 0.84 : 1 }]}
-                    onPress={() => handleDetailQuickAction('comment')}
+                    onPress={handleDetailQuickAction}
                   >
                     <Ionicons name="chatbubble-ellipses-outline" size={15} color="#FFFFFF" />
                     <Text style={styles.detailActionCapsuleText}>评论</Text>
@@ -1127,18 +1210,40 @@ export default function PlaylistScreen({ onTrackPress, onTrackMorePress, onPlayA
                 <View style={styles.detailPlayTools}>
                   <Pressable
                     style={({ pressed }) => [styles.detailToolBtn, { opacity: pressed ? 0.82 : 1 }]}
-                    onPress={() => handleDetailQuickAction('search')}
+                    onPress={handleToggleDetailSearch}
                   >
                     <Ionicons name="search-outline" size={18} color={colors.textSecondary} />
                   </Pressable>
                   <Pressable
                     style={({ pressed }) => [styles.detailToolBtn, { opacity: pressed ? 0.82 : 1 }]}
-                    onPress={() => Alert.alert('提示', '排序功能即将上线')}
+                    onPress={handleOpenDetailSortMenu}
                   >
                     <Ionicons name="reorder-three-outline" size={20} color={colors.textSecondary} />
                   </Pressable>
                 </View>
               </View>
+
+              {showDetailSearchPanel && (
+                <View style={[styles.detailSearchRow, { backgroundColor: colors.surface, borderColor: colors.separator }]}>
+                  <Ionicons name="search-outline" size={16} color={colors.textSecondary} />
+                  <TextInput
+                    value={detailSearchKeyword}
+                    onChangeText={setDetailSearchKeyword}
+                    placeholder="搜索歌名 / 歌手 / 专辑"
+                    placeholderTextColor={colors.textTertiary}
+                    style={[styles.detailSearchInput, { color: colors.text }]}
+                    returnKeyType="search"
+                  />
+                  {!!detailSearchKeyword && (
+                    <Pressable
+                      style={styles.detailSearchClearBtn}
+                      onPress={() => setDetailSearchKeyword('')}
+                    >
+                      <Ionicons name="close-circle" size={18} color={colors.textTertiary} />
+                    </Pressable>
+                  )}
+                </View>
+              )}
 
               {currentTrack && (
                 <View style={styles.detailContinueRow}>
@@ -1151,10 +1256,17 @@ export default function PlaylistScreen({ onTrackPress, onTrackMorePress, onPlayA
               <View style={styles.detailListHeaderRow}>
                 <Text style={[styles.detailListHeaderTitle, { color: colors.text }]}>歌曲列表</Text>
                 <Text style={[styles.detailListHeaderMeta, { color: colors.textSecondary }]}>
-                  共 {selectedPlaylist.tracks.length} 首
+                  {detailListMetaLabel}
                 </Text>
               </View>
             </>
+          )}
+          ListEmptyComponent={(
+            <View style={styles.detailListEmptyWrap}>
+              <Text style={[styles.detailListEmptyText, { color: colors.textSecondary }]}>
+                {normalizedDetailSearchKeyword ? '没有找到匹配的歌曲' : '当前歌单暂无歌曲'}
+              </Text>
+            </View>
           )}
           ListFooterComponent={hasMoreDetailTracks ? (
             <View style={styles.detailListFooter}>
@@ -1709,6 +1821,30 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
+  detailSearchRow: {
+    marginHorizontal: spacing.md,
+    marginTop: spacing.xs,
+    borderRadius: borderRadius.md,
+    borderWidth: StyleSheet.hairlineWidth,
+    minHeight: 40,
+    paddingHorizontal: spacing.sm,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.xs,
+  },
+  detailSearchInput: {
+    flex: 1,
+    fontSize: fontSize.footnote,
+    fontWeight: '500',
+    paddingVertical: 0,
+  },
+  detailSearchClearBtn: {
+    width: 24,
+    height: 24,
+    borderRadius: 12,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
   detailCover: {
     width: 68,
     height: 68,
@@ -1758,6 +1894,17 @@ const styles = StyleSheet.create({
   },
   detailListFooterText: {
     fontSize: fontSize.caption1,
+    fontWeight: '600',
+  },
+  detailListEmptyWrap: {
+    marginHorizontal: spacing.md,
+    marginTop: spacing.sm,
+    minHeight: 52,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  detailListEmptyText: {
+    fontSize: fontSize.footnote,
     fontWeight: '600',
   },
   detailTrackRow: {

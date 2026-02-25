@@ -24,7 +24,8 @@ import {
   ScrollView,
   Pressable,
   Alert,
-  PanResponder,
+  FlatList,
+  ListRenderItemInfo,
 } from 'react-native';
 import Slider from '@react-native-community/slider';
 import { Ionicons } from '@expo/vector-icons';
@@ -38,6 +39,7 @@ import { playerController, type PlayMode } from '../../core/player';
 import type { Quality } from '../../core/music';
 import { ALL_QUALITIES } from '../../core/config/musicSource';
 import { getLyric, LyricData } from '../../core/lyric';
+import { getTrackComments, type TrackComment } from '../../core/comment';
 import LyricsView from '../../components/common/LyricsView';
 import type { RootState } from '../../store';
 import type { Track } from '../../types/music';
@@ -47,8 +49,9 @@ const SCREEN_HEIGHT = Dimensions.get('window').height;
 /** 封面视图模式下的封面直径 */
 const COVER_SIZE_LG = Math.min(320, SCREEN_WIDTH - 72);
 const QUEUE_SHEET_HEIGHT = Math.min(560, SCREEN_HEIGHT * 0.66);
+const COMMENT_SHEET_HEIGHT = Math.min(560, SCREEN_HEIGHT * 0.66);
 const QUEUE_ITEM_HEIGHT = 56;
-const QUEUE_DRAG_LONG_PRESS_MS = 220;
+const COMMENT_PAGE_LIMIT = 20;
 const QUALITY_PRIORITY: Quality[] = ['master', 'atmos_plus', 'atmos', 'hires', 'flac24bit', 'flac', '320k', '128k'];
 const QUALITY_LABELS: Record<Quality, string> = {
   master: '母带',
@@ -101,16 +104,14 @@ function formatMs(ms: number): string {
   return `${m}:${String(s).padStart(2, '0')}`;
 }
 
-function clampIndex(value: number, min: number, max: number): number {
-  return Math.max(min, Math.min(max, value));
-}
-
-function moveQueueItem<T>(list: T[], fromIndex: number, toIndex: number): T[] {
-  if (fromIndex === toIndex) return list;
-  const next = [...list];
-  const [movingItem] = next.splice(fromIndex, 1);
-  next.splice(toIndex, 0, movingItem);
-  return next;
+function formatLikeCount(count: number): string {
+  if (count >= 100000000) {
+    return `${(count / 100000000).toFixed(1).replace(/\.0$/, '')}亿`;
+  }
+  if (count >= 10000) {
+    return `${(count / 10000).toFixed(1).replace(/\.0$/, '')}万`;
+  }
+  return String(count);
 }
 
 /**
@@ -159,14 +160,17 @@ export default function NowPlaying({ onClose }: NowPlayingProps) {
   const coverBtnAnim = useRef(new Animated.Value(1)).current;
   const lyricsBtnAnim = useRef(new Animated.Value(0)).current;
   const queueSheetAnim = useRef(new Animated.Value(0)).current;
+  const commentSheetAnim = useRef(new Animated.Value(0)).current;
   const [queueSheetVisible, setQueueSheetVisible] = useState(false);
+  const [commentSheetVisible, setCommentSheetVisible] = useState(false);
   const [queueDraft, setQueueDraft] = useState(queue);
-  const [queueDragFromIndex, setQueueDragFromIndex] = useState<number | null>(null);
-  const [queueDragToIndex, setQueueDragToIndex] = useState<number | null>(null);
-  const queueDragFromRef = useRef<number | null>(null);
-  const queueDragCurrentRef = useRef<number | null>(null);
-  const queuePressSuppressRef = useRef(false);
-  const queuePressSuppressTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const [comments, setComments] = useState<TrackComment[]>([]);
+  const [commentsTotal, setCommentsTotal] = useState(0);
+  const [commentsLoading, setCommentsLoading] = useState(false);
+  const [commentsError, setCommentsError] = useState('');
+  const commentCacheRef = useRef<Record<string, TrackComment[]>>({});
+  const commentTotalCacheRef = useRef<Record<string, number>>({});
+  const commentRequestTokenRef = useRef(0);
   const [isResolvingTrack, setIsResolvingTrack] = useState(() => playerController.isResolvingTrack());
   const [resolvingHint, setResolvingHint] = useState(() => playerController.getResolvingHint());
   const [resolvedQuality, setResolvedQuality] = useState<Quality | null>(() => playerController.getCurrentResolvedQuality());
@@ -207,6 +211,27 @@ export default function NowPlaying({ onClose }: NowPlayingProps) {
   const [displayTrack, setDisplayTrack] = useState<Track | null>(null);
   const fallbackTrack = queueDraft.find(Boolean) || queue.find(Boolean) || controllerQueue.find(Boolean) || null;
   const renderTrack = activeTrack || displayTrack || fallbackTrack;
+  const getTrackIdentityToken = useCallback((track: Track | null | undefined): string => {
+    if (!track) return '';
+    const raw = track.id || track.songmid || track.hash || track.copyrightId;
+    const normalized = String(raw || '').trim();
+    if (normalized) return normalized;
+    const title = String(track.title || '').trim();
+    const artist = String(track.artist || '').trim();
+    const duration = Number.isFinite(track.duration) ? String(track.duration) : '';
+    return `${title}::${artist}::${duration}`.trim();
+  }, []);
+  const isValidTrack = useCallback((track: Track | null | undefined): track is Track => {
+    if (!track) return false;
+    return getTrackIdentityToken(track).length > 0;
+  }, [getTrackIdentityToken]);
+  const resolveQueueSnapshot = useCallback((): Track[] => {
+    const runtimeQueue = playerController.getPlaylist().filter(isValidTrack);
+    if (runtimeQueue.length) return runtimeQueue;
+    const reduxQueue = queue.filter(isValidTrack);
+    if (reduxQueue.length) return reduxQueue;
+    return isValidTrack(renderTrack) ? [renderTrack] : [];
+  }, [isValidTrack, queue, renderTrack]);
 
   const selectedSourceConfig = useMemo(
     () => importedSources.find((item) => item.id === selectedImportedSourceId),
@@ -234,7 +259,7 @@ export default function NowPlaying({ onClose }: NowPlayingProps) {
 
   useEffect(() => {
     setQualityMenuVisible(false);
-  }, [activeTab, queueSheetVisible, renderTrack?.id]);
+  }, [activeTab, commentSheetVisible, queueSheetVisible, renderTrack?.id]);
 
   useEffect(() => {
     if (!activeTrack) return;
@@ -242,18 +267,14 @@ export default function NowPlaying({ onClose }: NowPlayingProps) {
   }, [activeTrack]);
 
   useEffect(() => {
-    if (queueDragFromRef.current !== null) return;
-    setQueueDraft(queue);
-  }, [queue]);
+    setQueueDraft(resolveQueueSnapshot());
+  }, [queue, resolveQueueSnapshot, renderTrack?.id, renderTrack?.songmid, renderTrack?.source]);
 
-  useEffect(() => {
-    return () => {
-      if (queuePressSuppressTimerRef.current) {
-        clearTimeout(queuePressSuppressTimerRef.current);
-        queuePressSuppressTimerRef.current = null;
-      }
-    };
-  }, []);
+  const queueListData = useMemo(() => queueDraft.filter(isValidTrack), [isValidTrack, queueDraft]);
+  const queueRenderData = useMemo(() => {
+    if (queueListData.length > 0) return queueListData;
+    return isValidTrack(renderTrack) ? [renderTrack] : [];
+  }, [isValidTrack, queueListData, renderTrack]);
 
   /** 播放时启动匀速旋转，暂停时停在当前角度 */
   useEffect(() => {
@@ -373,8 +394,66 @@ export default function NowPlaying({ onClose }: NowPlayingProps) {
   }, [dispatch])
 
   const getTrackIdentity = useCallback((track: Track) => {
-    return `${track.source || 'unknown'}::${track.id}`;
+    const source = String(track.source || 'unknown').toLowerCase();
+    const token = getTrackIdentityToken(track);
+    return `${source}::${token}`;
+  }, [getTrackIdentityToken]);
+
+  const getCommentTrackIdentity = useCallback((track: Track) => {
+    const source = String(track.source || '').toLowerCase();
+    const rawSongId = String(track.songmid || '').trim();
+    const fallbackSongId = String(track.id || '').replace(/^wy_/, '');
+    return `${source}_${rawSongId || fallbackSongId}`;
   }, []);
+
+  const loadCommentsForTrack = useCallback(async(track: Track, forceRefresh = false) => {
+    const requestToken = commentRequestTokenRef.current + 1;
+    commentRequestTokenRef.current = requestToken;
+    const source = String(track.source || '').toLowerCase();
+    if (source !== 'wy') {
+      setCommentsLoading(false);
+      setComments([]);
+      setCommentsTotal(0);
+      setCommentsError('当前平台暂不支持歌曲评论');
+      return;
+    }
+
+    const cacheKey = getCommentTrackIdentity(track);
+    if (!forceRefresh) {
+      const cachedComments = commentCacheRef.current[cacheKey];
+      if (cachedComments) {
+        if (requestToken !== commentRequestTokenRef.current) return;
+        setCommentsLoading(false);
+        setComments(cachedComments);
+        setCommentsTotal(commentTotalCacheRef.current[cacheKey] || cachedComments.length);
+        setCommentsError('');
+        return;
+      }
+    }
+
+    setCommentsLoading(true);
+    setCommentsError('');
+    try {
+      const result = await getTrackComments(track, {
+        limit: COMMENT_PAGE_LIMIT,
+        offset: 0,
+      });
+      if (requestToken !== commentRequestTokenRef.current) return;
+      setComments(result.comments);
+      setCommentsTotal(result.total);
+      commentCacheRef.current[cacheKey] = result.comments;
+      commentTotalCacheRef.current[cacheKey] = result.total;
+    } catch (error) {
+      if (requestToken !== commentRequestTokenRef.current) return;
+      const message = error instanceof Error ? error.message : '加载评论失败，请稍后重试';
+      setComments([]);
+      setCommentsTotal(0);
+      setCommentsError(message);
+    } finally {
+      if (requestToken !== commentRequestTokenRef.current) return;
+      setCommentsLoading(false);
+    }
+  }, [getCommentTrackIdentity]);
 
   useEffect(() => {
     if (!renderTrack) return;
@@ -493,90 +572,50 @@ export default function NowPlaying({ onClose }: NowPlayingProps) {
     );
   }, [handleAddQueueTrackToPlaylist, handleRemoveQueueTrack]);
 
-  const finishQueueDrag = useCallback(() => {
-    const fromIndex = queueDragFromRef.current;
-    const toIndex = queueDragCurrentRef.current;
+  const closeCommentSheet = useCallback(() => {
+    Animated.timing(commentSheetAnim, {
+      toValue: 0,
+      duration: 200,
+      easing: Easing.out(Easing.cubic),
+      useNativeDriver: true,
+    }).start(() => {
+      setCommentSheetVisible(false);
+    });
+  }, [commentSheetAnim]);
 
-    queueDragFromRef.current = null;
-    queueDragCurrentRef.current = null;
-    setQueueDragFromIndex(null);
-    setQueueDragToIndex(null);
-
-    if (fromIndex === null || toIndex === null || fromIndex === toIndex) {
+  const openCommentSheet = useCallback(() => {
+    if (!renderTrack) return;
+    if (String(renderTrack.source || '').toLowerCase() !== 'wy') {
+      Alert.alert('暂不支持', '当前仅网易云平台支持歌曲评论。');
       return;
     }
-    const moved = playerController.moveTrackInQueue(fromIndex, toIndex);
-    if (!moved) {
-      setQueueDraft(playerController.getPlaylist());
-      return;
-    }
-    setQueueDraft(playerController.getPlaylist());
-    syncPlayerSnapshotToStore();
-  }, [syncPlayerSnapshotToStore]);
 
-  const queueDragResponder = useMemo(() => PanResponder.create({
-    onStartShouldSetPanResponder: () => false,
-    onMoveShouldSetPanResponder: (_, gestureState) => {
-      return queueDragFromRef.current !== null && Math.abs(gestureState.dy) > 2;
-    },
-    onMoveShouldSetPanResponderCapture: (_, gestureState) => {
-      return queueDragFromRef.current !== null && Math.abs(gestureState.dy) > 2;
-    },
-    onPanResponderMove: (_, gestureState) => {
-      const dragStartIndex = queueDragFromRef.current;
-      if (dragStartIndex === null || queueDraft.length <= 1) return;
-      const estimateIndex = clampIndex(
-        Math.round(dragStartIndex + gestureState.dy / QUEUE_ITEM_HEIGHT),
-        0,
-        queueDraft.length - 1,
-      );
-      const currentIndex = queueDragCurrentRef.current ?? dragStartIndex;
-      if (estimateIndex === currentIndex) return;
+    setCommentSheetVisible(true);
+    commentSheetAnim.setValue(0);
+    Animated.spring(commentSheetAnim, {
+      toValue: 1,
+      useNativeDriver: true,
+      tension: 230,
+      friction: 24,
+    }).start();
+    void loadCommentsForTrack(renderTrack);
+  }, [commentSheetAnim, loadCommentsForTrack, renderTrack]);
 
-      setQueueDraft((prev) => moveQueueItem(prev, currentIndex, estimateIndex));
-      queueDragCurrentRef.current = estimateIndex;
-      setQueueDragToIndex(estimateIndex);
-    },
-    onPanResponderRelease: () => {
-      finishQueueDrag();
-    },
-    onPanResponderTerminate: () => {
-      finishQueueDrag();
-    },
-  }), [finishQueueDrag, queueDraft.length]);
-
-  const handleQueueItemLongPress = useCallback((index: number) => {
-    if (index < 0 || index >= queueDraft.length) return;
-    if (queueDragFromRef.current !== null) return;
-    queuePressSuppressRef.current = true;
-    if (queuePressSuppressTimerRef.current) {
-      clearTimeout(queuePressSuppressTimerRef.current);
-    }
-    queuePressSuppressTimerRef.current = setTimeout(() => {
-      queuePressSuppressRef.current = false;
-      queuePressSuppressTimerRef.current = null;
-    }, 320);
-    queueDragFromRef.current = index;
-    queueDragCurrentRef.current = index;
-    setQueueDragFromIndex(index);
-    setQueueDragToIndex(index);
-  }, [queueDraft.length]);
+  useEffect(() => {
+    if (!commentSheetVisible || !renderTrack) return;
+    void loadCommentsForTrack(renderTrack);
+  }, [commentSheetVisible, loadCommentsForTrack, renderTrack?.id, renderTrack?.songmid, renderTrack?.source]);
 
   const openQueueSheet = useCallback(() => {
-    if (!queue.length) {
+    if (commentSheetVisible) {
+      closeCommentSheet();
+    }
+    const latestQueue = resolveQueueSnapshot();
+    if (!latestQueue.length) {
       Alert.alert('播放列表为空', '当前还没有可播放的歌曲。');
       return;
     }
-    setQueueDraft(queue);
-    queuePressSuppressRef.current = false;
-    if (queuePressSuppressTimerRef.current) {
-      clearTimeout(queuePressSuppressTimerRef.current);
-      queuePressSuppressTimerRef.current = null;
-    }
-    queueDragFromRef.current = null;
-    queueDragCurrentRef.current = null;
-    setQueueDragFromIndex(null);
-    setQueueDragToIndex(null);
+    setQueueDraft(latestQueue);
     setQueueSheetVisible(true);
     queueSheetAnim.setValue(0);
     Animated.spring(queueSheetAnim, {
@@ -585,18 +624,9 @@ export default function NowPlaying({ onClose }: NowPlayingProps) {
       tension: 230,
       friction: 24,
     }).start();
-  }, [queue, queueSheetAnim]);
+  }, [closeCommentSheet, commentSheetVisible, queueSheetAnim, resolveQueueSnapshot]);
 
   const closeQueueSheet = useCallback(() => {
-    queuePressSuppressRef.current = false;
-    if (queuePressSuppressTimerRef.current) {
-      clearTimeout(queuePressSuppressTimerRef.current);
-      queuePressSuppressTimerRef.current = null;
-    }
-    queueDragFromRef.current = null;
-    queueDragCurrentRef.current = null;
-    setQueueDragFromIndex(null);
-    setQueueDragToIndex(null);
     Animated.timing(queueSheetAnim, {
       toValue: 0,
       duration: 200,
@@ -607,19 +637,41 @@ export default function NowPlaying({ onClose }: NowPlayingProps) {
     });
   }, [queueSheetAnim]);
 
-  const handleQueueTrackPress = useCallback(async(index: number) => {
-    if (queuePressSuppressRef.current) {
-      queuePressSuppressRef.current = false;
-      if (queuePressSuppressTimerRef.current) {
-        clearTimeout(queuePressSuppressTimerRef.current);
-        queuePressSuppressTimerRef.current = null;
-      }
+  const handleClearQueue = useCallback(() => {
+    if (!queueRenderData.length) {
+      Alert.alert('播放列表为空', '当前没有可清空的歌曲。');
       return;
     }
-    if (queueDragFromRef.current !== null) return;
-    if (index < 0 || index >= queueDraft.length) return;
+    Alert.alert(
+      '清空播放列表',
+      '清空后将停止播放，并移除当前队列中的全部歌曲。',
+      [
+        { text: '取消', style: 'cancel' },
+        {
+          text: '清空',
+          style: 'destructive',
+          onPress: () => {
+            void (async() => {
+              try {
+                await playerController.clearQueue();
+                setQueueDraft([]);
+                syncPlayerSnapshotToStore();
+                closeQueueSheet();
+              } catch (error) {
+                console.error('Clear queue error:', error);
+                Alert.alert('清空失败', '请稍后重试。');
+              }
+            })();
+          },
+        },
+      ],
+    );
+  }, [closeQueueSheet, queueRenderData.length, syncPlayerSnapshotToStore]);
+
+  const handleQueueTrackPress = useCallback(async(index: number) => {
+    if (index < 0 || index >= queueRenderData.length) return;
     try {
-      await playerController.playFromPlaylist(queueDraft, index, {
+      await playerController.playFromPlaylist(queueRenderData, index, {
         autoPlay: true,
       });
       syncPlayerSnapshotToStore()
@@ -628,7 +680,90 @@ export default function NowPlaying({ onClose }: NowPlayingProps) {
       console.error('Play queue item error:', error);
       Alert.alert('播放失败', '切换到该歌曲失败，请稍后重试。');
     }
-  }, [closeQueueSheet, queueDraft, syncPlayerSnapshotToStore]);
+  }, [closeQueueSheet, queueRenderData, syncPlayerSnapshotToStore]);
+
+  const renderQueueItem = useCallback(({ item: track, index }: ListRenderItemInfo<Track>) => {
+    if (!track) return null;
+    const safeIndex = index >= 0 ? index : 0;
+    const isCurrent = renderTrack ? getTrackIdentity(track) === getTrackIdentity(renderTrack) : false;
+
+    return (
+      <TouchableOpacity
+        activeOpacity={0.9}
+        onPress={() => {
+          void handleQueueTrackPress(safeIndex);
+        }}
+        style={[
+          styles.queueItem,
+          {
+            borderBottomWidth: StyleSheet.hairlineWidth,
+            borderBottomColor: colors.separator,
+            backgroundColor: isCurrent
+              ? (isDark ? 'rgba(10,132,255,0.16)' : 'rgba(0,122,255,0.1)')
+              : (
+                isDark ? 'rgba(255,255,255,0.04)' : 'rgba(0,0,0,0.03)'
+              ),
+          },
+        ]}
+      >
+        <View style={styles.queueItemIndex}>
+          <Text
+            style={[
+              styles.queueIndexText,
+              { color: isCurrent ? colors.accent : colors.textTertiary },
+            ]}
+          >
+            {safeIndex + 1}
+          </Text>
+        </View>
+        <View style={styles.queueItemInfo}>
+          <Text
+            numberOfLines={1}
+            style={[
+              styles.queueItemTitle,
+              { color: isCurrent ? colors.accent : colors.text },
+            ]}
+          >
+            {track.title || '未知歌曲'}
+          </Text>
+          <Text numberOfLines={1} style={[styles.queueItemArtist, { color: colors.textSecondary }]}>
+            {track.artist || '未知歌手'}
+          </Text>
+        </View>
+        <View style={styles.queueItemActions}>
+          {isCurrent && (
+            <Ionicons
+              name={isPlaying ? 'volume-high' : 'pause'}
+              size={18}
+              color={colors.accent}
+            />
+          )}
+          <Pressable
+            style={styles.queueMoreButton}
+            hitSlop={8}
+            onPress={(event) => {
+              event.stopPropagation?.();
+              handleQueueTrackMorePress(track);
+            }}
+          >
+            <Ionicons name="ellipsis-horizontal" size={18} color={colors.textSecondary} />
+          </Pressable>
+        </View>
+      </TouchableOpacity>
+    );
+  }, [
+    colors.accent,
+    colors.separator,
+    colors.text,
+    colors.textSecondary,
+    colors.textTertiary,
+    getTrackIdentity,
+    handleQueueTrackMorePress,
+    handleQueueTrackPress,
+    isDark,
+    isPlaying,
+    renderTrack,
+  ]);
 
   const handleCyclePlayMode = useCallback(() => {
     playerController.cyclePlayMode()
@@ -638,6 +773,11 @@ export default function NowPlaying({ onClose }: NowPlayingProps) {
   const sourceLabel = renderTrack?.source
     ? renderTrack.source.toUpperCase()
     : 'LOCAL';
+  const isWyCommentSupported = String(renderTrack?.source || '').toLowerCase() === 'wy';
+  const queueDisplayCount = useMemo(
+    () => queueRenderData.length,
+    [queueRenderData],
+  );
 
   const subMeta = useMemo(() => {
     const parts = [renderTrack?.album, sourceLabel].filter(Boolean);
@@ -677,6 +817,14 @@ export default function NowPlaying({ onClose }: NowPlayingProps) {
     outputRange: [QUEUE_SHEET_HEIGHT + 24, 0],
   });
   const queueSheetMaskOpacity = queueSheetAnim.interpolate({
+    inputRange: [0, 1],
+    outputRange: [0, 1],
+  });
+  const commentSheetTranslateY = commentSheetAnim.interpolate({
+    inputRange: [0, 1],
+    outputRange: [COMMENT_SHEET_HEIGHT + 24, 0],
+  });
+  const commentSheetMaskOpacity = commentSheetAnim.interpolate({
     inputRange: [0, 1],
     outputRange: [0, 1],
   });
@@ -1169,6 +1317,21 @@ export default function NowPlaying({ onClose }: NowPlayingProps) {
                 {
                   backgroundColor: isDark ? 'rgba(255,255,255,0.08)' : 'rgba(0,0,0,0.06)',
                   borderColor: colors.separator,
+                  opacity: isWyCommentSupported ? 1 : 0.45,
+                },
+              ]}
+              activeOpacity={0.75}
+              disabled={!isWyCommentSupported}
+              onPress={openCommentSheet}
+            >
+              <Ionicons name="chatbubble-ellipses-outline" size={18} color={colors.textSecondary} />
+            </TouchableOpacity>
+            <TouchableOpacity
+              style={[
+                styles.bottomIconButton,
+                {
+                  backgroundColor: isDark ? 'rgba(255,255,255,0.08)' : 'rgba(0,0,0,0.06)',
+                  borderColor: colors.separator,
                 },
               ]}
               activeOpacity={0.75}
@@ -1180,9 +1343,148 @@ export default function NowPlaying({ onClose }: NowPlayingProps) {
         </View>
       </View>
 
+      {commentSheetVisible && (
+        <View style={styles.commentSheetOverlay} pointerEvents="box-none">
+          <Pressable style={StyleSheet.absoluteFill} onPress={closeCommentSheet}>
+            <Animated.View
+              style={[
+                styles.commentSheetMask,
+                {
+                  opacity: commentSheetMaskOpacity,
+                },
+              ]}
+            />
+          </Pressable>
+          <Animated.View
+            style={[
+              styles.commentSheet,
+              {
+                paddingBottom: insets.bottom + spacing.md,
+                backgroundColor: isDark ? '#111317' : '#F8FAFD',
+                borderColor: colors.separator,
+                transform: [{ translateY: commentSheetTranslateY }],
+              },
+            ]}
+          >
+            <View style={styles.commentSheetHeader}>
+              <View style={styles.commentSheetHeaderMain}>
+                <Text style={[styles.commentSheetTitle, { color: colors.text }]}>歌曲评论</Text>
+                <Text style={[styles.commentSheetSubTitle, { color: colors.textSecondary }]}>
+                  {commentsTotal > 0 ? `共 ${commentsTotal} 条` : '暂无评论'}
+                </Text>
+              </View>
+              <TouchableOpacity
+                style={[
+                  styles.commentRefreshButton,
+                  {
+                    backgroundColor: isDark ? 'rgba(255,255,255,0.08)' : 'rgba(0,0,0,0.04)',
+                    borderColor: colors.separator,
+                  },
+                ]}
+                activeOpacity={0.75}
+                onPress={() => {
+                  if (!renderTrack) return;
+                  void loadCommentsForTrack(renderTrack, true);
+                }}
+              >
+                <Ionicons name="refresh" size={16} color={colors.textSecondary} />
+              </TouchableOpacity>
+            </View>
+
+            {commentsLoading ? (
+              <View style={styles.commentStateWrap}>
+                <ActivityIndicator size="small" color={colors.accent} />
+                <Text style={[styles.commentStateText, { color: colors.textSecondary }]}>
+                  正在加载评论...
+                </Text>
+              </View>
+            ) : commentsError ? (
+              <View style={styles.commentStateWrap}>
+                <Ionicons name="warning-outline" size={18} color={colors.textSecondary} />
+                <Text style={[styles.commentStateText, { color: colors.textSecondary }]}>
+                  {commentsError}
+                </Text>
+                <TouchableOpacity
+                  style={[
+                    styles.commentRetryButton,
+                    {
+                      borderColor: colors.separator,
+                      backgroundColor: isDark ? 'rgba(255,255,255,0.08)' : 'rgba(0,0,0,0.04)',
+                    },
+                  ]}
+                  activeOpacity={0.75}
+                  onPress={() => {
+                    if (!renderTrack) return;
+                    void loadCommentsForTrack(renderTrack, true);
+                  }}
+                >
+                  <Text style={[styles.commentRetryText, { color: colors.textSecondary }]}>重试</Text>
+                </TouchableOpacity>
+              </View>
+            ) : comments.length === 0 ? (
+              <View style={styles.commentStateWrap}>
+                <Ionicons name="chatbubble-ellipses-outline" size={18} color={colors.textSecondary} />
+                <Text style={[styles.commentStateText, { color: colors.textSecondary }]}>
+                  当前歌曲暂无可展示评论
+                </Text>
+              </View>
+            ) : (
+              <ScrollView
+                showsVerticalScrollIndicator={false}
+                contentContainerStyle={styles.commentSheetList}
+              >
+                {comments.map((comment, index) => (
+                  <View
+                    key={`${comment.id}_${index}`}
+                    style={[styles.commentItem, { borderBottomColor: colors.separator }]}
+                  >
+                    <View style={styles.commentItemHeader}>
+                      <View style={styles.commentUserRow}>
+                        {comment.avatarUrl ? (
+                          <Image source={{ uri: comment.avatarUrl }} style={styles.commentAvatar} />
+                        ) : (
+                          <View
+                            style={[
+                              styles.commentAvatarFallback,
+                              {
+                                backgroundColor: isDark ? 'rgba(255,255,255,0.1)' : 'rgba(0,0,0,0.06)',
+                              },
+                            ]}
+                          >
+                            <Ionicons name="person" size={12} color={colors.textSecondary} />
+                          </View>
+                        )}
+                        <View style={styles.commentUserInfo}>
+                          <Text style={[styles.commentUserName, { color: colors.text }]} numberOfLines={1}>
+                            {comment.userName}
+                          </Text>
+                          <Text style={[styles.commentMetaText, { color: colors.textTertiary }]} numberOfLines={1}>
+                            {comment.timeText || '刚刚'}
+                            {comment.location ? ` · ${comment.location}` : ''}
+                          </Text>
+                        </View>
+                      </View>
+                      {comment.likedCount > 0 && (
+                        <View style={styles.commentLikeWrap}>
+                          <Ionicons name="heart-outline" size={12} color={colors.textTertiary} />
+                          <Text style={[styles.commentLikeText, { color: colors.textTertiary }]}>
+                            {formatLikeCount(comment.likedCount)}
+                          </Text>
+                        </View>
+                      )}
+                    </View>
+                    <Text style={[styles.commentContent, { color: colors.text }]}>{comment.content}</Text>
+                  </View>
+                ))}
+              </ScrollView>
+            )}
+          </Animated.View>
+        </View>
+      )}
+
       {queueSheetVisible && (
         <View style={styles.queueSheetOverlay} pointerEvents="box-none">
-          <Pressable style={StyleSheet.absoluteFill} onPress={closeQueueSheet}>
+          <Pressable style={[StyleSheet.absoluteFill, { zIndex: 1 }]} onPress={closeQueueSheet}>
             <Animated.View
               style={[
                 styles.queueSheetMask,
@@ -1200,6 +1502,7 @@ export default function NowPlaying({ onClose }: NowPlayingProps) {
                 backgroundColor: isDark ? '#111317' : '#F8FAFD',
                 borderColor: colors.separator,
                 transform: [{ translateY: queueSheetTranslateY }],
+                zIndex: 2,
               },
             ]}
           >
@@ -1207,97 +1510,45 @@ export default function NowPlaying({ onClose }: NowPlayingProps) {
               <Text style={[styles.queueSheetTitle, { color: colors.text }]}>
                 当前播放列表
               </Text>
-              <Text style={[styles.queueSheetCount, { color: colors.textSecondary }]}>
-                共 {queueDraft.length} 首
-              </Text>
+              <View style={styles.queueSheetHeaderRight}>
+                <Text style={[styles.queueSheetCount, { color: colors.textSecondary }]}>
+                  共 {queueDisplayCount} 首
+                </Text>
+                <TouchableOpacity
+                  style={[
+                    styles.queueHeaderAction,
+                    {
+                      borderColor: colors.separator,
+                      backgroundColor: isDark ? 'rgba(255,255,255,0.08)' : 'rgba(0,0,0,0.04)',
+                      opacity: queueDisplayCount > 0 ? 1 : 0.45,
+                    },
+                  ]}
+                  activeOpacity={0.78}
+                  disabled={queueDisplayCount <= 0}
+                  onPress={handleClearQueue}
+                >
+                  <Ionicons name="trash-outline" size={15} color={colors.textSecondary} />
+                </TouchableOpacity>
+              </View>
             </View>
 
-            <View
-              style={styles.queueListGestureLayer}
-              {...queueDragResponder.panHandlers}
-            >
-              <ScrollView
-                showsVerticalScrollIndicator={false}
-                contentContainerStyle={styles.queueSheetList}
-                scrollEnabled={queueDragFromIndex === null}
-              >
-                {queueDraft.map((track, index) => {
-                  const isCurrent = renderTrack ? getTrackIdentity(track) === getTrackIdentity(renderTrack) : false;
-                  const isDraggingTarget = queueDragFromIndex !== null && index === queueDragToIndex;
-                  return (
-                    <Pressable
-                      key={`${track.source || 'src'}_${track.id}_${index}`}
-                      onPress={() => void handleQueueTrackPress(index)}
-                      onPressOut={() => {
-                        if (queueDragFromRef.current !== null) {
-                          finishQueueDrag();
-                        }
-                      }}
-                      onLongPress={() => handleQueueItemLongPress(index)}
-                      delayLongPress={QUEUE_DRAG_LONG_PRESS_MS}
-                      style={({ pressed }) => [
-                        styles.queueItem,
-                        {
-                          borderBottomColor: colors.separator,
-                          opacity: pressed ? 0.9 : 1,
-                          backgroundColor: isDraggingTarget
-                            ? (isDark ? 'rgba(10,132,255,0.2)' : 'rgba(0,122,255,0.16)')
-                            : (
-                              isCurrent
-                                ? (isDark ? 'rgba(10,132,255,0.16)' : 'rgba(0,122,255,0.1)')
-                                : 'transparent'
-                            ),
-                        },
-                      ]}
-                    >
-                      <View style={styles.queueItemIndex}>
-                        <Text
-                          style={[
-                            styles.queueIndexText,
-                            { color: isCurrent ? colors.accent : colors.textTertiary },
-                          ]}
-                        >
-                          {index + 1}
-                        </Text>
-                      </View>
-                      <View style={styles.queueItemInfo}>
-                        <Text
-                          numberOfLines={1}
-                          style={[
-                            styles.queueItemTitle,
-                            { color: isCurrent ? colors.accent : colors.text },
-                          ]}
-                        >
-                          {track.title || '未知歌曲'}
-                        </Text>
-                        <Text numberOfLines={1} style={[styles.queueItemArtist, { color: colors.textSecondary }]}>
-                          {track.artist || '未知歌手'}
-                        </Text>
-                      </View>
-                      <View style={styles.queueItemActions}>
-                        {isCurrent && (
-                          <Ionicons
-                            name={isPlaying ? 'volume-high' : 'pause'}
-                            size={18}
-                            color={colors.accent}
-                          />
-                        )}
-                        <Ionicons name="reorder-three-outline" size={16} color={colors.textTertiary} />
-                        <Pressable
-                          style={styles.queueMoreButton}
-                          hitSlop={8}
-                          onPress={(event) => {
-                            event.stopPropagation?.();
-                            handleQueueTrackMorePress(track);
-                          }}
-                        >
-                          <Ionicons name="ellipsis-horizontal" size={18} color={colors.textSecondary} />
-                        </Pressable>
-                      </View>
-                    </Pressable>
-                  )
-                })}
-              </ScrollView>
+            <View style={styles.queueListGestureLayer}>
+              {queueRenderData.length === 0 ? (
+                <View style={styles.queueEmptyState}>
+                  <Text style={[styles.queueEmptyText, { color: colors.textSecondary }]}>
+                    暂无可展示的歌曲
+                  </Text>
+                </View>
+              ) : (
+                <FlatList
+                  style={styles.queueSheetScroll}
+                  contentContainerStyle={styles.queueSheetList}
+                  data={queueRenderData}
+                  keyExtractor={(track, index) => `${getTrackIdentity(track)}_${index}`}
+                  showsVerticalScrollIndicator={false}
+                  renderItem={renderQueueItem}
+                />
+              )}
             </View>
           </Animated.View>
         </View>
@@ -1594,6 +1845,131 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
+  commentSheetOverlay: {
+    ...StyleSheet.absoluteFillObject,
+    justifyContent: 'flex-end',
+    zIndex: 190,
+  },
+  commentSheetMask: {
+    ...StyleSheet.absoluteFillObject,
+    backgroundColor: 'rgba(0,0,0,0.42)',
+  },
+  commentSheet: {
+    maxHeight: COMMENT_SHEET_HEIGHT,
+    borderTopLeftRadius: borderRadius.xl,
+    borderTopRightRadius: borderRadius.xl,
+    borderWidth: StyleSheet.hairlineWidth,
+    paddingTop: spacing.md,
+  },
+  commentSheetHeader: {
+    paddingHorizontal: spacing.md,
+    paddingBottom: spacing.sm,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: spacing.sm,
+  },
+  commentSheetHeaderMain: {
+    flex: 1,
+  },
+  commentSheetTitle: {
+    fontSize: fontSize.title3,
+    fontWeight: '700',
+  },
+  commentSheetSubTitle: {
+    fontSize: fontSize.footnote,
+    marginTop: 2,
+  },
+  commentRefreshButton: {
+    width: 30,
+    height: 30,
+    borderRadius: 15,
+    borderWidth: StyleSheet.hairlineWidth,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  commentSheetList: {
+    paddingBottom: spacing.sm,
+  },
+  commentStateWrap: {
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.lg,
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: spacing.xs,
+  },
+  commentStateText: {
+    fontSize: fontSize.callout,
+    textAlign: 'center',
+  },
+  commentRetryButton: {
+    marginTop: spacing.xs,
+    minWidth: 72,
+    minHeight: 30,
+    borderRadius: borderRadius.full,
+    borderWidth: StyleSheet.hairlineWidth,
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: spacing.md,
+  },
+  commentRetryText: {
+    fontSize: fontSize.caption1,
+    fontWeight: '600',
+  },
+  commentItem: {
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.sm,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    gap: spacing.xs,
+  },
+  commentItemHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: spacing.sm,
+  },
+  commentUserRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    flex: 1,
+  },
+  commentAvatar: {
+    width: 28,
+    height: 28,
+    borderRadius: 14,
+    marginRight: spacing.xs,
+  },
+  commentAvatarFallback: {
+    width: 28,
+    height: 28,
+    borderRadius: 14,
+    marginRight: spacing.xs,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  commentUserInfo: {
+    flex: 1,
+  },
+  commentUserName: {
+    fontSize: fontSize.footnote,
+    fontWeight: '600',
+  },
+  commentMetaText: {
+    fontSize: fontSize.caption2,
+    marginTop: 1,
+  },
+  commentLikeWrap: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+  },
+  commentLikeText: {
+    fontSize: fontSize.caption2,
+  },
+  commentContent: {
+    fontSize: fontSize.callout,
+    lineHeight: Math.round(fontSize.callout * 1.4),
+  },
   queueSheetOverlay: {
     ...StyleSheet.absoluteFillObject,
     justifyContent: 'flex-end',
@@ -1604,7 +1980,7 @@ const styles = StyleSheet.create({
     backgroundColor: 'rgba(0,0,0,0.42)',
   },
   queueSheet: {
-    maxHeight: QUEUE_SHEET_HEIGHT,
+    height: QUEUE_SHEET_HEIGHT,
     borderTopLeftRadius: borderRadius.xl,
     borderTopRightRadius: borderRadius.xl,
     borderWidth: StyleSheet.hairlineWidth,
@@ -1617,6 +1993,11 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'space-between',
   },
+  queueSheetHeaderRight: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.xs,
+  },
   queueSheetTitle: {
     fontSize: fontSize.title3,
     fontWeight: '700',
@@ -1624,11 +2005,33 @@ const styles = StyleSheet.create({
   queueSheetCount: {
     fontSize: fontSize.footnote,
   },
+  queueHeaderAction: {
+    width: 28,
+    height: 28,
+    borderRadius: 14,
+    borderWidth: StyleSheet.hairlineWidth,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  queueSheetScroll: {
+    flex: 1,
+  },
   queueSheetList: {
     paddingBottom: spacing.sm,
+    flexGrow: 1,
   },
   queueListGestureLayer: {
     flex: 1,
+    minHeight: QUEUE_ITEM_HEIGHT + spacing.md,
+  },
+  queueEmptyState: {
+    minHeight: 120,
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: spacing.lg,
+  },
+  queueEmptyText: {
+    fontSize: fontSize.callout,
   },
   queueItem: {
     height: QUEUE_ITEM_HEIGHT,
