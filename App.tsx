@@ -3,10 +3,12 @@
  * iOS music player application powered by React Native + Expo
  */
 
-import React, { useCallback, useEffect, useState } from 'react'
+import React, { useCallback, useEffect, useRef, useState } from 'react'
 import {
   ActivityIndicator,
+  Animated,
   Alert,
+  Easing,
   Pressable,
   StatusBar,
   StyleSheet,
@@ -100,13 +102,19 @@ function AppContent() {
   const [isResolvingTrack, setIsResolvingTrack] = useState(() => playerController.isResolvingTrack())
   const [resolvingHint, setResolvingHint] = useState(() => playerController.getResolvingHint())
   const [isScrollAtTop, setIsScrollAtTop] = useState(true)
-  const [isFabPressed, setIsFabPressed] = useState(false)
   const shouldHideTabBar = activeTab === 'discover' && isDiscoverMoreVisible
   const miniPlayerBottom = Math.max(insets.bottom, 16) + (
     shouldHideTabBar ? 10 : CAPSULE_BOTTOM_MARGIN + CAPSULE_TAB_HEIGHT + 10
   )
   const scrollTopFabBottom = miniPlayerBottom + 74
   const showScrollFab = !showNowPlaying && !detailLoading && !isScrollAtTop
+  const [fabMounted, setFabMounted] = useState(showScrollFab)
+  const fabOpacityAnim = useRef(new Animated.Value(showScrollFab ? 1 : 0)).current
+  const fabScaleAnim = useRef(new Animated.Value(showScrollFab ? 1 : 0.9)).current
+  const fabTranslateYAnim = useRef(new Animated.Value(showScrollFab ? 0 : 16)).current
+  const fabFloatAnim = useRef(new Animated.Value(0)).current
+  const fabPressScaleAnim = useRef(new Animated.Value(1)).current
+  const fabFloatLoopRef = useRef<Animated.CompositeAnimation | null>(null)
 
   const getReadablePlayError = useCallback((error: unknown) => {
     const message = error instanceof Error ? error.message : '获取歌曲链接失败'
@@ -742,6 +750,125 @@ function AppContent() {
     emitScrollToTop()
   }, [])
 
+  const handleFabPressIn = useCallback(() => {
+    Animated.spring(fabPressScaleAnim, {
+      toValue: 0.93,
+      useNativeDriver: true,
+      speed: 26,
+      bounciness: 0,
+    }).start()
+  }, [fabPressScaleAnim])
+
+  const handleFabPressOut = useCallback(() => {
+    Animated.spring(fabPressScaleAnim, {
+      toValue: 1,
+      useNativeDriver: true,
+      speed: 20,
+      bounciness: 5,
+    }).start()
+  }, [fabPressScaleAnim])
+
+  useEffect(() => {
+    let active = true
+    if (showScrollFab) {
+      setFabMounted(true)
+      Animated.parallel([
+        Animated.timing(fabOpacityAnim, {
+          toValue: 1,
+          duration: 180,
+          easing: Easing.out(Easing.cubic),
+          useNativeDriver: true,
+        }),
+        Animated.spring(fabScaleAnim, {
+          toValue: 1,
+          useNativeDriver: true,
+          speed: 18,
+          bounciness: 7,
+        }),
+        Animated.timing(fabTranslateYAnim, {
+          toValue: 0,
+          duration: 220,
+          easing: Easing.out(Easing.cubic),
+          useNativeDriver: true,
+        }),
+      ]).start()
+      return () => {
+        active = false
+      }
+    }
+
+    Animated.parallel([
+      Animated.timing(fabOpacityAnim, {
+        toValue: 0,
+        duration: 140,
+        easing: Easing.in(Easing.quad),
+        useNativeDriver: true,
+      }),
+      Animated.timing(fabScaleAnim, {
+        toValue: 0.9,
+        duration: 140,
+        easing: Easing.in(Easing.quad),
+        useNativeDriver: true,
+      }),
+      Animated.timing(fabTranslateYAnim, {
+        toValue: 14,
+        duration: 140,
+        easing: Easing.in(Easing.quad),
+        useNativeDriver: true,
+      }),
+    ]).start(({ finished }) => {
+      if (active && finished) setFabMounted(false)
+    })
+
+    return () => {
+      active = false
+    }
+  }, [fabOpacityAnim, fabScaleAnim, fabTranslateYAnim, showScrollFab])
+
+  useEffect(() => {
+    if (!showScrollFab) {
+      fabFloatLoopRef.current?.stop()
+      fabFloatLoopRef.current = null
+      fabFloatAnim.setValue(0)
+      return
+    }
+
+    fabFloatLoopRef.current?.stop()
+    fabFloatAnim.setValue(0)
+    const loop = Animated.loop(
+      Animated.sequence([
+        Animated.timing(fabFloatAnim, {
+          toValue: 1,
+          duration: 1700,
+          easing: Easing.inOut(Easing.sin),
+          useNativeDriver: true,
+          isInteraction: false,
+        }),
+        Animated.timing(fabFloatAnim, {
+          toValue: 0,
+          duration: 1700,
+          easing: Easing.inOut(Easing.sin),
+          useNativeDriver: true,
+          isInteraction: false,
+        }),
+      ]),
+    )
+    fabFloatLoopRef.current = loop
+    loop.start()
+
+    return () => {
+      loop.stop()
+      if (fabFloatLoopRef.current === loop) {
+        fabFloatLoopRef.current = null
+      }
+    }
+  }, [fabFloatAnim, showScrollFab])
+
+  const fabFloatOffset = fabFloatAnim.interpolate({
+    inputRange: [0, 1],
+    outputRange: [0, -4],
+  })
+
   return (
     <View style={[styles.container, { backgroundColor: colors.background }]}>
       <StatusBar barStyle={isDark ? 'light-content' : 'dark-content'} />
@@ -839,38 +966,50 @@ function AppContent() {
         <MiniPlayer onOpenPlayer={() => setShowNowPlaying(true)} />
       </View>
 
-      {showScrollFab && (
-        <Pressable
+      {fabMounted && (
+        <Animated.View
           style={[
-            styles.scrollTopFab,
+            styles.scrollTopFabWrap,
             {
-              width: SCROLL_FAB_SIZE,
-              height: SCROLL_FAB_SIZE,
               right: 10,
               bottom: scrollTopFabBottom,
-              borderColor: colors.separator,
-              opacity: isFabPressed ? 0.88 : 1,
+              opacity: fabOpacityAnim,
+              transform: [
+                { translateY: Animated.add(fabTranslateYAnim, fabFloatOffset) },
+                { scale: Animated.multiply(fabScaleAnim, fabPressScaleAnim) },
+              ],
             },
           ]}
-          onPress={handleScrollToTopPress}
-          onPressIn={() => setIsFabPressed(true)}
-          onPressOut={() => setIsFabPressed(false)}
-          accessibilityRole="button"
-          accessibilityLabel="回到顶部"
         >
-          <LinearGradient
-            colors={
-              isDark
-                ? ['rgba(92, 173, 255, 0.95)', 'rgba(38, 120, 230, 0.94)']
-                : ['rgba(140, 218, 255, 0.98)', 'rgba(60, 151, 255, 0.95)']
-            }
-            start={{ x: 0, y: 0 }}
-            end={{ x: 1, y: 1 }}
-            style={styles.scrollTopFabInner}
+          <Pressable
+            style={[
+              styles.scrollTopFab,
+              {
+                width: SCROLL_FAB_SIZE,
+                height: SCROLL_FAB_SIZE,
+                borderColor: colors.separator,
+              },
+            ]}
+            onPress={handleScrollToTopPress}
+            onPressIn={handleFabPressIn}
+            onPressOut={handleFabPressOut}
+            accessibilityRole="button"
+            accessibilityLabel="回到顶部"
           >
-            <Ionicons name="chevron-up" size={20} color="#FFFFFF" />
-          </LinearGradient>
-        </Pressable>
+            <LinearGradient
+              colors={
+                isDark
+                  ? ['rgba(92, 173, 255, 0.95)', 'rgba(38, 120, 230, 0.94)']
+                  : ['rgba(140, 218, 255, 0.98)', 'rgba(60, 151, 255, 0.95)']
+              }
+              start={{ x: 0, y: 0 }}
+              end={{ x: 1, y: 1 }}
+              style={styles.scrollTopFabInner}
+            >
+              <Ionicons name="chevron-up" size={20} color="#FFFFFF" />
+            </LinearGradient>
+          </Pressable>
+        </Animated.View>
       )}
 
       {showNowPlaying && (
@@ -930,12 +1069,14 @@ const styles = StyleSheet.create({
     fontSize: 12,
     fontWeight: '600',
   },
-  scrollTopFab: {
+  scrollTopFabWrap: {
     position: 'absolute',
+    zIndex: 95,
+  },
+  scrollTopFab: {
     borderRadius: borderRadius.full,
     overflow: 'hidden',
     borderWidth: StyleSheet.hairlineWidth,
-    zIndex: 95,
     shadowColor: '#071B36',
     shadowOffset: { width: 0, height: 8 },
     shadowOpacity: 0.24,
