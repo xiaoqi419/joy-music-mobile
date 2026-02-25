@@ -14,6 +14,7 @@ import {
   NativeScrollEvent,
   NativeSyntheticEvent,
   PanResponder,
+  Linking,
   ScrollView,
   StyleProp,
   StyleSheet,
@@ -29,8 +30,6 @@ import { Ionicons } from '@expo/vector-icons'
 import * as DocumentPicker from 'expo-document-picker'
 import * as FileSystem from 'expo-file-system/legacy'
 import { useTheme, spacing, fontSize, borderRadius, BOTTOM_INSET } from '../../theme'
-import TrackListItem from '../../components/common/TrackListItem'
-import { usePlayerStatus } from '../../hooks/usePlayerStatus'
 import { useDispatch, useSelector } from 'react-redux'
 import { RootState } from '../../store'
 import { ThemeMode, Track, type TrackMoreActionHandler } from '../../types/music'
@@ -77,6 +76,13 @@ interface OverviewItem {
   value: string
 }
 
+interface AcknowledgementItem {
+  key: string
+  icon: keyof typeof Ionicons.glyphMap
+  title: string
+  subtitle: string
+}
+
 const THEME_OPTIONS: Array<{
   value: ThemeMode
   label: string
@@ -93,6 +99,21 @@ const THEME_LABELS: Record<ThemeMode, string> = {
   light: '浅色',
   dark: '深色',
 }
+
+const ACKNOWLEDGEMENTS: AcknowledgementItem[] = [
+  {
+    key: 'lxmusic',
+    icon: 'musical-notes-outline',
+    title: 'LxMusic（落雪）',
+    subtitle: '感谢落雪音乐项目的开源思路与生态贡献',
+  },
+  {
+    key: 'cerumusic',
+    icon: 'sparkles-outline',
+    title: 'CeruMusic（澜音）',
+    subtitle: '感谢澜音项目在功能设计与实现上的参考价值',
+  },
+]
 
 // 参照 CeruMusic 音质显示文案，并补充英文缩写对照。
 const QUALITY_LABELS: Record<Quality, string> = {
@@ -166,11 +187,10 @@ function EntryCard({ icon, title, subtitle, onPress, reducedMotion }: EntryCardP
   )
 }
 
-export default function LibraryScreen({ onTrackPress, onTrackMorePress }: LibraryScreenProps) {
+export default function LibraryScreen(_props: LibraryScreenProps) {
   const { colors } = useTheme()
   const dispatch = useDispatch()
   const insets = useSafeAreaInsets()
-  const { isPlaying, currentTrack } = usePlayerStatus()
   const playerState = useSelector((state: RootState) => state.player)
   const themeMode = useSelector((state: RootState) => state.config.theme)
   const musicSourceState = useSelector((state: RootState) => state.musicSource)
@@ -282,6 +302,20 @@ export default function LibraryScreen({ onTrackPress, onTrackMorePress }: Librar
       },
     ])
   }, [loadAudioCacheStats])
+
+  const handleOpenFeedbackWebsite = useCallback(async() => {
+    const url = 'https://music.ojason.top'
+    try {
+      const supported = await Linking.canOpenURL(url)
+      if (!supported) {
+        Alert.alert('无法打开链接', '当前设备不支持打开该网址')
+        return
+      }
+      await Linking.openURL(url)
+    } catch (error) {
+      Alert.alert('打开失败', error instanceof Error ? error.message : '请稍后重试')
+    }
+  }, [])
 
   const openCreateSourceModal = useCallback(() => {
     setEditingSourceId('')
@@ -594,12 +628,42 @@ export default function LibraryScreen({ onTrackPress, onTrackMorePress }: Librar
             onPress={() => setSubPage('cache')}
             reducedMotion={reduceMotionEnabled}
           />
+          <EntryCard
+            icon="globe-outline"
+            title="反馈"
+            subtitle="官网：music.ojason.top"
+            onPress={() => { void handleOpenFeedbackWebsite() }}
+            reducedMotion={reduceMotionEnabled}
+          />
         </View>
       </View>
 
-      <View style={[styles.sectionHeader, styles.playlistSectionHeader]}>
-        <Text style={[styles.sectionTitle, { color: colors.text }]}>当前播放列表</Text>
-        <Text style={[styles.sectionSubtitle, { color: colors.textSecondary }]}>{queueCount} 首</Text>
+      <View style={styles.section}>
+        <View style={styles.sectionHeader}>
+          <Text style={[styles.sectionTitle, { color: colors.text }]}>鸣谢</Text>
+          <Text style={[styles.sectionSubtitle, { color: colors.textSecondary }]}>开源项目</Text>
+        </View>
+        <View style={[styles.card, { backgroundColor: colors.surface, borderColor: colors.separator }]}>
+          {ACKNOWLEDGEMENTS.map((item, index) => (
+            <View
+              key={item.key}
+              style={[
+                styles.optionRow,
+                index < ACKNOWLEDGEMENTS.length - 1
+                  ? { borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: colors.separator }
+                  : null,
+              ]}
+            >
+              <View style={[styles.themeIconWrap, { backgroundColor: colors.surfaceSecondary }]}>
+                <Ionicons name={item.icon} size={16} color={colors.textSecondary} />
+              </View>
+              <View style={styles.rowMeta}>
+                <Text style={[styles.rowTitle, { color: colors.text }]}>{item.title}</Text>
+                <Text style={[styles.rowDesc, { color: colors.textSecondary }]}>{item.subtitle}</Text>
+              </View>
+            </View>
+          ))}
+        </View>
       </View>
     </>
   ), [
@@ -610,50 +674,14 @@ export default function LibraryScreen({ onTrackPress, onTrackMorePress }: Librar
     colors.text,
     colors.textSecondary,
     overviewItems,
-    queueCount,
+    handleOpenFeedbackWebsite,
     reduceMotionEnabled,
     renderHeader,
     selectedSource,
     themeMode,
   ])
 
-  const renderPlaylistItem = useCallback(({ item, index }: { item: Track; index: number }) => {
-    const isFirst = index === 0
-    const isLast = index === queueCount - 1
-    return (
-      <View
-        style={[
-          styles.playlistRow,
-          {
-            backgroundColor: colors.surface,
-            borderTopLeftRadius: isFirst ? borderRadius.md : 0,
-            borderTopRightRadius: isFirst ? borderRadius.md : 0,
-            borderBottomLeftRadius: isLast ? borderRadius.md : 0,
-            borderBottomRightRadius: isLast ? borderRadius.md : 0,
-            borderBottomColor: colors.separator,
-            borderBottomWidth: isLast ? 0 : StyleSheet.hairlineWidth,
-          },
-        ]}
-      >
-        <TrackListItem
-          track={item}
-          index={index}
-          showIndex
-          isCurrentTrack={currentTrack?.id === item.id}
-          isPlaying={isPlaying && currentTrack?.id === item.id}
-          onPress={onTrackPress}
-          onMorePress={(track) => onTrackMorePress?.(track, { playbackQueue: true })}
-        />
-      </View>
-    )
-  }, [colors.separator, colors.surface, currentTrack?.id, isPlaying, onTrackMorePress, onTrackPress, queueCount])
-
-  const mainListEmpty = useMemo(() => (
-    <View style={[styles.emptyPlaylistCard, { backgroundColor: colors.surface, borderColor: colors.separator }]}>
-      <Ionicons name="musical-notes-outline" size={18} color={colors.textTertiary} />
-      <Text style={[styles.emptyPlaylistText, { color: colors.textSecondary }]}>当前还没有播放队列</Text>
-    </View>
-  ), [colors.separator, colors.surface, colors.textSecondary, colors.textTertiary])
+  const renderNoopItem = useCallback(() => null, [])
 
   const renderAppearancePage = () => (
     <View style={styles.section}>
@@ -941,11 +969,9 @@ export default function LibraryScreen({ onTrackPress, onTrackMorePress }: Librar
             ref={mainListRef}
             onScroll={handleMainListScroll}
             scrollEventThrottle={16}
-            data={playerState.playlist}
-            keyExtractor={(item, index) => `${item.source || 'src'}_${item.id}_${index}`}
-            renderItem={renderPlaylistItem}
+            data={[] as Track[]}
+            renderItem={renderNoopItem}
             ListHeaderComponent={mainListHeader}
-            ListEmptyComponent={mainListEmpty}
             showsVerticalScrollIndicator={false}
             contentContainerStyle={[styles.mainListContent, { paddingBottom: BOTTOM_INSET + spacing.md }]}
           />
@@ -1165,28 +1191,6 @@ const styles = StyleSheet.create({
     fontSize: fontSize.caption1,
     fontWeight: '500',
   },
-  playlistSectionHeader: {
-    marginBottom: spacing.sm,
-  },
-  playlistRow: {
-    marginHorizontal: spacing.md,
-    overflow: 'hidden',
-  },
-  emptyPlaylistCard: {
-    marginHorizontal: spacing.md,
-    borderRadius: borderRadius.lg,
-    borderWidth: StyleSheet.hairlineWidth,
-    paddingVertical: spacing.lg,
-    paddingHorizontal: spacing.md,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  emptyPlaylistText: {
-    marginTop: spacing.xs,
-    fontSize: fontSize.footnote,
-    fontWeight: '600',
-  },
-
   card: {
     marginHorizontal: spacing.md,
     borderRadius: borderRadius.lg,
