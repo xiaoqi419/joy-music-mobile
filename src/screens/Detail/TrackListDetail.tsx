@@ -38,6 +38,8 @@ interface TrackListDetailProps {
   onTrackPress?: (track: Track) => void
   onTrackMorePress?: TrackMoreActionHandler
   onPlayAll?: () => void
+  onFavorite?: () => void
+  favoriteDisabled?: boolean
 }
 
 export default function TrackListDetail({
@@ -50,6 +52,8 @@ export default function TrackListDetail({
   onTrackPress,
   onTrackMorePress,
   onPlayAll,
+  onFavorite,
+  favoriteDisabled = false,
 }: TrackListDetailProps) {
   const { colors, isDark } = useTheme()
   const insets = useSafeAreaInsets()
@@ -119,6 +123,34 @@ export default function TrackListDetail({
           <Ionicons name="play" size={20} color="#FFFFFF" />
           <Text style={styles.playAllText}>播放全部</Text>
         </TouchableOpacity>
+        {!!onFavorite && (
+          <TouchableOpacity
+            style={[
+              styles.favoriteButton,
+              {
+                backgroundColor: favoriteDisabled ? colors.surfaceSecondary : colors.surface,
+                borderColor: favoriteDisabled ? colors.separator : colors.accent,
+              },
+            ]}
+            onPress={onFavorite}
+            activeOpacity={favoriteDisabled ? 1 : 0.8}
+            disabled={favoriteDisabled}
+          >
+            <Ionicons
+              name="bookmark-outline"
+              size={18}
+              color={favoriteDisabled ? colors.textTertiary : colors.accent}
+            />
+            <Text
+              style={[
+                styles.favoriteText,
+                { color: favoriteDisabled ? colors.textTertiary : colors.accent },
+              ]}
+            >
+              收藏
+            </Text>
+          </TouchableOpacity>
+        )}
       </View>
     </View>
   )
@@ -216,8 +248,11 @@ const styles = StyleSheet.create({
   actionRow: {
     paddingHorizontal: spacing.md,
     paddingVertical: spacing.md,
+    flexDirection: 'row',
+    gap: spacing.sm,
   },
   playAllButton: {
+    flex: 1,
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
@@ -229,5 +264,20 @@ const styles = StyleSheet.create({
     fontSize: fontSize.callout,
     fontWeight: '600',
     color: '#FFFFFF',
+  },
+  favoriteButton: {
+    minWidth: 104,
+    height: 44,
+    borderRadius: borderRadius.md,
+    borderWidth: StyleSheet.hairlineWidth,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 6,
+    paddingHorizontal: spacing.sm,
+  },
+  favoriteText: {
+    fontSize: fontSize.callout,
+    fontWeight: '700',
   },
 })

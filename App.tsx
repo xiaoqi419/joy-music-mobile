@@ -31,7 +31,7 @@ import LibraryScreen from './src/screens/Library'
 import TrackListDetail from './src/screens/Detail/TrackListDetail'
 import NowPlaying from './src/screens/NowPlaying'
 import { playerController, type PlaybackStatus } from './src/core/player'
-import { Track, type TrackMoreActionContext } from './src/types/music'
+import { Playlist, Track, type TrackMoreActionContext } from './src/types/music'
 import { LeaderboardBoardItem, SongListItem } from './src/types/discover'
 import { getLeaderboardDetail, getSongListDetail } from './src/core/discover'
 import { RootState } from './src/store'
@@ -56,9 +56,18 @@ interface DetailView {
   coverUrl?: string
   gradientColors?: [string, string]
   tracks: Track[]
+  favoritePayload?: {
+    type: 'playlist' | 'leaderboard'
+    source: SongListItem['source']
+    id: string
+  }
 }
 
 const SCROLL_FAB_SIZE = 52
+
+function createPlaylistId() {
+  return `pl_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`
+}
 
 function App() {
   return (
@@ -107,6 +116,41 @@ function AppContent() {
   const getTrackIdentity = useCallback((track: Track) => {
     return `${track.source || 'unknown'}::${track.id}`
   }, [])
+
+  const ensureUniquePlaylistName = useCallback((baseName: string) => {
+    const name = String(baseName || '').trim() || '未命名歌单'
+    const names = new Set(playlistState.playlists.map((item) => item.name))
+    if (!names.has(name)) return name
+    let suffix = 2
+    while (names.has(`${name} (${suffix})`)) {
+      suffix += 1
+    }
+    return `${name} (${suffix})`
+  }, [playlistState.playlists])
+
+  const createImportedPlaylist = useCallback((params: {
+    name: string
+    description?: string
+    coverUrl?: string
+    tracks: Track[]
+  }): Playlist => {
+    const now = Date.now()
+    const playlist: Playlist = {
+      id: createPlaylistId(),
+      name: ensureUniquePlaylistName(params.name),
+      description: params.description,
+      coverUrl: params.coverUrl,
+      source: 'imported',
+      tracks: params.tracks.map((track) => ({ ...track })),
+      createdAt: now,
+      updatedAt: now,
+    }
+    dispatch({ type: 'PLAYLIST_ADD', payload: playlist })
+    if (!playlistState.currentPlaylistId) {
+      dispatch({ type: 'PLAYLIST_SET_CURRENT', payload: playlist.id })
+    }
+    return playlist
+  }, [dispatch, ensureUniquePlaylistName, playlistState.currentPlaylistId])
 
   const ensureTracksHaveConfiguredSource = useCallback((tracks: Track[]) => {
     if (!tracks.length) return false
@@ -425,6 +469,115 @@ function AppContent() {
     syncPlayerStateToStore,
   ])
 
+  const loadSongListTracks = useCallback(async(source: SongListItem['source'], songListId: string) => {
+    const firstPage = await getSongListDetail({
+      source,
+      id: songListId,
+      page: 1,
+      refresh: true,
+    })
+    const tracks: Track[] = [...firstPage.list]
+    const pageLimit = Math.min(firstPage.maxPage, 10)
+    for (let page = 2; page <= pageLimit; page += 1) {
+      const detail = await getSongListDetail({
+        source,
+        id: songListId,
+        page,
+        refresh: true,
+      })
+      tracks.push(...detail.list)
+    }
+    return { firstPage, tracks, truncated: firstPage.maxPage > pageLimit }
+  }, [])
+
+  const loadLeaderboardTracks = useCallback(async(source: LeaderboardBoardItem['source'], boardId: string) => {
+    const firstPage = await getLeaderboardDetail({
+      source,
+      boardId,
+      page: 1,
+      refresh: true,
+    })
+    const tracks: Track[] = [...firstPage.list]
+    const pageLimit = Math.min(firstPage.maxPage, 6)
+    for (let page = 2; page <= pageLimit; page += 1) {
+      const detail = await getLeaderboardDetail({
+        source,
+        boardId,
+        page,
+        refresh: true,
+      })
+      tracks.push(...detail.list)
+    }
+    return { firstPage, tracks, truncated: firstPage.maxPage > pageLimit }
+  }, [])
+
+  const handleFavoriteSongList = useCallback(async(payload: {
+    source: SongListItem['source']
+    id: string
+    name: string
+    description?: string
+    coverUrl?: string
+  }) => {
+    try {
+      setDetailLoading(true)
+      const { firstPage, tracks, truncated } = await loadSongListTracks(payload.source, payload.id)
+      if (!tracks.length) {
+        Alert.alert('收藏失败', `${payload.source.toUpperCase()} 歌单暂无可导入歌曲`)
+        return
+      }
+      const created = createImportedPlaylist({
+        name: firstPage.info.name || payload.name,
+        description: firstPage.info.description || payload.description || `从${payload.source.toUpperCase()}网络歌单导入`,
+        coverUrl: firstPage.info.coverUrl || payload.coverUrl,
+        tracks,
+      })
+      Alert.alert(
+        '收藏成功',
+        truncated
+          ? `已导入「${created.name}」到自定义歌单（仅导入前 10 页）`
+          : `已导入「${created.name}」到自定义歌单`,
+      )
+    } catch (error) {
+      console.error('Favorite playlist error:', error)
+      Alert.alert('收藏失败', `${payload.source.toUpperCase()} 歌单导入失败，请稍后重试。`)
+    } finally {
+      setDetailLoading(false)
+    }
+  }, [createImportedPlaylist, loadSongListTracks])
+
+  const handleFavoriteLeaderboard = useCallback(async(payload: {
+    source: LeaderboardBoardItem['source']
+    id: string
+    name: string
+    coverUrl?: string
+  }) => {
+    try {
+      setDetailLoading(true)
+      const { tracks, truncated } = await loadLeaderboardTracks(payload.source, payload.id)
+      if (!tracks.length) {
+        Alert.alert('收藏失败', `${payload.source.toUpperCase()} 榜单暂无可导入歌曲`)
+        return
+      }
+      const created = createImportedPlaylist({
+        name: `${payload.name}（榜单）`,
+        description: `从${payload.source.toUpperCase()}排行榜导入`,
+        coverUrl: payload.coverUrl,
+        tracks,
+      })
+      Alert.alert(
+        '收藏成功',
+        truncated
+          ? `已导入「${created.name}」到自定义歌单（仅导入前 6 页）`
+          : `已导入「${created.name}」到自定义歌单`,
+      )
+    } catch (error) {
+      console.error('Favorite leaderboard error:', error)
+      Alert.alert('收藏失败', `${payload.source.toUpperCase()} 榜单导入失败，请稍后重试。`)
+    } finally {
+      setDetailLoading(false)
+    }
+  }, [createImportedPlaylist, loadLeaderboardTracks])
+
   const handleLeaderboardPress = useCallback(async(board: LeaderboardBoardItem) => {
     try {
       setDetailLoading(true)
@@ -442,6 +595,11 @@ function AppContent() {
         description: `${board.source.toUpperCase()} 榜单`,
         coverUrl: board.coverUrl,
         tracks: detail.list,
+        favoritePayload: {
+          type: 'leaderboard',
+          source: board.source,
+          id: board.id,
+        },
       })
     } catch (error) {
       console.error('Load leaderboard detail error:', error)
@@ -468,6 +626,11 @@ function AppContent() {
         description: detail.info.description || playlist.description,
         coverUrl: detail.info.coverUrl || playlist.coverUrl,
         tracks: detail.list,
+        favoritePayload: {
+          type: 'playlist',
+          source: playlist.source,
+          id: playlist.id,
+        },
       })
     } catch (error) {
       console.error('Load playlist detail error:', error)
@@ -476,6 +639,26 @@ function AppContent() {
       setDetailLoading(false)
     }
   }, [])
+
+  const handleDetailFavorite = useCallback(() => {
+    if (!detailView?.favoritePayload) return
+    if (detailView.favoritePayload.type === 'playlist') {
+      void handleFavoriteSongList({
+        source: detailView.favoritePayload.source,
+        id: detailView.favoritePayload.id,
+        name: detailView.title,
+        description: detailView.description,
+        coverUrl: detailView.coverUrl,
+      })
+      return
+    }
+    void handleFavoriteLeaderboard({
+      source: detailView.favoritePayload.source,
+      id: detailView.favoritePayload.id,
+      name: detailView.title,
+      coverUrl: detailView.coverUrl,
+    })
+  }, [detailView, handleFavoriteLeaderboard, handleFavoriteSongList])
 
   const playTracksAsQueue = useCallback(async(tracks: Track[]) => {
     if (!tracks.length) return
@@ -600,6 +783,8 @@ function AppContent() {
           onTrackPress={handleTrackPress}
           onTrackMorePress={handleTrackMorePress}
           onPlayAll={handlePlayAll}
+          onFavorite={detailView.favoritePayload ? handleDetailFavorite : undefined}
+          favoriteDisabled={!detailView.favoritePayload}
         />
       )}
 

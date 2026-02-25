@@ -12,7 +12,9 @@ import {
   NativeScrollEvent,
   NativeSyntheticEvent,
   Modal,
+  Platform,
   Pressable,
+  Share,
   StyleSheet,
   Text,
   TextInput,
@@ -21,6 +23,7 @@ import {
 import { useSafeAreaInsets } from 'react-native-safe-area-context'
 import { useDispatch, useSelector } from 'react-redux'
 import { Ionicons } from '@expo/vector-icons'
+import { LinearGradient } from 'expo-linear-gradient'
 import * as DocumentPicker from 'expo-document-picker'
 import * as FileSystem from 'expo-file-system/legacy'
 import { useTheme, spacing, fontSize, borderRadius, BOTTOM_INSET } from '../../theme'
@@ -30,7 +33,6 @@ import { DiscoverSourceId } from '../../types/discover'
 import { getSongListDetail } from '../../core/discover'
 import { httpRequest } from '../../core/discover/http'
 import { emitScrollTopState, subscribeScrollToTop } from '../../core/ui/scrollToTopBus'
-import TrackListItem from '../../components/common/TrackListItem'
 import { useSwipeBack } from '../../hooks/useSwipeBack'
 
 interface PlaylistScreenProps {
@@ -45,6 +47,12 @@ interface ImportCandidate {
   tracks: Track[]
 }
 
+interface PlaylistExportPayload {
+  version: string
+  exportedAt: string
+  playlists: Playlist[]
+}
+
 const IMPORT_SOURCE_OPTIONS: Array<{
   id: DiscoverSourceId
   label: string
@@ -55,6 +63,9 @@ const IMPORT_SOURCE_OPTIONS: Array<{
   { id: 'kg', label: '酷狗' },
   { id: 'mg', label: '咪咕' },
 ]
+
+const DETAIL_TRACK_INITIAL_COUNT = 80
+const DETAIL_TRACK_BATCH_SIZE = 80
 
 function createPlaylistId() {
   return `pl_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`
@@ -137,6 +148,143 @@ function parsePlaylistCandidates(raw: unknown): ImportCandidate[] {
   }
 
   return []
+}
+
+function sanitizeExportFileName(name: string): string {
+  const sanitized = name
+    .trim()
+    .replace(/[\\/:*?"<>|]/g, '_')
+    .replace(/\s+/g, '_')
+    .slice(0, 48)
+  return sanitized || 'playlist'
+}
+
+function normalizeTrackForExport(track: Track): Track {
+  return {
+    id: String(track.id || ''),
+    title: String(track.title || '未知歌曲'),
+    artist: String(track.artist || '未知歌手'),
+    album: track.album ? String(track.album) : undefined,
+    duration: Number(track.duration || 0),
+    url: String(track.url || ''),
+    coverUrl: track.coverUrl ? String(track.coverUrl) : undefined,
+    source: track.source ? String(track.source) : undefined,
+    songmid: track.songmid ? String(track.songmid) : undefined,
+    copyrightId: track.copyrightId ? String(track.copyrightId) : undefined,
+    hash: track.hash ? String(track.hash) : undefined,
+    picUrl: track.picUrl ? String(track.picUrl) : undefined,
+  }
+}
+
+function normalizePlaylistForExport(playlist: Playlist): Playlist {
+  return {
+    id: String(playlist.id || createPlaylistId()),
+    name: String(playlist.name || '未命名歌单'),
+    description: playlist.description ? String(playlist.description) : undefined,
+    coverUrl: playlist.coverUrl ? String(playlist.coverUrl) : undefined,
+    source: playlist.source || 'local',
+    tracks: playlist.tracks.map((track) => normalizeTrackForExport(track)),
+    createdAt: Number(playlist.createdAt || Date.now()),
+    updatedAt: Number(playlist.updatedAt || Date.now()),
+  }
+}
+
+function createPlaylistExportPayload(playlists: Playlist[]): PlaylistExportPayload {
+  return {
+    version: '1.0.0',
+    exportedAt: new Date().toISOString(),
+    playlists: playlists.map((playlist) => normalizePlaylistForExport(playlist)),
+  }
+}
+
+function getPlaylistSourceLabel(source?: Playlist['source']): string {
+  switch (source) {
+    case 'imported':
+      return '导入歌单'
+    case 'network':
+      return '网络歌单'
+    default:
+      return '自建歌单'
+  }
+}
+
+function getPlaylistPlatformCode(playlist: Playlist): string {
+  const trackSource = playlist.tracks.find((track) => track.source)?.source
+  if (trackSource) return String(trackSource).toUpperCase()
+
+  const description = String(playlist.description || '')
+  const match = description.match(/从\s*([A-Za-z]+)\s*网络歌单导入/i)
+  return match?.[1] ? String(match[1]).toUpperCase() : ''
+}
+
+function getPlaylistDisplayLabel(playlist: Playlist): string {
+  if (playlist.source === 'network') {
+    const platformCode = getPlaylistPlatformCode(playlist)
+    return platformCode ? `${platformCode}·网络歌单` : '网络歌单'
+  }
+  return getPlaylistSourceLabel(playlist.source)
+}
+
+function hashString(input: string): number {
+  let hash = 0
+  for (let index = 0; index < input.length; index += 1) {
+    hash = (hash << 5) - hash + input.charCodeAt(index)
+    hash |= 0
+  }
+  return Math.abs(hash)
+}
+
+function hslToHex(hue: number, saturation: number, lightness: number): string {
+  const s = saturation / 100
+  const l = lightness / 100
+  const c = (1 - Math.abs(2 * l - 1)) * s
+  const x = c * (1 - Math.abs((hue / 60) % 2 - 1))
+  const m = l - c / 2
+
+  let r = 0
+  let g = 0
+  let b = 0
+
+  if (hue < 60) {
+    r = c; g = x; b = 0
+  } else if (hue < 120) {
+    r = x; g = c; b = 0
+  } else if (hue < 180) {
+    r = 0; g = c; b = x
+  } else if (hue < 240) {
+    r = 0; g = x; b = c
+  } else if (hue < 300) {
+    r = x; g = 0; b = c
+  } else {
+    r = c; g = 0; b = x
+  }
+
+  const toHex = (value: number) => {
+    const normalized = Math.round((value + m) * 255)
+    return normalized.toString(16).padStart(2, '0')
+  }
+
+  return `#${toHex(r)}${toHex(g)}${toHex(b)}`
+}
+
+/**
+ * 从封面 URL 生成稳定的主色渐变。
+ * 说明：移动端无原生像素采样时，使用封面 URL 作为种子生成稳定主色，保证不同歌单有差异化氛围色。
+ */
+function buildCoverGradientColors(coverUrl: string | undefined, isDark: boolean): [string, string] {
+  if (!coverUrl) {
+    return isDark ? ['#5A3B1E', '#3A2818'] : ['#B77933', '#895826']
+  }
+
+  const seed = hashString(coverUrl)
+  const hue = seed % 360
+  const saturation = 55 + (seed % 18)
+  const lightA = isDark ? 30 + (seed % 8) : 44 + (seed % 8)
+  const lightB = Math.max(16, lightA - (isDark ? 12 : 10))
+
+  const primary = hslToHex(hue, saturation, lightA)
+  const secondary = hslToHex((hue + 18) % 360, Math.max(38, saturation - 9), lightB)
+  return [primary, secondary]
 }
 
 function collectSongListInputCandidates(input: string): string[] {
@@ -251,7 +399,7 @@ async function parseSongListIdWithShareUrl(source: DiscoverSourceId, input: stri
 }
 
 export default function PlaylistScreen({ onTrackPress, onTrackMorePress, onPlayAll }: PlaylistScreenProps) {
-  const { colors } = useTheme()
+  const { colors, isDark } = useTheme()
   const insets = useSafeAreaInsets()
   const dispatch = useDispatch()
 
@@ -268,6 +416,16 @@ export default function PlaylistScreen({ onTrackPress, onTrackMorePress, onPlayA
     () => playlists.find((item) => item.id === selectedPlaylistId) || null,
     [playlists, selectedPlaylistId],
   )
+  const [detailVisibleTrackCount, setDetailVisibleTrackCount] = useState(DETAIL_TRACK_INITIAL_COUNT)
+  const detailVisibleTracks = useMemo(() => {
+    if (!selectedPlaylist) return []
+    return selectedPlaylist.tracks.slice(0, Math.min(detailVisibleTrackCount, selectedPlaylist.tracks.length))
+  }, [detailVisibleTrackCount, selectedPlaylist])
+  const hasMoreDetailTracks = useMemo(() => {
+    if (!selectedPlaylist) return false
+    return detailVisibleTracks.length < selectedPlaylist.tracks.length
+  }, [detailVisibleTracks.length, selectedPlaylist])
+
   const mainListRef = useRef<FlatList<Playlist> | null>(null)
   const detailListRef = useRef<FlatList<Track> | null>(null)
   const { panX, panHandlers } = useSwipeBack(() => setSelectedPlaylistId(null))
@@ -302,6 +460,10 @@ export default function PlaylistScreen({ onTrackPress, onTrackMorePress, onPlayA
     emitScrollTopState(true)
   }, [selectedPlaylistId])
 
+  useEffect(() => {
+    setDetailVisibleTrackCount(DETAIL_TRACK_INITIAL_COUNT)
+  }, [selectedPlaylistId])
+
   const openPlaylistDetail = useCallback((playlistId: string) => {
     panX.setValue(0)
     setSelectedPlaylistId(playlistId)
@@ -311,6 +473,14 @@ export default function PlaylistScreen({ onTrackPress, onTrackMorePress, onPlayA
     panX.setValue(0)
     setSelectedPlaylistId(null)
   }, [panX])
+
+  const handleLoadMoreDetailTracks = useCallback(() => {
+    if (!selectedPlaylist) return
+    setDetailVisibleTrackCount((prev) => {
+      if (prev >= selectedPlaylist.tracks.length) return prev
+      return Math.min(prev + DETAIL_TRACK_BATCH_SIZE, selectedPlaylist.tracks.length)
+    })
+  }, [selectedPlaylist])
 
   const [showCreateModal, setShowCreateModal] = useState(false)
   const [createName, setCreateName] = useState('')
@@ -542,16 +712,156 @@ export default function PlaylistScreen({ onTrackPress, onTrackMorePress, onPlayA
     onPlayAll?.(playlist.tracks)
   }, [dispatch, onPlayAll])
 
+  const writePlaylistExportFile = useCallback(async(payload: PlaylistExportPayload, baseName: string) => {
+    const storageRoot = FileSystem.documentDirectory || FileSystem.cacheDirectory
+    if (!storageRoot) {
+      throw new Error('当前环境不支持导出本地文件')
+    }
+
+    const exportDir = `${storageRoot}joy_playlist_exports`
+    await FileSystem.makeDirectoryAsync(exportDir, { intermediates: true })
+
+    const filename = `${sanitizeExportFileName(baseName)}_${Date.now()}.json`
+    const fileUri = `${exportDir}/${filename}`
+    await FileSystem.writeAsStringAsync(
+      fileUri,
+      JSON.stringify(payload, null, 2),
+      { encoding: FileSystem.EncodingType.UTF8 },
+    )
+
+    return fileUri
+  }, [])
+
+  const handleExportPlaylist = useCallback(async(playlist: Playlist) => {
+    try {
+      const payload = createPlaylistExportPayload([playlist])
+      const fileUri = await writePlaylistExportFile(payload, playlist.name)
+      let sharedSuccessfully = false
+      try {
+        const shareResult = await Share.share({
+          title: '导出歌单',
+          url: fileUri,
+          message: Platform.OS === 'ios'
+            ? undefined
+            : `歌单导出文件：${fileUri}`,
+        })
+        sharedSuccessfully = shareResult.action === Share.sharedAction
+      } catch (shareError) {
+        console.warn('Export share failed:', shareError)
+      }
+
+      if (!sharedSuccessfully) {
+        return
+      }
+
+      Alert.alert(
+        '导出成功',
+        `已生成可导入 JSON 文件：\n${fileUri}\n\n可通过系统分享面板发送或保存该文件。`,
+      )
+    } catch (error) {
+      Alert.alert('导出失败', error instanceof Error ? error.message : '导出歌单失败')
+    }
+  }, [writePlaylistExportFile])
+
+  const handleFavoritePlaylist = useCallback((playlist: Playlist) => {
+    if (playlist.source !== 'network') {
+      return
+    }
+
+    const platform = getPlaylistPlatformCode(playlist) || '网络'
+    const now = Date.now()
+    const importedPlaylist: Playlist = {
+      id: createPlaylistId(),
+      name: ensureUniqueName(playlist.name),
+      description: playlist.description || `收藏自 ${platform}·网络歌单`,
+      coverUrl: playlist.coverUrl,
+      source: 'imported',
+      tracks: playlist.tracks.map((track) => ({ ...track })),
+      createdAt: now,
+      updatedAt: now,
+    }
+    savePlaylist(importedPlaylist, true)
+    Alert.alert('收藏成功', `已将「${importedPlaylist.name}」导入为自定义歌单`)
+  }, [ensureUniqueName, savePlaylist])
+
+  const handleDetailQuickAction = useCallback((action: 'comment' | 'search') => {
+    if (action === 'search') {
+      Alert.alert('提示', '歌单内搜索功能即将上线')
+      return
+    }
+    Alert.alert('提示', '评论功能正在规划中')
+  }, [])
+
+  const renderDetailTrackItem = useCallback(({ item, index }: { item: Track; index: number }) => {
+    const isCurrent = currentTrack?.id === item.id
+    const rowCover = String(item.coverUrl || item.picUrl || '').trim()
+    return (
+      <Pressable
+        style={({ pressed }) => [
+          styles.detailTrackRow,
+          {
+            backgroundColor: isCurrent
+              ? (isDark ? 'rgba(255,191,104,0.16)' : 'rgba(201,128,41,0.12)')
+              : 'transparent',
+            opacity: pressed ? 0.88 : 1,
+          },
+        ]}
+        onPress={() => onTrackPress?.(item)}
+      >
+        <View style={styles.detailTrackIndex}>
+          {isCurrent
+            ? <Ionicons name={isPlaying ? 'volume-high' : 'pause'} size={16} color={colors.accent} />
+            : <Text style={[styles.detailTrackIndexText, { color: colors.textTertiary }]}>{index + 1}</Text>}
+        </View>
+        <View style={[styles.detailTrackCover, { backgroundColor: colors.surfaceSecondary }]}>
+          {rowCover
+            ? <Image source={{ uri: rowCover }} style={styles.detailTrackCoverImage} resizeMode="cover" />
+            : <Ionicons name="musical-note" size={15} color={colors.textTertiary} />}
+        </View>
+        <View style={styles.detailTrackInfo}>
+          <Text
+            numberOfLines={1}
+            style={[
+              styles.detailTrackTitle,
+              { color: isCurrent ? colors.accent : colors.text },
+            ]}
+          >
+            {item.title || '未知歌曲'}
+          </Text>
+          <Text numberOfLines={1} style={[styles.detailTrackMeta, { color: colors.textSecondary }]}>
+            {item.artist || '未知歌手'}
+            {item.album ? ` · ${item.album}` : ''}
+          </Text>
+        </View>
+        <Pressable
+          style={styles.detailTrackMore}
+          hitSlop={8}
+          onPress={(event) => {
+            event.stopPropagation?.()
+            onTrackMorePress?.(item, { playlistId: selectedPlaylistId || undefined })
+          }}
+        >
+          <Ionicons name="ellipsis-vertical" size={16} color={colors.textTertiary} />
+        </Pressable>
+      </Pressable>
+    )
+  }, [colors.accent, colors.surfaceSecondary, colors.text, colors.textSecondary, colors.textTertiary, currentTrack?.id, isDark, isPlaying, onTrackMorePress, onTrackPress, selectedPlaylistId])
+
   const renderPlaylistCard = useCallback(({ item }: { item: Playlist }) => {
     const isCurrent = item.id === currentPlaylistId
     const coverUrl = getPlaylistCover(item)
+    const sourceLabel = getPlaylistDisplayLabel(item)
     return (
       <Pressable
         style={({ pressed }) => [
           styles.playlistCard,
           {
-            backgroundColor: isCurrent ? colors.accentLight : colors.surface,
-            borderColor: isCurrent ? colors.accent : colors.separator,
+            backgroundColor: isCurrent
+              ? (isDark ? 'rgba(184,125,67,0.28)' : '#FFF1E0')
+              : colors.surface,
+            borderColor: isCurrent
+              ? (isDark ? 'rgba(255,196,128,0.5)' : '#E3BA8D')
+              : colors.separator,
             opacity: pressed ? 0.92 : 1,
           },
         ]}
@@ -561,7 +871,7 @@ export default function PlaylistScreen({ onTrackPress, onTrackMorePress, onPlayA
           <View style={[styles.coverPlaceholder, { backgroundColor: colors.surfaceSecondary }]}>
             {coverUrl
               ? <Image source={{ uri: coverUrl }} style={styles.coverImage} resizeMode="cover" />
-              : <Ionicons name="albums-outline" size={18} color={colors.textSecondary} />}
+              : <Ionicons name="albums-outline" size={22} color={colors.textSecondary} />}
           </View>
           <View style={styles.playlistMeta}>
             <Text style={[styles.playlistName, { color: colors.text }]} numberOfLines={1}>{item.name}</Text>
@@ -569,6 +879,8 @@ export default function PlaylistScreen({ onTrackPress, onTrackMorePress, onPlayA
               {item.description || '未填写描述'}
             </Text>
             <View style={styles.playlistMetaRow}>
+              <Text style={[styles.playlistMetaText, { color: colors.textSecondary }]}>{sourceLabel}</Text>
+              <Text style={[styles.playlistMetaDot, { color: colors.textTertiary }]}>·</Text>
               <Text style={[styles.playlistMetaText, { color: colors.textSecondary }]}>{item.tracks.length} 首</Text>
               <Text style={[styles.playlistMetaDot, { color: colors.textTertiary }]}>·</Text>
               <Text style={[styles.playlistMetaText, { color: colors.textSecondary }]}>更新于 {formatUpdatedAt(item.updatedAt)}</Text>
@@ -607,7 +919,7 @@ export default function PlaylistScreen({ onTrackPress, onTrackMorePress, onPlayA
         </View>
       </Pressable>
     )
-  }, [colors.accent, colors.accentLight, colors.separator, colors.surface, colors.surfaceSecondary, colors.text, colors.textSecondary, colors.textTertiary, currentPlaylistId, handleDeletePlaylist, handlePlayAll, openPlaylistDetail])
+  }, [colors.accent, colors.separator, colors.surface, colors.surfaceSecondary, colors.text, colors.textSecondary, colors.textTertiary, currentPlaylistId, handleDeletePlaylist, handlePlayAll, isDark, openPlaylistDetail])
 
   const renderMain = () => (
     <FlatList
@@ -620,45 +932,54 @@ export default function PlaylistScreen({ onTrackPress, onTrackMorePress, onPlayA
       contentContainerStyle={{ paddingBottom: BOTTOM_INSET + spacing.md }}
       ListHeaderComponent={(
         <>
-          <View style={[styles.header, { paddingTop: insets.top + spacing.md }]}>
+          <View style={[styles.header, { paddingTop: insets.top + spacing.sm }]}>
             <Text style={[styles.largeTitle, { color: colors.text }]}>歌单</Text>
+            <Text style={[styles.headerDesc, { color: colors.textSecondary }]}>管理与导入你的音乐收藏</Text>
           </View>
 
-          <View style={[styles.summaryCard, { backgroundColor: colors.surface, borderColor: colors.separator }]}>
-            <View style={styles.summaryItem}>
-              <Text style={[styles.summaryLabel, { color: colors.textSecondary }]}>我的歌单</Text>
-              <Text style={[styles.summaryValue, { color: colors.text }]}>{playlists.length}</Text>
+          <LinearGradient
+            colors={isDark ? ['#5A3B1E', '#3F2A17'] : ['#B57A3B', '#8C5B2B']}
+            start={{ x: 0, y: 0 }}
+            end={{ x: 1, y: 1 }}
+            style={styles.heroCard}
+          >
+            <View style={styles.heroTopRow}>
+              <View style={styles.heroMain}>
+                <Text style={styles.heroTitle}>我的音乐库</Text>
+                <Text style={styles.heroSubtitle}>
+                  {playlists.length} 个歌单 · {totalTracks} 首歌曲
+                </Text>
+              </View>
+              <View style={styles.heroBadge}>
+                <Ionicons name="musical-notes-outline" size={14} color="#FDF4E7" />
+                <Text style={styles.heroBadgeText}>{currentPlaylistId ? '已选择当前歌单' : '未选择当前歌单'}</Text>
+              </View>
             </View>
-            <View style={[styles.summaryDivider, { backgroundColor: colors.separator }]} />
-            <View style={styles.summaryItem}>
-              <Text style={[styles.summaryLabel, { color: colors.textSecondary }]}>歌曲总数</Text>
-              <Text style={[styles.summaryValue, { color: colors.text }]}>{totalTracks}</Text>
+
+            <View style={styles.heroActionRow}>
+              <Pressable
+                style={({ pressed }) => [
+                  styles.heroPrimaryAction,
+                  { opacity: pressed ? 0.84 : 1 },
+                ]}
+                onPress={() => setShowCreateModal(true)}
+              >
+                <Ionicons name="add-circle-outline" size={18} color="#5A3A1A" />
+                <Text style={styles.heroPrimaryActionText}>新建歌单</Text>
+              </Pressable>
+
+              <Pressable
+                style={({ pressed }) => [
+                  styles.heroSecondaryAction,
+                  { opacity: pressed ? 0.84 : 1 },
+                ]}
+                onPress={() => setShowImportModal(true)}
+              >
+                <Ionicons name="download-outline" size={17} color="#FDF4E7" />
+                <Text style={styles.heroSecondaryActionText}>导入歌单</Text>
+              </Pressable>
             </View>
-          </View>
-
-          <View style={styles.topActions}>
-            <Pressable
-              style={({ pressed }) => [
-                styles.primaryAction,
-                { backgroundColor: colors.accent, opacity: pressed ? 0.86 : 1 },
-              ]}
-              onPress={() => setShowCreateModal(true)}
-            >
-              <Ionicons name="add-circle-outline" size={18} color="#FFFFFF" />
-              <Text style={styles.primaryActionText}>新建歌单</Text>
-            </Pressable>
-
-            <Pressable
-              style={({ pressed }) => [
-                styles.secondaryAction,
-                { backgroundColor: colors.surface, borderColor: colors.separator, opacity: pressed ? 0.86 : 1 },
-              ]}
-              onPress={() => setShowImportModal(true)}
-            >
-              <Ionicons name="download-outline" size={17} color={colors.textSecondary} />
-              <Text style={[styles.secondaryActionText, { color: colors.textSecondary }]}>导入歌单</Text>
-            </Pressable>
-          </View>
+          </LinearGradient>
         </>
       )}
       ListEmptyComponent={(
@@ -674,6 +995,11 @@ export default function PlaylistScreen({ onTrackPress, onTrackMorePress, onPlayA
   const renderDetail = () => {
     if (!selectedPlaylist) return null
     const detailCover = getPlaylistCover(selectedPlaylist)
+    const sourceLabel = getPlaylistDisplayLabel(selectedPlaylist)
+    const canFavoritePlaylist = false
+    const detailHeroColors = buildCoverGradientColors(detailCover, isDark)
+    const normalizedDescription = String(selectedPlaylist.description || '').trim()
+    const detailHint = /网络歌单导入/i.test(normalizedDescription) ? '' : normalizedDescription
 
     return (
       <Animated.View
@@ -690,69 +1016,156 @@ export default function PlaylistScreen({ onTrackPress, onTrackMorePress, onPlayA
           ref={detailListRef}
           onScroll={handleDetailListScroll}
           scrollEventThrottle={16}
-          data={selectedPlaylist.tracks}
+          data={detailVisibleTracks}
           keyExtractor={(item, index) => `${item.id}_${index}`}
+          onEndReachedThreshold={0.35}
+          onEndReached={handleLoadMoreDetailTracks}
+          initialNumToRender={18}
+          maxToRenderPerBatch={24}
+          windowSize={9}
+          removeClippedSubviews
+          updateCellsBatchingPeriod={40}
           ListHeaderComponent={(
             <>
-              <View style={[styles.detailHeader, { paddingTop: insets.top + spacing.md }]}>
-                <Pressable
-                  style={({ pressed }) => [
-                    styles.backButton,
-                    { backgroundColor: colors.surface, opacity: pressed ? 0.8 : 1 },
-                  ]}
-                  onPress={closePlaylistDetail}
-                >
-                  <Ionicons name="chevron-back" size={16} color={colors.textSecondary} />
-                  <Text style={[styles.backText, { color: colors.textSecondary }]}>返回</Text>
-                </Pressable>
-                <Text style={[styles.detailTitle, { color: colors.text }]} numberOfLines={1}>歌单详情</Text>
-                <View style={styles.detailHeaderRight} />
-              </View>
+              <LinearGradient
+                colors={detailHeroColors}
+                start={{ x: 0, y: 0 }}
+                end={{ x: 1, y: 1 }}
+                style={styles.detailHero}
+              >
+                <View style={[styles.detailHeader, { paddingTop: insets.top + spacing.sm }]}>
+                  <Pressable
+                    style={({ pressed }) => [
+                      styles.backButton,
+                      { backgroundColor: 'rgba(255,255,255,0.18)', opacity: pressed ? 0.82 : 1 },
+                    ]}
+                    onPress={closePlaylistDetail}
+                  >
+                    <Ionicons name="chevron-back" size={18} color="#FFFFFF" />
+                  </Pressable>
+                </View>
 
-              <View style={[styles.detailInfoCard, { backgroundColor: colors.surface, borderColor: colors.separator }]}>
-                <View style={styles.detailInfoTopRow}>
-                  <View style={[styles.detailCover, { backgroundColor: colors.surfaceSecondary }]}>
-                    {detailCover
-                      ? <Image source={{ uri: detailCover }} style={styles.detailCoverImage} resizeMode="cover" />
-                      : <Ionicons name="albums-outline" size={20} color={colors.textSecondary} />}
+                <View style={styles.detailHeroMain}>
+                  <View style={styles.detailCoverOuter}>
+                    <View style={[styles.detailCover, styles.detailHeroCover, { backgroundColor: 'rgba(255,255,255,0.22)' }]}>
+                      {detailCover
+                        ? <Image source={{ uri: detailCover }} style={styles.detailCoverImage} resizeMode="cover" />
+                        : <Ionicons name="albums-outline" size={32} color="#FFFFFF" />}
+                    </View>
                   </View>
-                  <View style={styles.detailInfoText}>
-                    <Text style={[styles.detailPlaylistName, { color: colors.text }]} numberOfLines={2}>{selectedPlaylist.name}</Text>
-                    <Text style={[styles.detailPlaylistDesc, { color: colors.textSecondary }]} numberOfLines={2}>
-                      {selectedPlaylist.description || '未填写描述'}
+
+                  <View style={styles.detailHeroText}>
+                    <Text style={styles.detailHeroTitle} numberOfLines={2}>{selectedPlaylist.name}</Text>
+                    <View style={styles.detailHeroBottomInfo}>
+                      <Text style={styles.detailHeroMeta} numberOfLines={1}>
+                        {sourceLabel} · {selectedPlaylist.tracks.length} 首
+                      </Text>
+                      <Text style={styles.detailHeroMeta} numberOfLines={1}>
+                        更新于 {formatUpdatedAt(selectedPlaylist.updatedAt)}
+                      </Text>
+                      {!!detailHint && (
+                        <Text style={styles.detailHeroHint} numberOfLines={2}>
+                          {detailHint}
+                        </Text>
+                      )}
+                    </View>
+                  </View>
+                </View>
+
+                <View style={styles.detailHeroActionRow}>
+                  <Pressable
+                    style={({ pressed }) => [styles.detailActionCapsule, { opacity: pressed ? 0.84 : 1 }]}
+                    onPress={() => { void handleExportPlaylist(selectedPlaylist) }}
+                  >
+                    <Ionicons name="download-outline" size={15} color="#FFFFFF" />
+                    <Text style={styles.detailActionCapsuleText}>导出</Text>
+                  </Pressable>
+                  <Pressable
+                    style={({ pressed }) => [styles.detailActionCapsule, { opacity: pressed ? 0.84 : 1 }]}
+                    onPress={() => handleDetailQuickAction('comment')}
+                  >
+                    <Ionicons name="chatbubble-ellipses-outline" size={15} color="#FFFFFF" />
+                    <Text style={styles.detailActionCapsuleText}>评论</Text>
+                  </Pressable>
+                  <Pressable
+                    style={({ pressed }) => [
+                      styles.detailActionCapsule,
+                      !canFavoritePlaylist && styles.detailActionCapsuleDisabled,
+                      { opacity: canFavoritePlaylist ? (pressed ? 0.84 : 1) : 0.56 },
+                    ]}
+                    onPress={() => handleFavoritePlaylist(selectedPlaylist)}
+                    disabled={!canFavoritePlaylist}
+                  >
+                    <Ionicons name="bookmark-outline" size={15} color="#FFFFFF" />
+                    <Text style={styles.detailActionCapsuleText}>
+                      {canFavoritePlaylist ? '收藏' : '已收藏'}
+                    </Text>
+                  </Pressable>
+                </View>
+              </LinearGradient>
+
+              <View style={[styles.detailPlayCard, { backgroundColor: colors.surface, borderColor: colors.separator }]}>
+                <View style={styles.detailPlayMain}>
+                  <Pressable
+                    style={({ pressed }) => [
+                      styles.detailPlayRoundBtn,
+                      { backgroundColor: colors.accent, opacity: pressed ? 0.84 : 1 },
+                    ]}
+                    onPress={() => handlePlayAll(selectedPlaylist)}
+                  >
+                    <Ionicons name="play" size={20} color="#FFFFFF" />
+                  </Pressable>
+
+                  <View style={styles.detailPlayTextWrap}>
+                    <Text style={[styles.detailPlayTitle, { color: colors.text }]}>播放全部</Text>
+                    <Text style={[styles.detailPlaySubTitle, { color: colors.textSecondary }]} numberOfLines={1}>
+                      {selectedPlaylist.tracks.length} 首 · {sourceLabel}
                     </Text>
                   </View>
                 </View>
-                <View style={styles.detailMetaRow}>
-                  <Text style={[styles.detailMetaText, { color: colors.textSecondary }]}>{selectedPlaylist.tracks.length} 首歌曲</Text>
-                  <Text style={[styles.playlistMetaDot, { color: colors.textTertiary }]}>·</Text>
-                  <Text style={[styles.detailMetaText, { color: colors.textSecondary }]}>更新于 {formatUpdatedAt(selectedPlaylist.updatedAt)}</Text>
+
+                <View style={styles.detailPlayTools}>
+                  <Pressable
+                    style={({ pressed }) => [styles.detailToolBtn, { opacity: pressed ? 0.82 : 1 }]}
+                    onPress={() => handleDetailQuickAction('search')}
+                  >
+                    <Ionicons name="search-outline" size={18} color={colors.textSecondary} />
+                  </Pressable>
+                  <Pressable
+                    style={({ pressed }) => [styles.detailToolBtn, { opacity: pressed ? 0.82 : 1 }]}
+                    onPress={() => Alert.alert('提示', '排序功能即将上线')}
+                  >
+                    <Ionicons name="reorder-three-outline" size={20} color={colors.textSecondary} />
+                  </Pressable>
                 </View>
-                <Pressable
-                  style={({ pressed }) => [
-                    styles.playAllBtn,
-                    { backgroundColor: colors.accent, opacity: pressed ? 0.86 : 1 },
-                  ]}
-                  onPress={() => handlePlayAll(selectedPlaylist)}
-                >
-                  <Ionicons name="play" size={16} color="#FFFFFF" />
-                  <Text style={styles.playAllBtnText}>播放全部</Text>
-                </Pressable>
+              </View>
+
+              {currentTrack && (
+                <View style={styles.detailContinueRow}>
+                  <Ionicons name="play-outline" size={14} color={colors.textSecondary} />
+                  <Text style={[styles.detailContinueText, { color: colors.textSecondary }]} numberOfLines={1}>
+                    继续播放：{currentTrack.title}
+                  </Text>
+                </View>
+              )}
+              <View style={styles.detailListHeaderRow}>
+                <Text style={[styles.detailListHeaderTitle, { color: colors.text }]}>歌曲列表</Text>
+                <Text style={[styles.detailListHeaderMeta, { color: colors.textSecondary }]}>
+                  共 {selectedPlaylist.tracks.length} 首
+                </Text>
               </View>
             </>
           )}
-          contentContainerStyle={{ paddingBottom: BOTTOM_INSET + spacing.md }}
-          renderItem={({ item, index }) => (
-            <TrackListItem
-              track={item}
-              index={index}
-              showIndex
-              isCurrentTrack={currentTrack?.id === item.id}
-              isPlaying={isPlaying && currentTrack?.id === item.id}
-              onPress={onTrackPress}
-              onMorePress={(track) => onTrackMorePress?.(track, { playlistId: selectedPlaylist.id })}
-            />
-          )}
+          ListFooterComponent={hasMoreDetailTracks ? (
+            <View style={styles.detailListFooter}>
+              <ActivityIndicator size="small" color={colors.accent} />
+              <Text style={[styles.detailListFooterText, { color: colors.textSecondary }]}>
+                正在加载更多歌曲…
+              </Text>
+            </View>
+          ) : null}
+          contentContainerStyle={{ paddingBottom: BOTTOM_INSET + spacing.lg }}
+          renderItem={renderDetailTrackItem}
         />
       </Animated.View>
     )
@@ -967,72 +1380,94 @@ const styles = StyleSheet.create({
   },
   header: {
     paddingHorizontal: spacing.md,
-    paddingBottom: spacing.sm,
+    paddingBottom: spacing.xs,
   },
   largeTitle: {
     fontSize: fontSize.largeTitle,
     fontWeight: '800',
     letterSpacing: 0.25,
   },
-  summaryCard: {
-    marginHorizontal: spacing.md,
-    borderRadius: borderRadius.lg,
-    borderWidth: StyleSheet.hairlineWidth,
-    minHeight: 92,
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingHorizontal: spacing.md,
-    marginBottom: spacing.md,
-  },
-  summaryItem: {
-    flex: 1,
-  },
-  summaryLabel: {
+  headerDesc: {
+    marginTop: 2,
     fontSize: fontSize.caption1,
     fontWeight: '600',
-    marginBottom: spacing.xs,
   },
-  summaryValue: {
-    fontSize: fontSize.title3,
+  heroCard: {
+    marginHorizontal: spacing.md,
+    borderRadius: borderRadius.xl,
+    paddingHorizontal: spacing.md,
+    paddingTop: spacing.md,
+    paddingBottom: spacing.sm + 2,
+    marginBottom: spacing.md,
+    overflow: 'hidden',
+  },
+  heroTopRow: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    justifyContent: 'space-between',
+    gap: spacing.sm,
+  },
+  heroMain: {
+    flex: 1,
+  },
+  heroTitle: {
+    color: '#FFFFFF',
+    fontSize: fontSize.title2,
     fontWeight: '800',
   },
-  summaryDivider: {
-    width: StyleSheet.hairlineWidth,
-    height: 36,
-    marginHorizontal: spacing.md,
+  heroSubtitle: {
+    marginTop: spacing.xs,
+    color: '#F8E9D8',
+    fontSize: fontSize.caption1,
+    fontWeight: '600',
   },
-  topActions: {
-    flexDirection: 'row',
-    gap: spacing.sm,
-    paddingHorizontal: spacing.md,
-    marginBottom: spacing.md,
-  },
-  primaryAction: {
-    flex: 1,
-    minHeight: 46,
-    borderRadius: borderRadius.md,
+  heroBadge: {
     flexDirection: 'row',
     alignItems: 'center',
-    justifyContent: 'center',
-    gap: spacing.xs,
+    gap: 4,
+    borderRadius: borderRadius.full,
+    paddingHorizontal: spacing.sm,
+    paddingVertical: 6,
+    backgroundColor: 'rgba(255,255,255,0.18)',
   },
-  primaryActionText: {
-    color: '#FFFFFF',
-    fontSize: fontSize.callout,
+  heroBadgeText: {
+    color: '#FDF4E7',
+    fontSize: fontSize.caption2,
     fontWeight: '700',
   },
-  secondaryAction: {
+  heroActionRow: {
+    marginTop: spacing.sm + 2,
+    flexDirection: 'row',
+    gap: spacing.sm,
+  },
+  heroPrimaryAction: {
     flex: 1,
-    minHeight: 46,
-    borderRadius: borderRadius.md,
-    borderWidth: StyleSheet.hairlineWidth,
+    minHeight: 42,
+    borderRadius: borderRadius.full,
+    backgroundColor: '#FFE5C2',
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
-    gap: spacing.xs,
+    gap: 6,
   },
-  secondaryActionText: {
-    fontSize: fontSize.callout,
+  heroPrimaryActionText: {
+    color: '#5A3A1A',
+    fontSize: fontSize.subhead,
+    fontWeight: '700',
+  },
+  heroSecondaryAction: {
+    flex: 1,
+    minHeight: 42,
+    borderRadius: borderRadius.full,
+    backgroundColor: 'rgba(255,255,255,0.16)',
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 6,
+  },
+  heroSecondaryActionText: {
+    color: '#FFFFFF',
+    fontSize: fontSize.subhead,
     fontWeight: '700',
   },
   emptyCard: {
@@ -1057,19 +1492,19 @@ const styles = StyleSheet.create({
     marginHorizontal: spacing.md,
     borderRadius: borderRadius.lg,
     borderWidth: StyleSheet.hairlineWidth,
-    marginBottom: spacing.sm,
+    marginBottom: spacing.md - 2,
     padding: spacing.md,
-    minHeight: 128,
+    minHeight: 132,
   },
   playlistCardHeader: {
     flexDirection: 'row',
-    alignItems: 'flex-start',
+    alignItems: 'center',
     gap: spacing.sm,
   },
   coverPlaceholder: {
-    width: 44,
-    height: 44,
-    borderRadius: borderRadius.sm,
+    width: 56,
+    height: 56,
+    borderRadius: borderRadius.md,
     alignItems: 'center',
     justifyContent: 'center',
     overflow: 'hidden',
@@ -1082,11 +1517,11 @@ const styles = StyleSheet.create({
     flex: 1,
   },
   playlistName: {
-    fontSize: fontSize.body,
+    fontSize: fontSize.headline,
     fontWeight: '700',
   },
   playlistDesc: {
-    marginTop: 2,
+    marginTop: 3,
     fontSize: fontSize.caption1,
   },
   playlistMetaRow: {
@@ -1108,20 +1543,21 @@ const styles = StyleSheet.create({
     fontWeight: '700',
   },
   deleteButton: {
-    width: 28,
-    height: 28,
+    width: 30,
+    height: 30,
+    borderRadius: 15,
     alignItems: 'center',
     justifyContent: 'center',
-    marginTop: -2,
+    marginTop: -8,
   },
   playlistActions: {
     flexDirection: 'row',
-    gap: spacing.xs,
     marginTop: spacing.sm,
+    alignItems: 'center',
   },
   actionBtn: {
     flex: 1,
-    minHeight: 38,
+    minHeight: 40,
     borderRadius: borderRadius.sm,
     flexDirection: 'row',
     alignItems: 'center',
@@ -1139,45 +1575,139 @@ const styles = StyleSheet.create({
   detailHeader: {
     flexDirection: 'row',
     alignItems: 'center',
-    justifyContent: 'space-between',
+    justifyContent: 'flex-start',
     paddingHorizontal: spacing.md,
+    paddingBottom: spacing.sm,
+  },
+  detailHero: {
+    borderBottomLeftRadius: borderRadius.xl,
+    borderBottomRightRadius: borderRadius.xl,
     paddingBottom: spacing.md,
+    overflow: 'hidden',
   },
   backButton: {
-    minHeight: 34,
-    minWidth: 64,
+    width: 34,
+    height: 34,
     borderRadius: borderRadius.full,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  detailHeroMain: {
+    marginTop: spacing.sm,
+    paddingHorizontal: spacing.md,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.md,
+  },
+  detailCoverOuter: {
+    width: 114,
+    height: 114,
+    borderRadius: borderRadius.lg + 2,
+    backgroundColor: 'rgba(255,255,255,0.16)',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  detailHeroCover: {
+    width: 106,
+    height: 106,
+    borderRadius: borderRadius.lg,
+  },
+  detailHeroText: {
+    flex: 1,
+    minHeight: 106,
+    justifyContent: 'center',
+  },
+  detailHeroBottomInfo: {
+    marginTop: spacing.xs,
+  },
+  detailHeroTitle: {
+    color: '#FFFFFF',
+    fontSize: fontSize.title2,
+    fontWeight: '700',
+  },
+  detailHeroMeta: {
+    marginTop: 4,
+    color: '#F9ECDD',
+    fontSize: fontSize.footnote,
+    fontWeight: '600',
+  },
+  detailHeroHint: {
+    marginTop: 2,
+    color: '#F4E7D8',
+    fontSize: fontSize.caption2,
+    fontWeight: '600',
+  },
+  detailHeroActionRow: {
+    marginTop: spacing.md,
+    paddingHorizontal: spacing.md,
+    flexDirection: 'row',
+    gap: spacing.sm,
+  },
+  detailActionCapsule: {
+    flex: 1,
+    minHeight: 38,
+    borderRadius: borderRadius.full,
+    backgroundColor: 'rgba(255,255,255,0.16)',
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
-    gap: 2,
-    paddingHorizontal: spacing.sm,
+    gap: 6,
   },
-  backText: {
-    fontSize: fontSize.caption1,
+  detailActionCapsuleDisabled: {
+    backgroundColor: 'rgba(255,255,255,0.08)',
+  },
+  detailActionCapsuleText: {
+    color: '#FFFFFF',
+    fontSize: fontSize.subhead,
     fontWeight: '700',
   },
-  detailTitle: {
-    flex: 1,
-    textAlign: 'center',
-    fontSize: fontSize.headline,
-    fontWeight: '700',
-    marginHorizontal: spacing.sm,
-  },
-  detailHeaderRight: {
-    width: 64,
-  },
-  detailInfoCard: {
+  detailPlayCard: {
     marginHorizontal: spacing.md,
+    marginTop: spacing.sm,
     borderRadius: borderRadius.lg,
     borderWidth: StyleSheet.hairlineWidth,
-    padding: spacing.md,
-    marginBottom: spacing.md,
-  },
-  detailInfoTopRow: {
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.sm + 2,
     flexDirection: 'row',
-    alignItems: 'flex-start',
+    alignItems: 'center',
+    justifyContent: 'space-between',
     gap: spacing.sm,
+  },
+  detailPlayMain: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.sm,
+  },
+  detailPlayRoundBtn: {
+    width: 42,
+    height: 42,
+    borderRadius: 21,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  detailPlayTextWrap: {
+    flex: 1,
+  },
+  detailPlayTitle: {
+    fontSize: fontSize.title3,
+    fontWeight: '800',
+  },
+  detailPlaySubTitle: {
+    marginTop: 2,
+    fontSize: fontSize.footnote,
+  },
+  detailPlayTools: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.xs,
+  },
+  detailToolBtn: {
+    width: 34,
+    height: 34,
+    borderRadius: 17,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   detailCover: {
     width: 68,
@@ -1191,41 +1721,91 @@ const styles = StyleSheet.create({
     width: '100%',
     height: '100%',
   },
-  detailInfoText: {
-    flex: 1,
-    minHeight: 68,
-    justifyContent: 'center',
-  },
-  detailPlaylistName: {
-    fontSize: fontSize.title3,
-    fontWeight: '800',
-  },
-  detailPlaylistDesc: {
-    marginTop: spacing.xs,
-    fontSize: fontSize.footnote,
-  },
-  detailMetaRow: {
-    marginTop: spacing.xs,
+  detailContinueRow: {
+    marginHorizontal: spacing.md,
+    marginTop: spacing.sm,
     flexDirection: 'row',
     alignItems: 'center',
+    gap: spacing.xs,
   },
-  detailMetaText: {
+  detailContinueText: {
+    flex: 1,
+    fontSize: fontSize.footnote,
+    fontWeight: '600',
+  },
+  detailListHeaderRow: {
+    marginHorizontal: spacing.md,
+    marginTop: spacing.sm,
+    marginBottom: spacing.xs,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+  },
+  detailListHeaderTitle: {
+    fontSize: fontSize.callout,
+    fontWeight: '700',
+  },
+  detailListHeaderMeta: {
     fontSize: fontSize.caption1,
     fontWeight: '600',
   },
-  playAllBtn: {
-    marginTop: spacing.md,
-    minHeight: 42,
-    borderRadius: borderRadius.md,
-    flexDirection: 'row',
+  detailListFooter: {
+    marginTop: spacing.sm,
+    marginBottom: spacing.sm,
     alignItems: 'center',
     justifyContent: 'center',
     gap: spacing.xs,
   },
-  playAllBtnText: {
-    color: '#FFFFFF',
+  detailListFooterText: {
+    fontSize: fontSize.caption1,
+    fontWeight: '600',
+  },
+  detailTrackRow: {
+    height: 66,
+    paddingHorizontal: spacing.md,
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  detailTrackIndex: {
+    width: 28,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  detailTrackIndexText: {
+    fontSize: fontSize.caption1,
+    fontWeight: '600',
+  },
+  detailTrackCover: {
+    width: 42,
+    height: 42,
+    borderRadius: borderRadius.sm,
+    alignItems: 'center',
+    justifyContent: 'center',
+    overflow: 'hidden',
+    marginLeft: spacing.xs,
+    marginRight: spacing.sm,
+  },
+  detailTrackCoverImage: {
+    width: '100%',
+    height: '100%',
+  },
+  detailTrackInfo: {
+    flex: 1,
+  },
+  detailTrackTitle: {
     fontSize: fontSize.callout,
-    fontWeight: '700',
+    fontWeight: '600',
+  },
+  detailTrackMeta: {
+    marginTop: spacing.xs,
+    fontSize: fontSize.caption1,
+  },
+  detailTrackMore: {
+    width: 34,
+    height: 34,
+    borderRadius: 17,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   modalMask: {
     flex: 1,

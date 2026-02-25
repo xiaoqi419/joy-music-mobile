@@ -96,7 +96,10 @@ export default function PlaylistSection({
         contentContainerStyle={styles.listContent}
         renderItem={({ item }) => (
           <View style={styles.cardColumn}>
-            <PlaylistCard item={item} onPress={() => onPlaylistPress?.(item)} />
+            <PlaylistCard
+              item={item}
+              onPress={() => onPlaylistPress?.(item)}
+            />
           </View>
         )}
       />
