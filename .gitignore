@@ -44,3 +44,9 @@ web-build/
 lx-music-mobile/
 
 CeruMusic/
+
+.claude/
+
+# Root markdown files (keep README only)
+/*.md
+!/README.md
