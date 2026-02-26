@@ -10,6 +10,7 @@ import {
   Animated,
   Easing,
   FlatList,
+  Image,
   Modal,
   NativeScrollEvent,
   NativeSyntheticEvent,
@@ -42,13 +43,15 @@ import {
 } from '../../core/config/musicSource'
 import { audioFileCache, formatCacheSize } from '../../core/music/audioCache'
 import { emitScrollTopState, subscribeScrollToTop } from '../../core/ui/scrollToTopBus'
+import appConfig from '../../config'
+import { checkGithubReleaseUpdate } from '../../core/update/githubRelease'
 
 interface LibraryScreenProps {
   onTrackPress?: (track: Track) => void
   onTrackMorePress?: TrackMoreActionHandler
 }
 
-type LibrarySubPage = 'main' | 'appearance' | 'sources' | 'cache'
+type LibrarySubPage = 'main' | 'appearance' | 'sources' | 'cache' | 'about'
 type SourceModalMode = 'manual' | 'url'
 
 interface MotionPressableProps {
@@ -222,6 +225,10 @@ export default function LibraryScreen(_props: LibraryScreenProps) {
   const [cacheEnabled, setCacheEnabled] = useState(true)
   const [cacheFileCount, setCacheFileCount] = useState(0)
   const [cacheSizeBytes, setCacheSizeBytes] = useState(0)
+  const [sponsorModalVisible, setSponsorModalVisible] = useState(false)
+  const [checkingUpdate, setCheckingUpdate] = useState(false)
+
+  const currentVersion = appConfig.version
 
   const pageTitle = subPage === 'main'
     ? '我的'
@@ -229,7 +236,9 @@ export default function LibraryScreen(_props: LibraryScreenProps) {
       ? '外观设置'
       : subPage === 'sources'
         ? '自定义源管理'
-        : '缓存管理'
+        : subPage === 'cache'
+          ? '缓存管理'
+          : '关于'
 
   const queueCount = playerState.playlist.length
   const cacheSummaryText = `${cacheEnabled ? '已开启' : '已关闭'} · ${formatCacheSize(cacheSizeBytes)}`
@@ -316,6 +325,71 @@ export default function LibraryScreen(_props: LibraryScreenProps) {
       Alert.alert('打开失败', error instanceof Error ? error.message : '请稍后重试')
     }
   }, [])
+
+  const handleCheckUpdate = useCallback(async() => {
+    if (checkingUpdate) return
+
+    const owner = appConfig.update.githubOwner
+    const repo = appConfig.update.githubRepo
+    const fallbackReleaseUrl = owner && repo
+      ? `https://github.com/${owner}/${repo}/releases`
+      : 'https://music.ojason.top'
+
+    setCheckingUpdate(true)
+    try {
+      const result = await checkGithubReleaseUpdate({
+        owner,
+        repo,
+        currentVersion,
+        requestTimeoutMs: appConfig.update.requestTimeoutMs,
+      })
+
+      if (result.status === 'has_update') {
+        const summaryLines = [
+          `当前版本：v${result.currentVersion}`,
+          `最新版本：v${result.latestVersion || '-'}`,
+        ]
+        const notes = result.notes?.trim()
+        if (notes) summaryLines.push('', notes.slice(0, 800))
+
+        const updateUrl = result.releaseUrl || fallbackReleaseUrl
+        Alert.alert('发现新版本', summaryLines.join('\n'), [
+          { text: '取消', style: 'cancel' },
+          {
+            text: '前往更新',
+            onPress: () => {
+              void Linking.openURL(updateUrl).catch(() => {
+                Alert.alert('打开失败', '请手动打开更新页面')
+              })
+            },
+          },
+        ])
+        return
+      }
+
+      if (result.status === 'up_to_date') {
+        Alert.alert('已是最新版本', `当前版本：v${result.currentVersion}`)
+        return
+      }
+
+      const failedUrl = result.releaseUrl || fallbackReleaseUrl
+      Alert.alert('检查更新失败', result.reason || '请稍后重试', [
+        { text: '取消', style: 'cancel' },
+        {
+          text: '打开更新页',
+          onPress: () => {
+            void Linking.openURL(failedUrl).catch(() => {
+              Alert.alert('打开失败', '请手动打开更新页面')
+            })
+          },
+        },
+      ])
+    } catch (error) {
+      Alert.alert('检查更新失败', error instanceof Error ? error.message : '请稍后重试')
+    } finally {
+      setCheckingUpdate(false)
+    }
+  }, [checkingUpdate, currentVersion])
 
   const openCreateSourceModal = useCallback(() => {
     setEditingSourceId('')
@@ -628,6 +702,29 @@ export default function LibraryScreen(_props: LibraryScreenProps) {
             onPress={() => setSubPage('cache')}
             reducedMotion={reduceMotionEnabled}
           />
+        </View>
+      </View>
+
+      <View style={styles.section}>
+        <View style={styles.sectionHeader}>
+          <Text style={[styles.sectionTitle, { color: colors.text }]}>支持与关于</Text>
+          <Text style={[styles.sectionSubtitle, { color: colors.textSecondary }]}>信息与链接</Text>
+        </View>
+        <View style={styles.entryList}>
+          <EntryCard
+            icon="information-circle-outline"
+            title="关于"
+            subtitle={`v${currentVersion}`}
+            onPress={() => setSubPage('about')}
+            reducedMotion={reduceMotionEnabled}
+          />
+          <EntryCard
+            icon="heart-outline"
+            title="赞助作者"
+            subtitle="微信赞赏"
+            onPress={() => setSponsorModalVisible(true)}
+            reducedMotion={reduceMotionEnabled}
+          />
           <EntryCard
             icon="globe-outline"
             title="反馈"
@@ -673,6 +770,7 @@ export default function LibraryScreen(_props: LibraryScreenProps) {
     colors.surfaceSecondary,
     colors.text,
     colors.textSecondary,
+    currentVersion,
     overviewItems,
     handleOpenFeedbackWebsite,
     reduceMotionEnabled,
@@ -947,6 +1045,51 @@ export default function LibraryScreen(_props: LibraryScreenProps) {
     </>
   )
 
+  const renderAboutPage = () => (
+    <>
+      <View style={styles.section}>
+        <View style={styles.sectionHeader}>
+          <Text style={[styles.sectionTitle, { color: colors.text }]}>应用信息</Text>
+          <Text style={[styles.sectionSubtitle, { color: colors.textSecondary }]}>IPA 自签分发</Text>
+        </View>
+        <View style={[styles.card, { backgroundColor: colors.surface, borderColor: colors.separator }]}>
+          <View style={[styles.optionRow, { borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: colors.separator }]}>
+            <View style={[styles.themeIconWrap, { backgroundColor: colors.surfaceSecondary }]}>
+              <Ionicons name="apps-outline" size={16} color={colors.textSecondary} />
+            </View>
+            <View style={styles.rowMeta}>
+              <Text style={[styles.rowTitle, { color: colors.text }]}>当前版本</Text>
+              <Text style={[styles.rowDesc, { color: colors.textSecondary }]}>v{currentVersion}</Text>
+            </View>
+          </View>
+
+          <MotionPressable
+            onPress={() => { void handleCheckUpdate() }}
+            reducedMotion={reduceMotionEnabled}
+            disabled={checkingUpdate}
+          >
+            <View style={styles.optionRow}>
+              <View style={[styles.themeIconWrap, { backgroundColor: colors.surfaceSecondary }]}>
+                {checkingUpdate
+                  ? <ActivityIndicator size="small" color={colors.accent} />
+                  : <Ionicons name="cloud-download-outline" size={16} color={colors.textSecondary} />}
+              </View>
+              <View style={styles.rowMeta}>
+                <Text style={[styles.rowTitle, { color: colors.text }]}>检查更新</Text>
+                <Text style={[styles.rowDesc, { color: colors.textSecondary }]}>
+                  {checkingUpdate ? '正在检查...' : '检查 GitHub Release 最新版本'}
+                </Text>
+              </View>
+              <Ionicons name="chevron-forward" size={16} color={colors.textTertiary} />
+            </View>
+          </MotionPressable>
+        </View>
+      </View>
+
+      <Text style={[styles.swipeHint, { color: colors.textTertiary }]}>从屏幕最左侧向右滑动可返回</Text>
+    </>
+  )
+
   const pageAnimatedStyle = {
     opacity: pageAnim,
     transform: [
@@ -987,9 +1130,30 @@ export default function LibraryScreen(_props: LibraryScreenProps) {
             {subPage === 'appearance' && renderAppearancePage()}
             {subPage === 'sources' && renderSourcesPage()}
             {subPage === 'cache' && renderCachePage()}
+            {subPage === 'about' && renderAboutPage()}
           </ScrollView>
         )}
       </Animated.View>
+
+      <Modal transparent visible={sponsorModalVisible} animationType="fade" onRequestClose={() => setSponsorModalVisible(false)}>
+        <View style={styles.modalMask}>
+          <View style={[styles.modalCard, styles.sponsorModalCard, { backgroundColor: colors.surface }]}>
+            <Text style={[styles.modalTitle, { color: colors.text }]}>赞助作者</Text>
+            <Text style={[styles.sponsorHint, { color: colors.textSecondary }]}>微信扫一扫支持一下</Text>
+            <Image
+              source={{ uri: 'https://ojason.oss-cn-chengdu.aliyuncs.com/hexo-blog/dfc8ad9d3f5cf38d65f3d7516360d8e9.jpg' }}
+              style={[styles.sponsorQrImage, { borderColor: colors.separator }]}
+              resizeMode="cover"
+            />
+            <TouchableOpacity
+              style={[styles.modalBtn, styles.sponsorCloseBtn, { backgroundColor: colors.accent }]}
+              onPress={() => setSponsorModalVisible(false)}
+            >
+              <Text style={[styles.cardBtnText, { color: '#FFFFFF' }]}>关闭</Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+      </Modal>
 
       <Modal transparent visible={sourceModalVisible} animationType="fade" onRequestClose={() => setSourceModalVisible(false)}>
         <View style={styles.modalMask}>
@@ -1421,5 +1585,27 @@ const styles = StyleSheet.create({
     borderRadius: borderRadius.sm,
     alignItems: 'center',
     justifyContent: 'center',
+  },
+  sponsorModalCard: {
+    width: '86%',
+    maxWidth: 340,
+    alignItems: 'center',
+  },
+  sponsorHint: {
+    marginBottom: spacing.sm,
+    fontSize: fontSize.caption1,
+    fontWeight: '500',
+  },
+  sponsorQrImage: {
+    width: 260,
+    height: 260,
+    borderRadius: borderRadius.md,
+    borderWidth: StyleSheet.hairlineWidth,
+  },
+  sponsorCloseBtn: {
+    marginTop: spacing.md,
+    minWidth: 120,
+    flex: 0,
+    paddingHorizontal: spacing.lg,
   },
 })

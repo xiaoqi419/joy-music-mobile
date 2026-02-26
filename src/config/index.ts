@@ -35,6 +35,13 @@ export const appConfig = {
     retryCount: 3,
   },
 
+  // App update
+  update: {
+    githubOwner: 'your-github-owner',
+    githubRepo: 'your-github-repo',
+    requestTimeoutMs: 8000,
+  },
+
   // Playback
   playback: {
     autoPlay: false,
