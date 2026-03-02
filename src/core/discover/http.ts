@@ -1,3 +1,5 @@
+import { appendRuntimeLog } from '../logging/runtimeLogger'
+
 type HttpMethod = 'GET' | 'POST'
 
 interface HttpOptions {
@@ -42,6 +44,7 @@ export async function httpRequest<T = any>(
 
   const controller = new AbortController()
   const timer = setTimeout(() => controller.abort(), timeoutMs)
+  let finalUrl = buildUrl(url, query)
 
   try {
     const requestHeaders: Record<string, string> = {
@@ -73,7 +76,11 @@ export async function httpRequest<T = any>(
       }
     }
 
-    const finalUrl = buildUrl(url, query)
+    appendRuntimeLog('info', '[HTTP] request', {
+      method,
+      url: finalUrl,
+      timeoutMs,
+    })
     const resp = await fetch(finalUrl, init)
     const text = await resp.text()
     let data: any = text
@@ -84,10 +91,28 @@ export async function httpRequest<T = any>(
     }
 
     if (!resp.ok) {
+      appendRuntimeLog('warn', '[HTTP] response not ok', {
+        method,
+        url: finalUrl,
+        status: resp.status,
+        statusText: resp.statusText,
+      })
       throw new Error(`HTTP ${resp.status} ${resp.statusText}`)
     }
 
+    appendRuntimeLog('debug', '[HTTP] response ok', {
+      method,
+      url: resp.url || finalUrl,
+      status: resp.status,
+    })
     return { status: resp.status, data, url: resp.url }
+  } catch (error) {
+    appendRuntimeLog('error', '[HTTP] request failed', {
+      method,
+      url: finalUrl,
+      reason: error instanceof Error ? error.message : String(error),
+    })
+    throw error
   } finally {
     clearTimeout(timer)
   }

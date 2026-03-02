@@ -16,6 +16,8 @@ import {
   NativeSyntheticEvent,
   PanResponder,
   Linking,
+  Platform,
+  Share,
   ScrollView,
   StyleProp,
   StyleSheet,
@@ -45,13 +47,21 @@ import { audioFileCache, formatCacheSize } from '../../core/music/audioCache'
 import { emitScrollTopState, subscribeScrollToTop } from '../../core/ui/scrollToTopBus'
 import appConfig from '../../config'
 import { checkGithubReleaseUpdate } from '../../core/update/githubRelease'
+import {
+  clearRuntimeLogs,
+  formatRuntimeLogsForExport,
+  getRuntimeLogEntries,
+  getRuntimeLogStats,
+  subscribeRuntimeLogs,
+  type RuntimeLogEntry,
+} from '../../core/logging/runtimeLogger'
 
 interface LibraryScreenProps {
   onTrackPress?: (track: Track) => void
   onTrackMorePress?: TrackMoreActionHandler
 }
 
-type LibrarySubPage = 'main' | 'appearance' | 'sources' | 'cache' | 'about'
+type LibrarySubPage = 'main' | 'appearance' | 'sources' | 'cache' | 'logs' | 'about'
 type SourceModalMode = 'manual' | 'url'
 
 interface MotionPressableProps {
@@ -128,6 +138,17 @@ const QUALITY_LABELS: Record<Quality, string> = {
   atmos: '全景环绕 (Atmos)',
   atmos_plus: '全景增强 (Atmos+)',
   master: '超清母带 (Master)',
+}
+
+function formatDateTime(timestamp: number | null): string {
+  if (!timestamp) return '--'
+  const date = new Date(timestamp)
+  const mm = String(date.getMonth() + 1).padStart(2, '0')
+  const dd = String(date.getDate()).padStart(2, '0')
+  const hh = String(date.getHours()).padStart(2, '0')
+  const mi = String(date.getMinutes()).padStart(2, '0')
+  const ss = String(date.getSeconds()).padStart(2, '0')
+  return `${mm}-${dd} ${hh}:${mi}:${ss}`
 }
 
 function MotionPressable({
@@ -225,6 +246,10 @@ export default function LibraryScreen(_props: LibraryScreenProps) {
   const [cacheEnabled, setCacheEnabled] = useState(true)
   const [cacheFileCount, setCacheFileCount] = useState(0)
   const [cacheSizeBytes, setCacheSizeBytes] = useState(0)
+  const [logExporting, setLogExporting] = useState(false)
+  const [runtimeLogCount, setRuntimeLogCount] = useState(0)
+  const [runtimeLastTimestamp, setRuntimeLastTimestamp] = useState<number | null>(null)
+  const [runtimeLogPreview, setRuntimeLogPreview] = useState<RuntimeLogEntry[]>([])
   const [sponsorModalVisible, setSponsorModalVisible] = useState(false)
   const [checkingUpdate, setCheckingUpdate] = useState(false)
 
@@ -238,10 +263,15 @@ export default function LibraryScreen(_props: LibraryScreenProps) {
         ? '自定义源管理'
         : subPage === 'cache'
           ? '缓存管理'
+          : subPage === 'logs'
+            ? '运行日志'
           : '关于'
 
   const queueCount = playerState.playlist.length
   const cacheSummaryText = `${cacheEnabled ? '已开启' : '已关闭'} · ${formatCacheSize(cacheSizeBytes)}`
+  const runtimeLogSummaryText = runtimeLogCount
+    ? `${runtimeLogCount} 条 · 最近 ${formatDateTime(runtimeLastTimestamp)}`
+    : '暂无运行日志'
   const sourceSummaryText = selectedSource
     ? selectedSource.name
     : (musicSourceState.currentSourceId ? `内置 ${musicSourceState.currentSourceId.toUpperCase()}` : '未配置')
@@ -311,6 +341,78 @@ export default function LibraryScreen(_props: LibraryScreenProps) {
       },
     ])
   }, [loadAudioCacheStats])
+
+  const refreshRuntimeLogState = useCallback(() => {
+    const stats = getRuntimeLogStats()
+    setRuntimeLogCount(stats.total)
+    setRuntimeLastTimestamp(stats.lastTimestamp)
+    setRuntimeLogPreview(getRuntimeLogEntries(120))
+  }, [])
+
+  const writeRuntimeLogFile = useCallback(async() => {
+    const storageRoot = FileSystem.documentDirectory || FileSystem.cacheDirectory
+    if (!storageRoot) {
+      throw new Error('当前环境不支持导出本地文件')
+    }
+
+    const exportDir = `${storageRoot}joy_runtime_logs`
+    await FileSystem.makeDirectoryAsync(exportDir, { intermediates: true })
+
+    const fileUri = `${exportDir}/runtime_log_${Date.now()}.txt`
+    const payload = formatRuntimeLogsForExport(1500)
+    await FileSystem.writeAsStringAsync(fileUri, payload, {
+      encoding: FileSystem.EncodingType.UTF8,
+    })
+    return fileUri
+  }, [])
+
+  const handleExportRuntimeLogs = useCallback(async() => {
+    if (logExporting) return
+    const stats = getRuntimeLogStats()
+    if (!stats.total) {
+      Alert.alert('暂无日志', '请先复现问题后再导出日志。')
+      return
+    }
+
+    setLogExporting(true)
+    try {
+      const fileUri = await writeRuntimeLogFile()
+      let sharedSuccessfully = false
+      try {
+        const shareResult = await Share.share({
+          title: '运行日志',
+          url: fileUri,
+          message: Platform.OS === 'ios'
+            ? undefined
+            : `运行日志文件：${fileUri}`,
+        })
+        sharedSuccessfully = shareResult.action === Share.sharedAction
+      } catch (shareError) {
+        console.warn('Runtime log share failed:', shareError)
+      }
+
+      if (!sharedSuccessfully) return
+      Alert.alert('导出成功', `日志文件已生成：\n${fileUri}`)
+    } catch (error) {
+      Alert.alert('导出失败', error instanceof Error ? error.message : '请稍后重试')
+    } finally {
+      setLogExporting(false)
+    }
+  }, [logExporting, writeRuntimeLogFile])
+
+  const handleClearRuntimeLogs = useCallback(() => {
+    Alert.alert('清空运行日志', '确认清空当前运行日志吗？', [
+      { text: '取消', style: 'cancel' },
+      {
+        text: '清空',
+        style: 'destructive',
+        onPress: () => {
+          clearRuntimeLogs()
+          Alert.alert('已清空', '运行日志已清空')
+        },
+      },
+    ])
+  }, [])
 
   const handleOpenFeedbackWebsite = useCallback(async() => {
     const url = 'https://music.ojason.top'
@@ -533,6 +635,11 @@ export default function LibraryScreen(_props: LibraryScreenProps) {
   }, [loadAudioCacheStats])
 
   useEffect(() => {
+    refreshRuntimeLogState()
+    return subscribeRuntimeLogs(refreshRuntimeLogState)
+  }, [refreshRuntimeLogState])
+
+  useEffect(() => {
     if (subPage !== 'cache') return
     void loadAudioCacheStats(true)
   }, [subPage, loadAudioCacheStats])
@@ -702,6 +809,13 @@ export default function LibraryScreen(_props: LibraryScreenProps) {
             onPress={() => setSubPage('cache')}
             reducedMotion={reduceMotionEnabled}
           />
+          <EntryCard
+            icon="document-text-outline"
+            title="运行日志"
+            subtitle={runtimeLogSummaryText}
+            onPress={() => setSubPage('logs')}
+            reducedMotion={reduceMotionEnabled}
+          />
         </View>
       </View>
 
@@ -771,6 +885,7 @@ export default function LibraryScreen(_props: LibraryScreenProps) {
     colors.text,
     colors.textSecondary,
     currentVersion,
+    runtimeLogSummaryText,
     overviewItems,
     handleOpenFeedbackWebsite,
     reduceMotionEnabled,
@@ -1045,6 +1160,125 @@ export default function LibraryScreen(_props: LibraryScreenProps) {
     </>
   )
 
+  const renderLogsPage = () => {
+    const previewList = [...runtimeLogPreview].slice(-80).reverse()
+    const levelColor = (level: RuntimeLogEntry['level']) => {
+      if (level === 'error') return colors.danger
+      if (level === 'warn') return '#E68A00'
+      if (level === 'info') return colors.accent
+      return colors.textSecondary
+    }
+
+    return (
+      <>
+        <View style={styles.section}>
+          <View style={styles.sectionHeader}>
+            <Text style={[styles.sectionTitle, { color: colors.text }]}>日志概览</Text>
+            <Text style={[styles.sectionSubtitle, { color: colors.textSecondary }]}>
+              最近更新 {formatDateTime(runtimeLastTimestamp)}
+            </Text>
+          </View>
+          <View style={[styles.card, { backgroundColor: colors.surface, borderColor: colors.separator }]}>
+            <View style={styles.logStatWrap}>
+              <View style={[styles.logStatItem, { backgroundColor: colors.surfaceSecondary }]}>
+                <Text style={[styles.logStatLabel, { color: colors.textSecondary }]}>当前条数</Text>
+                <Text style={[styles.logStatValue, { color: colors.text }]}>{runtimeLogCount}</Text>
+              </View>
+              <View style={[styles.logStatItem, { backgroundColor: colors.surfaceSecondary }]}>
+                <Text style={[styles.logStatLabel, { color: colors.textSecondary }]}>采集状态</Text>
+                <Text style={[styles.logStatValue, { color: colors.text }]}>已开启</Text>
+              </View>
+            </View>
+          </View>
+        </View>
+
+        <View style={styles.section}>
+          <View style={styles.sectionHeader}>
+            <Text style={[styles.sectionTitle, { color: colors.text }]}>日志操作</Text>
+            <Text style={[styles.sectionSubtitle, { color: colors.textSecondary }]}>导出给开发排查</Text>
+          </View>
+          <View style={[styles.card, { backgroundColor: colors.surface, borderColor: colors.separator }]}>
+            <View style={styles.logActionsRow}>
+              <MotionPressable
+                onPress={() => { void handleExportRuntimeLogs() }}
+                reducedMotion={reduceMotionEnabled}
+                disabled={logExporting}
+                style={[styles.logActionBtn, { backgroundColor: colors.surfaceSecondary }]}
+              >
+                <View style={styles.actionBtnContent}>
+                  {logExporting
+                    ? <ActivityIndicator size="small" color={colors.accent} />
+                    : <Ionicons name="share-social-outline" size={15} color={colors.textSecondary} />}
+                  <Text style={[styles.actionText, { color: colors.textSecondary }]}>
+                    {logExporting ? '导出中...' : '导出日志'}
+                  </Text>
+                </View>
+              </MotionPressable>
+
+              <MotionPressable
+                onPress={handleClearRuntimeLogs}
+                reducedMotion={reduceMotionEnabled}
+                disabled={logExporting || runtimeLogCount === 0}
+                style={[
+                  styles.logActionBtn,
+                  {
+                    backgroundColor: runtimeLogCount === 0 ? colors.surfaceSecondary : 'rgba(255,59,48,0.14)',
+                  },
+                ]}
+              >
+                <View style={styles.actionBtnContent}>
+                  <Ionicons name="trash-outline" size={15} color={runtimeLogCount === 0 ? colors.textSecondary : colors.danger} />
+                  <Text style={[styles.actionText, { color: runtimeLogCount === 0 ? colors.textSecondary : colors.danger }]}>清空日志</Text>
+                </View>
+              </MotionPressable>
+            </View>
+          </View>
+        </View>
+
+        <View style={styles.section}>
+          <View style={styles.sectionHeader}>
+            <Text style={[styles.sectionTitle, { color: colors.text }]}>最近日志</Text>
+            <Text style={[styles.sectionSubtitle, { color: colors.textSecondary }]}>仅预览最近 80 条</Text>
+          </View>
+          <View style={[styles.card, { backgroundColor: colors.surface, borderColor: colors.separator }]}>
+            {previewList.length === 0 && (
+              <View style={styles.logEmptyWrap}>
+                <Text style={[styles.rowDesc, { color: colors.textSecondary }]}>暂无日志，请先复现问题后再导出</Text>
+              </View>
+            )}
+
+            {previewList.map((entry, index) => (
+              <View
+                key={entry.id}
+                style={[
+                  styles.logItem,
+                  index < previewList.length - 1
+                    ? { borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: colors.separator }
+                    : null,
+                ]}
+              >
+                <View style={styles.logItemTop}>
+                  <Text style={[styles.logItemTime, { color: colors.textTertiary }]}>{formatDateTime(entry.timestamp)}</Text>
+                  <Text style={[styles.logItemLevel, { color: levelColor(entry.level) }]}>{entry.level.toUpperCase()}</Text>
+                </View>
+                <Text style={[styles.logItemMessage, { color: colors.text }]} numberOfLines={3}>
+                  {entry.message}
+                </Text>
+                {entry.meta ? (
+                  <Text style={[styles.logItemMeta, { color: colors.textSecondary }]} numberOfLines={4}>
+                    {entry.meta}
+                  </Text>
+                ) : null}
+              </View>
+            ))}
+          </View>
+        </View>
+
+        <Text style={[styles.swipeHint, { color: colors.textTertiary }]}>从屏幕最左侧向右滑动可返回</Text>
+      </>
+    )
+  }
+
   const renderAboutPage = () => (
     <>
       <View style={styles.section}>
@@ -1130,6 +1364,7 @@ export default function LibraryScreen(_props: LibraryScreenProps) {
             {subPage === 'appearance' && renderAppearancePage()}
             {subPage === 'sources' && renderSourcesPage()}
             {subPage === 'cache' && renderCachePage()}
+            {subPage === 'logs' && renderLogsPage()}
             {subPage === 'about' && renderAboutPage()}
           </ScrollView>
         )}
@@ -1528,6 +1763,69 @@ const styles = StyleSheet.create({
   dangerActionText: {
     fontSize: fontSize.subhead,
     fontWeight: '700',
+  },
+  logStatWrap: {
+    flexDirection: 'row',
+    gap: spacing.sm,
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.md,
+  },
+  logStatItem: {
+    flex: 1,
+    borderRadius: borderRadius.sm,
+    paddingHorizontal: spacing.sm,
+    paddingVertical: spacing.sm,
+  },
+  logStatLabel: {
+    fontSize: fontSize.caption2,
+    marginBottom: 4,
+  },
+  logStatValue: {
+    fontSize: fontSize.subhead,
+    fontWeight: '700',
+  },
+  logActionsRow: {
+    flexDirection: 'row',
+    gap: spacing.sm,
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.md,
+  },
+  logActionBtn: {
+    flex: 1,
+    borderRadius: borderRadius.md,
+    overflow: 'hidden',
+  },
+  logEmptyWrap: {
+    minHeight: 72,
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: spacing.md,
+  },
+  logItem: {
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.sm,
+    gap: 4,
+  },
+  logItemTop: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+  },
+  logItemTime: {
+    fontSize: fontSize.caption2,
+    fontWeight: '600',
+  },
+  logItemLevel: {
+    fontSize: fontSize.caption2,
+    fontWeight: '700',
+  },
+  logItemMessage: {
+    fontSize: fontSize.caption1,
+    fontWeight: '600',
+  },
+  logItemMeta: {
+    fontSize: fontSize.caption2,
+    lineHeight: 16,
   },
 
   swipeHint: {

@@ -49,8 +49,10 @@ import {
 } from './src/core/config/playlist'
 import { applyJoyRuntimeConfig, hasConfiguredJoySource } from './src/core/music/sources/joy'
 import { emitScrollToTop, subscribeScrollTopState } from './src/core/ui/scrollToTopBus'
+import { installRuntimeLogger } from './src/core/logging/runtimeLogger'
 
 // Keep the splash screen visible while we fetch resources
+installRuntimeLogger()
 SplashScreen.preventAutoHideAsync()
 
 interface DetailView {
