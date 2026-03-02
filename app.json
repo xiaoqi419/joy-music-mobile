@@ -17,7 +17,7 @@
     "assetBundlePatterns": ["**/*"],
     "ios": {
       "supportsTablet": true,
-      "bundleIdentifier": "com.jomusic.mobile",
+      "bundleIdentifier": "com.joymusic.mobile",
       "buildNumber": "1.0.0-beta",
       "infoPlist": {
         "UIBackgroundModes": ["audio"]
@@ -28,7 +28,7 @@
         "foregroundImage": "./assets/adaptive-icon.png",
         "backgroundColor": "#1a1a1a"
       },
-      "package": "com.jomusic.mobile"
+      "package": "com.joymusic.mobile"
     },
     "web": {
       "favicon": "./assets/favicon.png"
