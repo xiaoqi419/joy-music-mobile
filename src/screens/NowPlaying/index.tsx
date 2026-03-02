@@ -35,7 +35,7 @@ import { useTheme, spacing, fontSize, borderRadius } from '../../theme';
 import { usePlayerStatus } from '../../hooks/usePlayerStatus';
 import { useSwipeDownClose } from '../../hooks/useSwipeDownClose';
 import { playerController, type PlayMode } from '../../core/player';
-import type { Quality } from '../../core/music';
+import musicManager, { type Quality } from '../../core/music';
 import { ALL_QUALITIES } from '../../core/config/musicSource';
 import { getLyric, LyricData } from '../../core/lyric';
 import { getTrackComments, type TrackComment } from '../../core/comment';
@@ -600,6 +600,8 @@ export default function NowPlaying({ onClose }: NowPlayingProps) {
     const resumePosition = position;
     const shouldAutoPlay = isPlaying;
     try {
+      // 用户主动切音质：先清理当前歌曲旧缓存，再按新音质重新拉取和缓存。
+      await musicManager.clearTrackCache(renderTrack);
       await playerController.playTrack(renderTrack, {
         autoPlay: shouldAutoPlay,
         quality: nextQuality,

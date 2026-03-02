@@ -103,6 +103,7 @@ class MusicPlayerController {
       for (let index = 0; index < qualityAttempts.length; index += 1) {
         const quality = qualityAttempts[index]
         let resolvedAttemptQuality: Quality | null = null
+        let cacheHitAttempt = false
         try {
           this.assertPlayRequestActive(playRequestId)
           this.setResolvingHintForRequest(
@@ -128,6 +129,7 @@ class MusicPlayerController {
           )
           this.assertPlayRequestActive(playRequestId)
           resolvedAttemptQuality = playUrlResponse.quality
+          cacheHitAttempt = Boolean(playUrlResponse.cacheHit)
 
           // Play through player engine
           await expoAVPlayer.play(track, playUrlResponse.url, {
@@ -159,6 +161,12 @@ class MusicPlayerController {
             `[PlayerController] Play attempt failed with quality ${qualityLabel}:`,
             lastError.message
           )
+          if (cacheHitAttempt) {
+            console.warn(
+              `[PlayerController] Cached source failed for ${qualityLabel}, stop quality fallback chain`
+            )
+            break
+          }
           if (playRequestId === this.playRequestId) {
             // 不在降级循环里执行 stop()，避免底层 seek/remove 卡住后导致后续音质不再继续尝试。
             // 下一轮 play() 会通过 replace(url) 覆盖当前流。

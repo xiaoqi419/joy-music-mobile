@@ -18,13 +18,14 @@ import {
 import { LinearGradient } from 'expo-linear-gradient'
 import { useSafeAreaInsets } from 'react-native-safe-area-context'
 import { Ionicons } from '@expo/vector-icons'
+import { useSelector } from 'react-redux'
 import { useTheme, spacing, fontSize, borderRadius, BOTTOM_INSET } from '../../theme'
 import TrackListItem from '../../components/common/TrackListItem'
-import { usePlayerStatus } from '../../hooks/usePlayerStatus'
 import { useSwipeBack } from '../../hooks/useSwipeBack'
 import { Track, type TrackMoreActionHandler } from '../../types/music'
 import { emitScrollTopState, subscribeScrollToTop } from '../../core/ui/scrollToTopBus'
 import { normalizeImageUrl } from '../../utils/url'
+import { RootState } from '../../store'
 
 const SCREEN_WIDTH = Dimensions.get('window').width
 const HEADER_HEIGHT = 280
@@ -56,12 +57,18 @@ export default function TrackListDetail({
   onFavorite,
   favoriteDisabled = false,
 }: TrackListDetailProps) {
-  const { colors, isDark } = useTheme()
+  const { colors } = useTheme()
   const insets = useSafeAreaInsets()
-  const { isPlaying, currentTrack } = usePlayerStatus()
+  const currentTrackId = useSelector((state: RootState) => state.player.currentTrack?.id || '')
+  const isPlaying = useSelector((state: RootState) => state.player.isPlaying)
   const { panX, panHandlers } = useSwipeBack(onBack)
   const listRef = useRef<FlatList<Track> | null>(null)
+
   const normalizedCoverUrl = useMemo(() => normalizeImageUrl(coverUrl, 500), [coverUrl])
+  const headerCoverSource = useMemo(
+    () => (normalizedCoverUrl ? { uri: normalizedCoverUrl } : undefined),
+    [normalizedCoverUrl]
+  )
 
   useEffect(() => {
     return subscribeScrollToTop(() => {
@@ -77,7 +84,7 @@ export default function TrackListDetail({
     emitScrollTopState(true)
   }, [])
 
-  const renderHeader = () => (
+  const listHeader = useMemo(() => (
     <View>
       <LinearGradient
         colors={gradientColors}
@@ -96,8 +103,8 @@ export default function TrackListDetail({
 
         {/* Cover and info */}
         <View style={styles.headerContent}>
-          {normalizedCoverUrl ? (
-            <Image source={{ uri: normalizedCoverUrl }} style={styles.headerCover} />
+          {headerCoverSource ? (
+            <Image source={headerCoverSource} style={styles.headerCover} fadeDuration={0} />
           ) : (
             <View style={[styles.headerCover, { backgroundColor: 'rgba(255,255,255,0.15)' }]}>
               <Ionicons name="musical-notes" size={40} color="rgba(255,255,255,0.6)" />
@@ -155,7 +162,23 @@ export default function TrackListDetail({
         )}
       </View>
     </View>
-  )
+  ), [
+    colors.accent,
+    colors.separator,
+    colors.surface,
+    colors.surfaceSecondary,
+    colors.textTertiary,
+    description,
+    favoriteDisabled,
+    gradientColors,
+    headerCoverSource,
+    insets.top,
+    onBack,
+    onFavorite,
+    onPlayAll,
+    title,
+    tracks.length,
+  ])
 
   return (
     <Animated.View
@@ -174,15 +197,15 @@ export default function TrackListDetail({
         scrollEventThrottle={16}
         data={tracks}
         keyExtractor={(item) => item.id}
-        ListHeaderComponent={renderHeader}
+        ListHeaderComponent={listHeader}
         contentContainerStyle={{ paddingBottom: BOTTOM_INSET + spacing.md }}
         renderItem={({ item, index }) => (
           <TrackListItem
             track={item}
             index={index}
             showIndex
-            isCurrentTrack={currentTrack?.id === item.id}
-            isPlaying={isPlaying && currentTrack?.id === item.id}
+            isCurrentTrack={currentTrackId === item.id}
+            isPlaying={isPlaying && currentTrackId === item.id}
             onPress={onTrackPress}
             onMorePress={onTrackMorePress}
           />

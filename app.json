@@ -14,13 +14,17 @@
     "updates": {
       "fallbackToCacheTimeout": 0
     },
-    "assetBundlePatterns": ["**/*"],
+    "assetBundlePatterns": [
+      "**/*"
+    ],
     "ios": {
       "supportsTablet": true,
       "bundleIdentifier": "com.joymusic.mobile",
       "buildNumber": "1.1.2",
       "infoPlist": {
-        "UIBackgroundModes": ["audio"],
+        "UIBackgroundModes": [
+          "audio"
+        ],
         "NSAppTransportSecurity": {
           "NSAllowsArbitraryLoads": true,
           "NSAllowsArbitraryLoadsInWebContent": true,
@@ -47,7 +51,8 @@
           "microphonePermission": "Allow 悦音 to access your microphone.",
           "recordAudioAndroid": false
         }
-      ]
+      ],
+      "expo-sqlite"
     ]
   }
 }

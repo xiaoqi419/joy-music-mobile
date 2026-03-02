@@ -4,12 +4,17 @@
  * - 下次播放优先命中本地文件，避免再次走远端 API
  */
 
-import AsyncStorage from '@react-native-async-storage/async-storage'
 import * as FileSystem from 'expo-file-system/legacy'
 import { Quality } from './source'
+import { getPlayableAudioUrlCandidates, normalizePlayableAudioUrl } from '../../utils/url'
+import {
+  AudioCacheIndexRecord,
+  getAudioCacheEnabledSetting,
+  loadAudioCacheIndexRecords,
+  replaceAudioCacheIndexRecords,
+  saveAudioCacheEnabledSetting,
+} from './cacheSqlite'
 
-const AUDIO_CACHE_SETTINGS_KEY = '@joy_music_audio_cache_settings'
-const AUDIO_CACHE_INDEX_KEY = '@joy_music_audio_cache_index'
 const AUDIO_CACHE_DIR_NAME = 'joy_audio_cache'
 
 const DEFAULT_AUDIO_CACHE_SETTINGS: AudioCacheSettings = {
@@ -84,14 +89,7 @@ function inferFileExtension(url: string): string {
 }
 
 function getDownloadCandidates(url: string): string[] {
-  const first = String(url || '').trim()
-  if (!first) return []
-  const candidates = [first]
-  if (/^http:\/\//i.test(first)) {
-    const httpsVersion = first.replace(/^http:/i, 'https:')
-    return Array.from(new Set([httpsVersion, first]))
-  }
-  return Array.from(new Set(candidates))
+  return getPlayableAudioUrlCandidates(url)
 }
 
 function formatCacheError(error: unknown): string {
@@ -124,14 +122,13 @@ class AudioFileCacheManager {
   private async readSettings(): Promise<AudioCacheSettings> {
     if (this.settingsCache) return this.settingsCache
     try {
-      const raw = await AsyncStorage.getItem(AUDIO_CACHE_SETTINGS_KEY)
-      if (!raw) {
+      const enabled = await getAudioCacheEnabledSetting()
+      if (enabled === null) {
         this.settingsCache = DEFAULT_AUDIO_CACHE_SETTINGS
         return this.settingsCache
       }
-      const parsed = JSON.parse(raw || '{}')
       this.settingsCache = {
-        enabled: parsed?.enabled !== false,
+        enabled,
       }
       return this.settingsCache
     } catch {
@@ -142,28 +139,25 @@ class AudioFileCacheManager {
 
   private async saveSettings(settings: AudioCacheSettings): Promise<void> {
     this.settingsCache = settings
-    await AsyncStorage.setItem(AUDIO_CACHE_SETTINGS_KEY, JSON.stringify(settings))
+    await saveAudioCacheEnabledSetting(settings.enabled)
   }
 
   private async readIndex(): Promise<Record<string, CachedAudioFileEntry>> {
     if (this.indexCache) return this.indexCache
     try {
-      const raw = await AsyncStorage.getItem(AUDIO_CACHE_INDEX_KEY)
-      if (!raw) {
-        this.indexCache = {}
-        return this.indexCache
-      }
-      const parsed = JSON.parse(raw || '{}')
       const normalized: Record<string, CachedAudioFileEntry> = {}
-      Object.entries(parsed || {}).forEach(([id, entry]) => {
-        if (!entry || typeof entry !== 'object') return
-        const value = entry as CachedAudioFileEntry
-        if (!value.fileUri) return
-        normalized[id] = {
-          ...value,
-          musicId: value.musicId || id,
-          updatedAt: Number(value.updatedAt || Date.now()),
-          size: Number(value.size || 0),
+      const records = await loadAudioCacheIndexRecords()
+      records.forEach((record) => {
+        if (!record.fileUri) return
+        normalized[record.musicId] = {
+          musicId: record.musicId,
+          fileUri: record.fileUri,
+          quality: record.quality as Quality,
+          source: record.source,
+          updatedAt: Number(record.updatedAt || Date.now()),
+          size: Number(record.size || 0),
+          title: record.title,
+          artist: record.artist,
         }
       })
       this.indexCache = normalized
@@ -176,7 +170,17 @@ class AudioFileCacheManager {
 
   private async saveIndex(index: Record<string, CachedAudioFileEntry>): Promise<void> {
     this.indexCache = index
-    await AsyncStorage.setItem(AUDIO_CACHE_INDEX_KEY, JSON.stringify(index))
+    const records: AudioCacheIndexRecord[] = Object.values(index).map((entry) => ({
+      musicId: entry.musicId,
+      fileUri: entry.fileUri,
+      quality: entry.quality,
+      source: entry.source,
+      size: Number(entry.size || 0),
+      updatedAt: Number(entry.updatedAt || Date.now()),
+      title: entry.title,
+      artist: entry.artist,
+    }))
+    await replaceAudioCacheIndexRecords(records)
   }
 
   private async removeFileIfExists(uri?: string): Promise<void> {
@@ -203,9 +207,8 @@ class AudioFileCacheManager {
     await this.saveSettings(next)
   }
 
-  async resolveCachedPlayableUrl(musicId: string): Promise<{ uri: string; quality: Quality } | null> {
-    const settings = await this.readSettings()
-    if (!settings.enabled) return null
+  async getCachedEntry(musicId: string): Promise<CachedAudioFileEntry | null> {
+    if (!musicId) return null
 
     const index = await this.readIndex()
     const entry = index[musicId]
@@ -220,18 +223,46 @@ class AudioFileCacheManager {
       }
       const nextSize = typeof info.size === 'number' ? info.size : entry.size
       if (nextSize !== entry.size) {
-        index[musicId] = {
+        const nextEntry: CachedAudioFileEntry = {
           ...entry,
           size: nextSize,
         }
+        index[musicId] = nextEntry
         await this.saveIndex(index)
+        return nextEntry
       }
-      return {
-        uri: entry.fileUri,
-        quality: entry.quality,
-      }
+      return entry
     } catch {
       return null
+    }
+  }
+
+  async clearCachedAudioByMusicId(musicId: string): Promise<void> {
+    if (!musicId) return
+    const index = await this.readIndex()
+    const entry = index[musicId]
+    if (!entry) return
+
+    await this.removeFileIfExists(entry.fileUri)
+    delete index[musicId]
+    await this.saveIndex(index)
+    console.log(`[AudioCache] Cleared cached audio for ${musicId}`)
+  }
+
+  async resolveCachedPlayableUrl(
+    musicId: string,
+    expectedQuality?: Quality
+  ): Promise<{ uri: string; quality: Quality } | null> {
+    const settings = await this.readSettings()
+    if (!settings.enabled) return null
+
+    const entry = await this.getCachedEntry(musicId)
+    if (!entry) return null
+    if (expectedQuality && entry.quality !== expectedQuality) return null
+
+    return {
+      uri: entry.fileUri,
+      quality: entry.quality,
     }
   }
 
@@ -259,13 +290,21 @@ class AudioFileCacheManager {
         }
       }
 
-      const ext = inferFileExtension(url)
+      const normalizedUrl = normalizePlayableAudioUrl(url) || url
+      if (normalizedUrl !== url) {
+        console.log(`[AudioCache] Normalized URL for ${musicId}: ${url} -> ${normalizedUrl}`)
+      }
+
+      const ext = inferFileExtension(normalizedUrl)
       const fileNamePrefix = `${safeFileName(musicId)}_${Date.now()}`
 
       let downloadResult: FileSystem.FileSystemDownloadResult | null = null
-      let usedUrl = url
+      let usedUrl = normalizedUrl
       let usedTargetUri = ''
-      const candidates = getDownloadCandidates(url)
+      const candidates = getDownloadCandidates(normalizedUrl)
+      if (!candidates.length) {
+        throw new Error(`no downloadable url candidates for ${musicId}`)
+      }
 
       for (let i = 0; i < candidates.length; i++) {
         const candidateUrl = candidates[i]
@@ -331,7 +370,7 @@ class AudioFileCacheManager {
           musicId,
           source,
           quality,
-          url,
+          url: normalizePlayableAudioUrl(url) || url,
         })
       })
       .finally(() => {

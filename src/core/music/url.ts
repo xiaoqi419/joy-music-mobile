@@ -6,6 +6,7 @@
 import { musicSourceManager, Quality } from './source'
 import { musicUrlCache } from './cache'
 import { audioFileCache } from './audioCache'
+import { normalizePlayableAudioUrl } from '../../utils/url'
 import {
   hasConfiguredJoySource,
   JoySourceUnavailableError,
@@ -25,6 +26,7 @@ export interface MusicUrlResponse {
   url: string
   quality: Quality
   musicId: string
+  cacheHit?: boolean
 }
 
 export interface MusicUrlProgress {
@@ -120,6 +122,10 @@ export const getPlayQuality = (
   return attempts[0] || supportedQualities[0] || '128k'
 }
 
+const normalizeResolvedAudioUrl = (rawUrl: string): string => {
+  return normalizePlayableAudioUrl(rawUrl) || rawUrl
+}
+
 /**
  * Fetch music URL from source
  * Implements retry logic and error handling
@@ -138,25 +144,8 @@ export const getMusicUrl = async(request: MusicUrlRequest): Promise<MusicUrlResp
   try {
     const requestedQuality = quality || 'master'
     const trackSource = String(musicInfo?.source || '').toLowerCase()
-    // TX 链接时效通常更短，命中陈旧缓存后会出现“有链接但无法播放”。
+    // TX URL is usually short-lived, stale cache can easily fail playback.
     const shouldSkipCache = trackSource === 'tx'
-
-    // 优先命中本地音频缓存，避免重复走远端 API。
-    const cachedAudio = await audioFileCache.resolveCachedPlayableUrl(musicId)
-    if (cachedAudio) {
-      console.log(`[AudioCache] Hit local file for ${musicId}`)
-      onProgress?.({
-        message: '已命中本地缓存，正在加载本地文件...',
-        quality: cachedAudio.quality,
-        attempt: 1,
-        totalAttempts: 1,
-      })
-      return {
-        url: cachedAudio.uri,
-        quality: cachedAudio.quality,
-        musicId,
-      }
-    }
 
     // Step 1: Get current source
     const source = musicSourceManager.getCurrentSource()
@@ -164,7 +153,7 @@ export const getMusicUrl = async(request: MusicUrlRequest): Promise<MusicUrlResp
       throw new Error('No music source available')
     }
 
-    // Joy 运行时未配置可用音源时，直接中断，不进入音质降级链路。
+    // If joy source is selected but runtime source config is missing, fail fast.
     if (
       musicSourceManager.getCurrentSourceId() === 'joy' &&
       !hasConfiguredJoySource(trackSource || 'kw')
@@ -177,8 +166,6 @@ export const getMusicUrl = async(request: MusicUrlRequest): Promise<MusicUrlResp
       musicSourceManager.getCurrentSourceId()
     )
     const trackQualities = getTrackAvailableQualities(musicInfo)
-    // TX 的 _types 在部分歌曲上不稳定，可能把可用音质误判得过窄（只剩 flac24bit）。
-    // 这里对 TX 始终按平台全量音质链路尝试，避免被单曲元数据卡死。
     const availableQualities = trackSource === 'tx'
       ? sourceQualities
       : getEffectiveQualities(sourceQualities, trackQualities)
@@ -191,13 +178,52 @@ export const getMusicUrl = async(request: MusicUrlRequest): Promise<MusicUrlResp
       )
     }
 
-    // Step 3: Check cache if not refreshing
+    // User changed quality for the same track: clear stale cached quality first.
+    const cachedAudioEntry = await audioFileCache.getCachedEntry(musicId)
+    if (cachedAudioEntry && cachedAudioEntry.quality !== targetQuality) {
+      console.log(
+        `[MusicUrl] Quality changed for ${musicId}: ${cachedAudioEntry.quality} -> ${targetQuality}, clearing stale cache`
+      )
+      await Promise.all([
+        musicUrlCache.clearMusicUrl(musicId),
+        audioFileCache.clearCachedAudioByMusicId(musicId),
+      ])
+    }
+
+    // Step 3: local file cache first (same quality only)
+    const cachedAudio = await audioFileCache.resolveCachedPlayableUrl(musicId, targetQuality)
+    if (cachedAudio) {
+      console.log(`[AudioCache] Hit local file for ${musicId} (${targetQuality})`)
+      onProgress?.({
+        message: '已命中本地缓存，正在加载本地文件...',
+        quality: cachedAudio.quality,
+        attempt: 1,
+        totalAttempts: 1,
+      })
+      return {
+        url: cachedAudio.uri,
+        quality: cachedAudio.quality,
+        musicId,
+        cacheHit: true,
+      }
+    }
+
+    // Step 4: URL cache (skip for refresh/TX)
     if (!isRefresh && !shouldSkipCache) {
       const cachedUrl = await musicUrlCache.getMusicUrl(musicId, targetQuality)
       if (cachedUrl) {
+        const normalizedCachedUrl = normalizeResolvedAudioUrl(cachedUrl)
+        if (normalizedCachedUrl !== cachedUrl) {
+          await musicUrlCache.saveMusicUrl(
+            musicId,
+            targetQuality,
+            normalizedCachedUrl,
+            musicSourceManager.getCurrentSourceId()
+          )
+        }
         void audioFileCache.cacheFromUrl({
           musicId,
-          url: cachedUrl,
+          url: normalizedCachedUrl,
           quality: targetQuality,
           source: String(musicInfo?.source || musicSourceManager.getCurrentSourceId() || ''),
           title: String(musicInfo?.title || ''),
@@ -205,14 +231,15 @@ export const getMusicUrl = async(request: MusicUrlRequest): Promise<MusicUrlResp
         })
         console.log(`[MusicUrl] Using cached URL for ${musicId}`)
         return {
-          url: cachedUrl,
+          url: normalizedCachedUrl,
           quality: targetQuality,
           musicId,
+          cacheHit: true,
         }
       }
     }
 
-    // Step 4: Request URL
+    // Step 5: Request URL
     const retrySuffix = totalAttempts > 1 ? `（网络重试 ${attempt}/${totalAttempts}）` : ''
     onProgress?.({
       message: `正在尝试 ${targetQuality} 音质${retrySuffix}`,
@@ -221,20 +248,20 @@ export const getMusicUrl = async(request: MusicUrlRequest): Promise<MusicUrlResp
       totalAttempts,
     })
 
-    // Step 5: Fetch URL from source
     console.log(`[MusicUrl] Fetching URL for ${musicId} with quality ${targetQuality}`)
     let url: string
 
     try {
-      url = await source.getMusicUrl(musicInfo, targetQuality)
+      url = normalizeResolvedAudioUrl(await source.getMusicUrl(musicInfo, targetQuality))
     } catch (error) {
       if (error instanceof JoySourceUnavailableError) {
         throw error
       }
-      // If the requested quality fails, try fallback qualities
-      console.warn(`[MusicUrl] Failed with ${targetQuality}, trying fallback qualities`)
 
+      // If the requested quality fails, try fallback qualities.
+      console.warn(`[MusicUrl] Failed with ${targetQuality}, trying fallback qualities`)
       let fallbackUrl: string | null = null
+
       for (const fallbackQuality of qualityAttempts.slice(1)) {
         const fallbackRetrySuffix = totalAttempts > 1 ? `（网络重试 ${attempt}/${totalAttempts}）` : ''
         onProgress?.({
@@ -243,12 +270,14 @@ export const getMusicUrl = async(request: MusicUrlRequest): Promise<MusicUrlResp
           attempt,
           totalAttempts,
         })
+
         try {
           console.log(`[MusicUrl] Trying fallback quality: ${fallbackQuality}`)
-          fallbackUrl = await source.getMusicUrl(musicInfo, fallbackQuality)
+          fallbackUrl = normalizeResolvedAudioUrl(
+            await source.getMusicUrl(musicInfo, fallbackQuality)
+          )
           console.log(`[MusicUrl] Success with fallback quality: ${fallbackQuality}`)
 
-          // Cache the fallback quality
           if (!shouldSkipCache) {
             await musicUrlCache.saveMusicUrl(
               musicId,
@@ -271,6 +300,7 @@ export const getMusicUrl = async(request: MusicUrlRequest): Promise<MusicUrlResp
             url: fallbackUrl,
             quality: fallbackQuality,
             musicId,
+            cacheHit: false,
           }
         } catch (fallbackError) {
           if (fallbackError instanceof JoySourceUnavailableError) {
@@ -281,7 +311,6 @@ export const getMusicUrl = async(request: MusicUrlRequest): Promise<MusicUrlResp
         }
       }
 
-      // All attempts failed
       throw error
     }
 
@@ -309,6 +338,7 @@ export const getMusicUrl = async(request: MusicUrlRequest): Promise<MusicUrlResp
       url,
       quality: targetQuality,
       musicId,
+      cacheHit: false,
     }
   } catch (error) {
     console.error(`[MusicUrl] Error fetching URL for ${musicId}:`, error)

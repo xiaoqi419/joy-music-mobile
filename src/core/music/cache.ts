@@ -3,13 +3,22 @@
  * Implements multi-layer caching strategy
  */
 
-import AsyncStorage from '@react-native-async-storage/async-storage'
 import { Quality } from './source'
 import { audioFileCache } from './audioCache'
+import {
+  clearLyricCacheRecords,
+  clearUrlCacheRecords,
+  getLyricCacheRecord,
+  getUrlCacheRecord,
+  removeLyricCacheRecord,
+  removeUrlCacheByMusicId,
+  removeUrlCacheRecord,
+  saveLyricCacheRecord,
+  saveUrlCacheRecord,
+} from './cacheSqlite'
 
 const CACHE_PREFIX = '@joy_music_'
 const URL_CACHE_PREFIX = `${CACHE_PREFIX}url_`
-const LYRIC_CACHE_PREFIX = `${CACHE_PREFIX}lyric_`
 
 /** 播放 URL 缓存有效期（20 分钟），多数平台 URL 有效期在 10~30 分钟 */
 const URL_CACHE_TTL = 20 * 60 * 1000
@@ -36,13 +45,16 @@ class MusicUrlCache {
   ): Promise<void> {
     try {
       const key = `${URL_CACHE_PREFIX}${musicId}_${quality}`
-      const data: CachedMusicUrl = {
-        url,
+      const timestamp = Date.now()
+      await saveUrlCacheRecord({
+        cacheKey: key,
+        musicId,
         quality,
-        timestamp: Date.now(),
+        url,
         source,
-      }
-      await AsyncStorage.setItem(key, JSON.stringify(data))
+        timestamp,
+        ttlMs: URL_CACHE_TTL,
+      })
       console.log(`[Cache] Saved URL for ${musicId} (${quality})`)
     } catch (error) {
       console.error('[Cache] Failed to save URL:', error)
@@ -55,23 +67,19 @@ class MusicUrlCache {
   async getMusicUrl(musicId: string, quality: Quality): Promise<string | null> {
     try {
       const key = `${URL_CACHE_PREFIX}${musicId}_${quality}`
-      const cached = await AsyncStorage.getItem(key)
-
+      const cached = await getUrlCacheRecord(key)
       if (!cached) {
         return null
       }
 
-      const data: CachedMusicUrl = JSON.parse(cached)
-
-      // 检查是否过期
-      if (Date.now() - data.timestamp > URL_CACHE_TTL) {
+      if (Date.now() - cached.timestamp > URL_CACHE_TTL) {
         console.log(`[Cache] URL expired for ${musicId} (${quality}), clearing`)
-        await AsyncStorage.removeItem(key)
+        await removeUrlCacheRecord(key)
         return null
       }
 
       console.log(`[Cache] Retrieved URL for ${musicId} (${quality})`)
-      return data.url
+      return cached.url
     } catch (error) {
       console.error('[Cache] Failed to get URL:', error)
       return null
@@ -83,12 +91,7 @@ class MusicUrlCache {
    */
   async clearMusicUrl(musicId: string): Promise<void> {
     try {
-      const keys = await AsyncStorage.getAllKeys()
-      const urlKeys = keys.filter(key =>
-        key.startsWith(URL_CACHE_PREFIX) && key.includes(musicId)
-      )
-
-      await AsyncStorage.multiRemove(urlKeys)
+      await removeUrlCacheByMusicId(musicId)
       console.log(`[Cache] Cleared URL cache for ${musicId}`)
     } catch (error) {
       console.error('[Cache] Failed to clear URL cache:', error)
@@ -100,10 +103,7 @@ class MusicUrlCache {
    */
   async clearAllUrlCache(): Promise<void> {
     try {
-      const keys = await AsyncStorage.getAllKeys()
-      const urlKeys = keys.filter(key => key.startsWith(URL_CACHE_PREFIX))
-
-      await AsyncStorage.multiRemove(urlKeys)
+      await clearUrlCacheRecords()
       console.log('[Cache] Cleared all URL cache')
     } catch (error) {
       console.error('[Cache] Failed to clear all URL cache:', error)
@@ -120,8 +120,7 @@ class LyricCache {
    */
   async saveLyric(musicId: string, lyricInfo: any): Promise<void> {
     try {
-      const key = `${LYRIC_CACHE_PREFIX}${musicId}`
-      await AsyncStorage.setItem(key, JSON.stringify(lyricInfo))
+      await saveLyricCacheRecord(musicId, JSON.stringify(lyricInfo))
       console.log(`[Cache] Saved lyric for ${musicId}`)
     } catch (error) {
       console.error('[Cache] Failed to save lyric:', error)
@@ -133,13 +132,10 @@ class LyricCache {
    */
   async getLyric(musicId: string): Promise<any | null> {
     try {
-      const key = `${LYRIC_CACHE_PREFIX}${musicId}`
-      const cached = await AsyncStorage.getItem(key)
-
+      const cached = await getLyricCacheRecord(musicId)
       if (!cached) {
         return null
       }
-
       console.log(`[Cache] Retrieved lyric for ${musicId}`)
       return JSON.parse(cached)
     } catch (error) {
@@ -149,14 +145,23 @@ class LyricCache {
   }
 
   /**
+   * Clear lyric cache for one music id
+   */
+  async clearLyric(musicId: string): Promise<void> {
+    try {
+      await removeLyricCacheRecord(musicId)
+      console.log(`[Cache] Cleared lyric cache for ${musicId}`)
+    } catch (error) {
+      console.error('[Cache] Failed to clear lyric cache:', error)
+    }
+  }
+
+  /**
    * Clear all lyric cache
    */
   async clearAllLyricCache(): Promise<void> {
     try {
-      const keys = await AsyncStorage.getAllKeys()
-      const lyricKeys = keys.filter(key => key.startsWith(LYRIC_CACHE_PREFIX))
-
-      await AsyncStorage.multiRemove(lyricKeys)
+      await clearLyricCacheRecords()
       console.log('[Cache] Cleared all lyric cache')
     } catch (error) {
       console.error('[Cache] Failed to clear all lyric cache:', error)

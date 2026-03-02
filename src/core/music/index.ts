@@ -14,6 +14,7 @@ import {
   MusicUrlResponse,
 } from './url'
 import { musicUrlCache, clearAllCache } from './cache'
+import { audioFileCache } from './audioCache'
 
 // Initialize music sources on module load
 const initializeMusicSources = () => {
@@ -159,6 +160,19 @@ class MusicManager {
    */
   async clearCache(): Promise<void> {
     await clearAllCache()
+  }
+
+  /**
+   * Clear one track cache (URL + local audio file).
+   * Useful when user actively switches quality.
+   */
+  async clearTrackCache(musicInfo: any): Promise<void> {
+    const musicId = String(musicInfo?.id || musicInfo?.songmid || musicInfo?.hash || '').trim()
+    if (!musicId) return
+    await Promise.all([
+      musicUrlCache.clearMusicUrl(musicId),
+      audioFileCache.clearCachedAudioByMusicId(musicId),
+    ])
   }
 }
 

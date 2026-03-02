@@ -34,6 +34,7 @@ import { getSongListDetail } from '../../core/discover'
 import { httpRequest } from '../../core/discover/http'
 import { emitScrollTopState, subscribeScrollToTop } from '../../core/ui/scrollToTopBus'
 import { useSwipeBack } from '../../hooks/useSwipeBack'
+import { normalizeImageUrl } from '../../utils/url'
 
 interface PlaylistScreenProps {
   onTrackPress?: (track: Track) => void
@@ -413,13 +414,12 @@ export default function PlaylistScreen({ onTrackPress, onTrackMorePress, onPlayA
   const insets = useSafeAreaInsets()
   const dispatch = useDispatch()
 
-  const playlistState = useSelector((state: RootState) => state.playlist)
-  const playerState = useSelector((state: RootState) => state.player)
-  const currentTrack = playerState.currentTrack
-  const isPlaying = playerState.isPlaying
-
-  const playlists = playlistState.playlists
-  const currentPlaylistId = playlistState.currentPlaylistId
+  const playlists = useSelector((state: RootState) => state.playlist.playlists)
+  const currentPlaylistId = useSelector((state: RootState) => state.playlist.currentPlaylistId)
+  const currentTrackId = useSelector((state: RootState) => state.player.currentTrack?.id || '')
+  const currentTrackTitle = useSelector((state: RootState) => state.player.currentTrack?.title || '')
+  const isPlaying = useSelector((state: RootState) => state.player.isPlaying)
+  const playerQueue = useSelector((state: RootState) => state.player.playlist)
 
   const [selectedPlaylistId, setSelectedPlaylistId] = useState<string | null>(null)
   const selectedPlaylist = useMemo(
@@ -609,7 +609,7 @@ export default function PlaylistScreen({ onTrackPress, onTrackMorePress, onPlayA
   }, [createDescription, createName, ensureUniqueName, savePlaylist])
 
   const handleImportFromCurrentQueue = useCallback(() => {
-    if (!playerState.playlist.length) {
+    if (!playerQueue.length) {
       Alert.alert('当前队列为空', '请先播放歌曲后再导入歌单')
       return
     }
@@ -618,16 +618,16 @@ export default function PlaylistScreen({ onTrackPress, onTrackMorePress, onPlayA
     const playlist: Playlist = {
       id: createPlaylistId(),
       name: ensureUniqueName(baseName),
-      description: `从当前播放队列导入，共 ${playerState.playlist.length} 首`,
+      description: `从当前播放队列导入，共 ${playerQueue.length} 首`,
       source: 'imported',
-      tracks: playerState.playlist.map((track) => ({ ...track })),
+      tracks: playerQueue.map((track) => ({ ...track })),
       createdAt: now,
       updatedAt: now,
     }
     savePlaylist(playlist, true)
     setShowImportModal(false)
     Alert.alert('导入成功', `已导入 ${playlist.tracks.length} 首歌曲`)
-  }, [ensureUniqueName, playerState.playlist, savePlaylist])
+  }, [ensureUniqueName, playerQueue, savePlaylist])
 
   const handleImportFromFile = useCallback(async() => {
     try {
@@ -871,8 +871,8 @@ export default function PlaylistScreen({ onTrackPress, onTrackMorePress, onPlayA
   }, [detailSortMode])
 
   const renderDetailTrackItem = useCallback(({ item, index }: { item: Track; index: number }) => {
-    const isCurrent = currentTrack?.id === item.id
-    const rowCover = String(item.coverUrl || item.picUrl || '').trim()
+    const isCurrent = currentTrackId === item.id
+    const rowCover = normalizeImageUrl(item.coverUrl || item.picUrl, 500)
     return (
       <Pressable
         style={({ pressed }) => [
@@ -893,7 +893,7 @@ export default function PlaylistScreen({ onTrackPress, onTrackMorePress, onPlayA
         </View>
         <View style={[styles.detailTrackCover, { backgroundColor: colors.surfaceSecondary }]}>
           {rowCover
-            ? <Image source={{ uri: rowCover }} style={styles.detailTrackCoverImage} resizeMode="cover" />
+            ? <Image source={{ uri: rowCover, cache: 'force-cache' }} style={styles.detailTrackCoverImage} resizeMode="cover" fadeDuration={0} />
             : <Ionicons name="musical-note" size={15} color={colors.textTertiary} />}
         </View>
         <View style={styles.detailTrackInfo}>
@@ -923,11 +923,11 @@ export default function PlaylistScreen({ onTrackPress, onTrackMorePress, onPlayA
         </Pressable>
       </Pressable>
     )
-  }, [colors.accent, colors.surfaceSecondary, colors.text, colors.textSecondary, colors.textTertiary, currentTrack?.id, isDark, isPlaying, onTrackMorePress, onTrackPress, selectedPlaylistId])
+  }, [colors.accent, colors.surfaceSecondary, colors.text, colors.textSecondary, colors.textTertiary, currentTrackId, isDark, isPlaying, onTrackMorePress, onTrackPress, selectedPlaylistId])
 
   const renderPlaylistCard = useCallback(({ item }: { item: Playlist }) => {
     const isCurrent = item.id === currentPlaylistId
-    const coverUrl = getPlaylistCover(item)
+    const coverUrl = normalizeImageUrl(getPlaylistCover(item), 500)
     const sourceLabel = getPlaylistDisplayLabel(item)
     return (
       <Pressable
@@ -948,7 +948,7 @@ export default function PlaylistScreen({ onTrackPress, onTrackMorePress, onPlayA
         <View style={styles.playlistCardHeader}>
           <View style={[styles.coverPlaceholder, { backgroundColor: colors.surfaceSecondary }]}>
             {coverUrl
-              ? <Image source={{ uri: coverUrl }} style={styles.coverImage} resizeMode="cover" />
+              ? <Image source={{ uri: coverUrl, cache: 'force-cache' }} style={styles.coverImage} resizeMode="cover" fadeDuration={0} />
               : <Ionicons name="albums-outline" size={22} color={colors.textSecondary} />}
           </View>
           <View style={styles.playlistMeta}>
@@ -998,6 +998,15 @@ export default function PlaylistScreen({ onTrackPress, onTrackMorePress, onPlayA
       </Pressable>
     )
   }, [colors.accent, colors.separator, colors.surface, colors.surfaceSecondary, colors.text, colors.textSecondary, colors.textTertiary, currentPlaylistId, handleDeletePlaylist, handlePlayAll, isDark, openPlaylistDetail])
+
+  const detailCover = useMemo(
+    () => (selectedPlaylist ? normalizeImageUrl(getPlaylistCover(selectedPlaylist), 500) : undefined),
+    [selectedPlaylist],
+  )
+  const detailCoverSource = useMemo(
+    () => (detailCover ? { uri: detailCover, cache: 'force-cache' as const } : undefined),
+    [detailCover],
+  )
 
   const renderMain = () => (
     <FlatList
@@ -1072,7 +1081,6 @@ export default function PlaylistScreen({ onTrackPress, onTrackMorePress, onPlayA
 
   const renderDetail = () => {
     if (!selectedPlaylist) return null
-    const detailCover = getPlaylistCover(selectedPlaylist)
     const sourceLabel = getPlaylistDisplayLabel(selectedPlaylist)
     const canFavoritePlaylist = false
     const detailFilteredCount = detailProcessedTracks.length
@@ -1106,7 +1114,7 @@ export default function PlaylistScreen({ onTrackPress, onTrackMorePress, onPlayA
           initialNumToRender={18}
           maxToRenderPerBatch={24}
           windowSize={9}
-          removeClippedSubviews
+          removeClippedSubviews={Platform.OS === 'android'}
           updateCellsBatchingPeriod={40}
           ListHeaderComponent={(
             <>
@@ -1131,8 +1139,8 @@ export default function PlaylistScreen({ onTrackPress, onTrackMorePress, onPlayA
                 <View style={styles.detailHeroMain}>
                   <View style={styles.detailCoverOuter}>
                     <View style={[styles.detailCover, styles.detailHeroCover, { backgroundColor: 'rgba(255,255,255,0.22)' }]}>
-                      {detailCover
-                        ? <Image source={{ uri: detailCover }} style={styles.detailCoverImage} resizeMode="cover" />
+                      {detailCoverSource
+                        ? <Image source={detailCoverSource} style={styles.detailCoverImage} resizeMode="cover" fadeDuration={0} />
                         : <Ionicons name="albums-outline" size={32} color="#FFFFFF" />}
                     </View>
                   </View>
@@ -1245,11 +1253,11 @@ export default function PlaylistScreen({ onTrackPress, onTrackMorePress, onPlayA
                 </View>
               )}
 
-              {currentTrack && (
+              {!!currentTrackTitle && (
                 <View style={styles.detailContinueRow}>
                   <Ionicons name="play-outline" size={14} color={colors.textSecondary} />
                   <Text style={[styles.detailContinueText, { color: colors.textSecondary }]} numberOfLines={1}>
-                    继续播放：{currentTrack.title}
+                    继续播放：{currentTrackTitle}
                   </Text>
                 </View>
               )}
