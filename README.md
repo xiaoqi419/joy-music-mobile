@@ -210,6 +210,7 @@ joy-music-mobile/
 - **[STRUCTURE.md](./STRUCTURE.md)** - 项目结构详解
 - **[PROJECT_SUMMARY.md](./PROJECT_SUMMARY.md)** - 项目创建总结
 - **[docs/ios-self-sign.md](./docs/ios-self-sign.md)** - iOS 自签分发与安装说明
+- **[docs/versioning.md](./docs/versioning.md)** - 版本号标识规范（Major/Minor/Patch）
 
 ## 🤝 开发指南
 
