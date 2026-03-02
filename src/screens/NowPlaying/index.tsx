@@ -21,7 +21,6 @@ import {
   Easing,
   Platform,
   Dimensions,
-  ScrollView,
   Pressable,
   Alert,
   FlatList,
@@ -94,6 +93,13 @@ interface NowPlayingProps {
   onClose: () => void;
 }
 
+interface CommentCacheEntry {
+  comments: TrackComment[]
+  total: number
+  hasMore: boolean
+  nextOffset: number
+}
+
 /**
  * 格式化毫秒为 m:ss 时间字符串。
  */
@@ -112,6 +118,19 @@ function formatLikeCount(count: number): string {
     return `${(count / 10000).toFixed(1).replace(/\.0$/, '')}万`;
   }
   return String(count);
+}
+
+function mergeTrackComments(base: TrackComment[], incoming: TrackComment[]): TrackComment[] {
+  const merged = new Map<string, TrackComment>()
+  for (const item of base) {
+    merged.set(item.id, item)
+  }
+  for (const item of incoming) {
+    if (!merged.has(item.id)) {
+      merged.set(item.id, item)
+    }
+  }
+  return Array.from(merged.values())
 }
 
 /**
@@ -167,10 +186,17 @@ export default function NowPlaying({ onClose }: NowPlayingProps) {
   const [comments, setComments] = useState<TrackComment[]>([]);
   const [commentsTotal, setCommentsTotal] = useState(0);
   const [commentsLoading, setCommentsLoading] = useState(false);
+  const [commentsRefreshing, setCommentsRefreshing] = useState(false);
+  const [commentsLoadingMore, setCommentsLoadingMore] = useState(false);
+  const [commentsLoadMoreError, setCommentsLoadMoreError] = useState('');
+  const [commentsHasMore, setCommentsHasMore] = useState(false);
+  const [commentsNextOffset, setCommentsNextOffset] = useState(0);
+  const [activeCommentTrackKey, setActiveCommentTrackKey] = useState('');
+  const [commentsRefreshError, setCommentsRefreshError] = useState('');
   const [commentsError, setCommentsError] = useState('');
-  const commentCacheRef = useRef<Record<string, TrackComment[]>>({});
-  const commentTotalCacheRef = useRef<Record<string, number>>({});
+  const commentCacheRef = useRef<Record<string, CommentCacheEntry>>({});
   const commentRequestTokenRef = useRef(0);
+  const commentLoadingMoreRef = useRef(false);
   const [isResolvingTrack, setIsResolvingTrack] = useState(() => playerController.isResolvingTrack());
   const [resolvingHint, setResolvingHint] = useState(() => playerController.getResolvingHint());
   const [resolvedQuality, setResolvedQuality] = useState<Quality | null>(() => playerController.getCurrentResolvedQuality());
@@ -409,51 +435,148 @@ export default function NowPlaying({ onClose }: NowPlayingProps) {
   const loadCommentsForTrack = useCallback(async(track: Track, forceRefresh = false) => {
     const requestToken = commentRequestTokenRef.current + 1;
     commentRequestTokenRef.current = requestToken;
+    commentLoadingMoreRef.current = false;
+    setCommentsLoadingMore(false);
+    setCommentsLoadMoreError('');
+    setCommentsRefreshError('');
+
     const source = String(track.source || '').toLowerCase();
     if (source !== 'wy') {
       setCommentsLoading(false);
+      setCommentsRefreshing(false);
       setComments([]);
       setCommentsTotal(0);
+      setCommentsHasMore(false);
+      setCommentsNextOffset(0);
+      setActiveCommentTrackKey('');
       setCommentsError('当前平台暂不支持歌曲评论');
       return;
     }
 
     const cacheKey = getCommentTrackIdentity(track);
+    setActiveCommentTrackKey(cacheKey);
+
     if (!forceRefresh) {
-      const cachedComments = commentCacheRef.current[cacheKey];
-      if (cachedComments) {
+      const cachedEntry = commentCacheRef.current[cacheKey];
+      if (cachedEntry) {
         if (requestToken !== commentRequestTokenRef.current) return;
         setCommentsLoading(false);
-        setComments(cachedComments);
-        setCommentsTotal(commentTotalCacheRef.current[cacheKey] || cachedComments.length);
+        setCommentsRefreshing(false);
+        setComments(cachedEntry.comments);
+        setCommentsTotal(cachedEntry.total || cachedEntry.comments.length);
+        setCommentsHasMore(cachedEntry.hasMore);
+        setCommentsNextOffset(cachedEntry.nextOffset);
+        setCommentsRefreshError('');
         setCommentsError('');
         return;
       }
     }
 
-    setCommentsLoading(true);
+    if (forceRefresh) {
+      setCommentsRefreshing(true);
+    } else {
+      setCommentsLoading(true);
+      setComments([]);
+      setCommentsTotal(0);
+      setCommentsHasMore(false);
+      setCommentsNextOffset(0);
+    }
     setCommentsError('');
+
     try {
       const result = await getTrackComments(track, {
         limit: COMMENT_PAGE_LIMIT,
         offset: 0,
       });
       if (requestToken !== commentRequestTokenRef.current) return;
+      const normalizedTotal = Math.max(result.total, result.comments.length);
       setComments(result.comments);
-      setCommentsTotal(result.total);
-      commentCacheRef.current[cacheKey] = result.comments;
-      commentTotalCacheRef.current[cacheKey] = result.total;
+      setCommentsTotal(normalizedTotal);
+      setCommentsHasMore(result.hasMore);
+      setCommentsNextOffset(result.nextOffset);
+      setCommentsRefreshError('');
+      commentCacheRef.current[cacheKey] = {
+        comments: result.comments,
+        total: normalizedTotal,
+        hasMore: result.hasMore,
+        nextOffset: result.nextOffset,
+      };
     } catch (error) {
       if (requestToken !== commentRequestTokenRef.current) return;
       const message = error instanceof Error ? error.message : '加载评论失败，请稍后重试';
-      setComments([]);
-      setCommentsTotal(0);
-      setCommentsError(message);
+      if (forceRefresh && comments.length > 0) {
+        setCommentsRefreshError(message);
+      } else {
+        setComments([]);
+        setCommentsTotal(0);
+        setCommentsHasMore(false);
+        setCommentsNextOffset(0);
+        setCommentsRefreshError('');
+        setCommentsError(message);
+      }
     } finally {
       if (requestToken !== commentRequestTokenRef.current) return;
       setCommentsLoading(false);
+      setCommentsRefreshing(false);
     }
-  }, [getCommentTrackIdentity]);
+  }, [comments.length, getCommentTrackIdentity]);
+
+  const loadMoreComments = useCallback(async() => {
+    if (!renderTrack) return;
+    if (commentsLoading || commentsRefreshing || commentsLoadingMore) return;
+    if (!commentsHasMore) return;
+    const source = String(renderTrack.source || '').toLowerCase();
+    if (source !== 'wy') return;
+
+    const cacheKey = getCommentTrackIdentity(renderTrack);
+    if (!cacheKey || cacheKey !== activeCommentTrackKey) return;
+    if (commentLoadingMoreRef.current) return;
+
+    commentLoadingMoreRef.current = true;
+    setCommentsLoadingMore(true);
+    setCommentsLoadMoreError('');
+    const requestToken = commentRequestTokenRef.current;
+    try {
+      const result = await getTrackComments(renderTrack, {
+        limit: COMMENT_PAGE_LIMIT,
+        offset: commentsNextOffset,
+      });
+      if (requestToken !== commentRequestTokenRef.current) return;
+      const mergedComments = mergeTrackComments(comments, result.comments);
+      const normalizedTotal = Math.max(result.total, mergedComments.length);
+      setComments(mergedComments);
+      setCommentsTotal(normalizedTotal);
+      setCommentsHasMore(result.hasMore);
+      setCommentsNextOffset(result.nextOffset);
+      setCommentsRefreshError('');
+      setCommentsError('');
+      commentCacheRef.current[cacheKey] = {
+        comments: mergedComments,
+        total: normalizedTotal,
+        hasMore: result.hasMore,
+        nextOffset: result.nextOffset,
+      };
+    } catch (error) {
+      if (requestToken !== commentRequestTokenRef.current) return;
+      const message = error instanceof Error ? error.message : '加载更多评论失败，请稍后重试';
+      setCommentsLoadMoreError(message);
+    } finally {
+      if (requestToken === commentRequestTokenRef.current) {
+        setCommentsLoadingMore(false);
+      }
+      commentLoadingMoreRef.current = false;
+    }
+  }, [
+    activeCommentTrackKey,
+    comments,
+    commentsHasMore,
+    commentsLoading,
+    commentsLoadingMore,
+    commentsNextOffset,
+    commentsRefreshing,
+    getCommentTrackIdentity,
+    renderTrack,
+  ]);
 
   useEffect(() => {
     if (!renderTrack) return;
@@ -605,6 +728,144 @@ export default function NowPlaying({ onClose }: NowPlayingProps) {
     if (!commentSheetVisible || !renderTrack) return;
     void loadCommentsForTrack(renderTrack);
   }, [commentSheetVisible, loadCommentsForTrack, renderTrack?.id, renderTrack?.songmid, renderTrack?.source]);
+
+  const handleCommentRefresh = useCallback(() => {
+    if (!renderTrack) return;
+    if (commentsLoading || commentsRefreshing) return;
+    void loadCommentsForTrack(renderTrack, true);
+  }, [commentsLoading, commentsRefreshing, loadCommentsForTrack, renderTrack]);
+
+  const handleCommentEndReached = useCallback(() => {
+    if (commentsLoading || commentsRefreshing || commentsLoadingMore) return;
+    if (commentsLoadMoreError) return;
+    if (!commentsHasMore || comments.length === 0) return;
+    void loadMoreComments();
+  }, [
+    comments.length,
+    commentsHasMore,
+    commentsLoading,
+    commentsLoadingMore,
+    commentsLoadMoreError,
+    commentsRefreshing,
+    loadMoreComments,
+  ]);
+
+  const commentSubTitle = useMemo(() => {
+    if (commentsTotal <= 0) return '暂无评论';
+    if (commentsHasMore) return `已展示 ${comments.length}/${commentsTotal} 条`;
+    return `共 ${commentsTotal} 条`;
+  }, [comments.length, commentsHasMore, commentsTotal]);
+
+  const renderCommentFooter = useCallback(() => {
+    if (commentsLoadingMore) {
+      return (
+        <View style={styles.commentListFooter}>
+          <ActivityIndicator size="small" color={colors.accent} />
+          <Text style={[styles.commentFooterText, { color: colors.textSecondary }]}>加载更多评论...</Text>
+        </View>
+      );
+    }
+    if (commentsLoadMoreError) {
+      return (
+        <View style={styles.commentListFooter}>
+          <Text style={[styles.commentFooterText, { color: colors.textSecondary }]} numberOfLines={2}>
+            {commentsLoadMoreError}
+          </Text>
+          <TouchableOpacity
+            style={[
+              styles.commentFooterRetryButton,
+              {
+                borderColor: colors.separator,
+                backgroundColor: isDark ? 'rgba(255,255,255,0.08)' : 'rgba(0,0,0,0.04)',
+              },
+            ]}
+            activeOpacity={0.75}
+            onPress={() => {
+              void loadMoreComments();
+            }}
+          >
+            <Text style={[styles.commentFooterRetryText, { color: colors.textSecondary }]}>重试加载</Text>
+          </TouchableOpacity>
+        </View>
+      );
+    }
+    if (!commentsHasMore && comments.length > 0) {
+      return (
+        <View style={styles.commentListFooter}>
+          <Text style={[styles.commentFooterText, { color: colors.textTertiary }]}>已显示全部评论</Text>
+        </View>
+      );
+    }
+    return <View style={styles.commentFooterSpacer} />;
+  }, [
+    colors.accent,
+    colors.separator,
+    colors.textSecondary,
+    colors.textTertiary,
+    comments.length,
+    commentsHasMore,
+    commentsLoadMoreError,
+    commentsLoadingMore,
+    isDark,
+    loadMoreComments,
+  ]);
+
+  const renderCommentItem = useCallback(({ item: comment }: ListRenderItemInfo<TrackComment>) => {
+    return (
+      <View
+        style={[
+          styles.commentItem,
+          {
+            borderColor: colors.separator,
+            backgroundColor: isDark ? 'rgba(255,255,255,0.05)' : '#FFFFFF',
+          },
+        ]}
+      >
+        <View style={styles.commentItemHeader}>
+          <View style={styles.commentUserRow}>
+            {comment.avatarUrl ? (
+              <Image source={{ uri: comment.avatarUrl }} style={styles.commentAvatar} />
+            ) : (
+              <View
+                style={[
+                  styles.commentAvatarFallback,
+                  {
+                    backgroundColor: isDark ? 'rgba(255,255,255,0.1)' : 'rgba(0,0,0,0.06)',
+                  },
+                ]}
+              >
+                <Ionicons name="person" size={13} color={colors.textSecondary} />
+              </View>
+            )}
+            <View style={styles.commentUserInfo}>
+              <Text style={[styles.commentUserName, { color: colors.text }]} numberOfLines={1}>
+                {comment.userName}
+              </Text>
+              <Text style={[styles.commentMetaText, { color: colors.textTertiary }]} numberOfLines={1}>
+                {comment.timeText || '刚刚'}
+                {comment.location ? ` · ${comment.location}` : ''}
+              </Text>
+            </View>
+          </View>
+          {comment.likedCount > 0 && (
+            <View style={styles.commentLikeWrap}>
+              <Ionicons name="heart-outline" size={12} color={colors.textTertiary} />
+              <Text style={[styles.commentLikeText, { color: colors.textTertiary }]}>
+                {formatLikeCount(comment.likedCount)}
+              </Text>
+            </View>
+          )}
+        </View>
+        <Text style={[styles.commentContent, { color: colors.text }]}>{comment.content}</Text>
+      </View>
+    );
+  }, [
+    colors.separator,
+    colors.text,
+    colors.textSecondary,
+    colors.textTertiary,
+    isDark,
+  ]);
 
   const openQueueSheet = useCallback(() => {
     if (commentSheetVisible) {
@@ -1370,35 +1631,80 @@ export default function NowPlaying({ onClose }: NowPlayingProps) {
               <View style={styles.commentSheetHeaderMain}>
                 <Text style={[styles.commentSheetTitle, { color: colors.text }]}>歌曲评论</Text>
                 <Text style={[styles.commentSheetSubTitle, { color: colors.textSecondary }]}>
-                  {commentsTotal > 0 ? `共 ${commentsTotal} 条` : '暂无评论'}
+                  {commentSubTitle}
                 </Text>
+                {comments.length > 0 && (
+                  <Text style={[styles.commentSheetHint, { color: colors.textTertiary }]}>
+                    下拉刷新，滑到底部自动加载更多
+                  </Text>
+                )}
               </View>
-              <TouchableOpacity
+              <View style={styles.commentSheetHeaderActions}>
+                <TouchableOpacity
+                  style={[
+                    styles.commentRefreshButton,
+                    {
+                      backgroundColor: isDark ? 'rgba(255,255,255,0.08)' : 'rgba(0,0,0,0.04)',
+                      borderColor: colors.separator,
+                    },
+                  ]}
+                  activeOpacity={0.75}
+                  disabled={commentsLoading || commentsRefreshing}
+                  onPress={handleCommentRefresh}
+                >
+                  {commentsRefreshing ? (
+                    <ActivityIndicator size="small" color={colors.textSecondary} />
+                  ) : (
+                    <Ionicons name="refresh" size={16} color={colors.textSecondary} />
+                  )}
+                </TouchableOpacity>
+                <TouchableOpacity
+                  style={[
+                    styles.commentRefreshButton,
+                    {
+                      backgroundColor: isDark ? 'rgba(255,255,255,0.08)' : 'rgba(0,0,0,0.04)',
+                      borderColor: colors.separator,
+                    },
+                  ]}
+                  activeOpacity={0.75}
+                  onPress={closeCommentSheet}
+                >
+                  <Ionicons name="chevron-down" size={18} color={colors.textSecondary} />
+                </TouchableOpacity>
+              </View>
+            </View>
+            {commentsRefreshError ? (
+              <View
                 style={[
-                  styles.commentRefreshButton,
+                  styles.commentInlineError,
                   {
-                    backgroundColor: isDark ? 'rgba(255,255,255,0.08)' : 'rgba(0,0,0,0.04)',
                     borderColor: colors.separator,
+                    backgroundColor: isDark ? 'rgba(255,159,67,0.12)' : 'rgba(255,149,0,0.12)',
                   },
                 ]}
-                activeOpacity={0.75}
-                onPress={() => {
-                  if (!renderTrack) return;
-                  void loadCommentsForTrack(renderTrack, true);
-                }}
               >
-                <Ionicons name="refresh" size={16} color={colors.textSecondary} />
-              </TouchableOpacity>
-            </View>
+                <Ionicons name="warning-outline" size={14} color={colors.textSecondary} />
+                <Text style={[styles.commentInlineErrorText, { color: colors.textSecondary }]} numberOfLines={2}>
+                  {commentsRefreshError}
+                </Text>
+                <TouchableOpacity
+                  style={styles.commentInlineErrorAction}
+                  activeOpacity={0.75}
+                  onPress={handleCommentRefresh}
+                >
+                  <Text style={[styles.commentInlineErrorActionText, { color: colors.accent }]}>重试</Text>
+                </TouchableOpacity>
+              </View>
+            ) : null}
 
-            {commentsLoading ? (
+            {commentsLoading && comments.length === 0 ? (
               <View style={styles.commentStateWrap}>
                 <ActivityIndicator size="small" color={colors.accent} />
                 <Text style={[styles.commentStateText, { color: colors.textSecondary }]}>
                   正在加载评论...
                 </Text>
               </View>
-            ) : commentsError ? (
+            ) : commentsError && comments.length === 0 ? (
               <View style={styles.commentStateWrap}>
                 <Ionicons name="warning-outline" size={18} color={colors.textSecondary} />
                 <Text style={[styles.commentStateText, { color: colors.textSecondary }]}>
@@ -1413,70 +1719,35 @@ export default function NowPlaying({ onClose }: NowPlayingProps) {
                     },
                   ]}
                   activeOpacity={0.75}
-                  onPress={() => {
-                    if (!renderTrack) return;
-                    void loadCommentsForTrack(renderTrack, true);
-                  }}
+                  onPress={handleCommentRefresh}
                 >
                   <Text style={[styles.commentRetryText, { color: colors.textSecondary }]}>重试</Text>
                 </TouchableOpacity>
               </View>
-            ) : comments.length === 0 ? (
-              <View style={styles.commentStateWrap}>
-                <Ionicons name="chatbubble-ellipses-outline" size={18} color={colors.textSecondary} />
-                <Text style={[styles.commentStateText, { color: colors.textSecondary }]}>
-                  当前歌曲暂无可展示评论
-                </Text>
-              </View>
             ) : (
-              <ScrollView
+              <FlatList
+                data={comments}
+                keyExtractor={(comment) => comment.id}
+                renderItem={renderCommentItem}
                 showsVerticalScrollIndicator={false}
-                contentContainerStyle={styles.commentSheetList}
-              >
-                {comments.map((comment, index) => (
-                  <View
-                    key={`${comment.id}_${index}`}
-                    style={[styles.commentItem, { borderBottomColor: colors.separator }]}
-                  >
-                    <View style={styles.commentItemHeader}>
-                      <View style={styles.commentUserRow}>
-                        {comment.avatarUrl ? (
-                          <Image source={{ uri: comment.avatarUrl }} style={styles.commentAvatar} />
-                        ) : (
-                          <View
-                            style={[
-                              styles.commentAvatarFallback,
-                              {
-                                backgroundColor: isDark ? 'rgba(255,255,255,0.1)' : 'rgba(0,0,0,0.06)',
-                              },
-                            ]}
-                          >
-                            <Ionicons name="person" size={12} color={colors.textSecondary} />
-                          </View>
-                        )}
-                        <View style={styles.commentUserInfo}>
-                          <Text style={[styles.commentUserName, { color: colors.text }]} numberOfLines={1}>
-                            {comment.userName}
-                          </Text>
-                          <Text style={[styles.commentMetaText, { color: colors.textTertiary }]} numberOfLines={1}>
-                            {comment.timeText || '刚刚'}
-                            {comment.location ? ` · ${comment.location}` : ''}
-                          </Text>
-                        </View>
-                      </View>
-                      {comment.likedCount > 0 && (
-                        <View style={styles.commentLikeWrap}>
-                          <Ionicons name="heart-outline" size={12} color={colors.textTertiary} />
-                          <Text style={[styles.commentLikeText, { color: colors.textTertiary }]}>
-                            {formatLikeCount(comment.likedCount)}
-                          </Text>
-                        </View>
-                      )}
-                    </View>
-                    <Text style={[styles.commentContent, { color: colors.text }]}>{comment.content}</Text>
+                contentContainerStyle={[
+                  styles.commentSheetList,
+                  comments.length === 0 ? styles.commentSheetListEmpty : null,
+                ]}
+                refreshing={commentsRefreshing}
+                onRefresh={handleCommentRefresh}
+                onEndReached={handleCommentEndReached}
+                onEndReachedThreshold={0.24}
+                ListFooterComponent={renderCommentFooter}
+                ListEmptyComponent={(
+                  <View style={styles.commentStateWrap}>
+                    <Ionicons name="chatbubble-ellipses-outline" size={18} color={colors.textSecondary} />
+                    <Text style={[styles.commentStateText, { color: colors.textSecondary }]}>
+                      当前歌曲暂无可展示评论
+                    </Text>
                   </View>
-                ))}
-              </ScrollView>
+                )}
+              />
             )}
           </Animated.View>
         </View>
@@ -1863,9 +2134,9 @@ const styles = StyleSheet.create({
   },
   commentSheetHeader: {
     paddingHorizontal: spacing.md,
-    paddingBottom: spacing.sm,
+    paddingBottom: spacing.xs,
     flexDirection: 'row',
-    alignItems: 'center',
+    alignItems: 'flex-start',
     justifyContent: 'space-between',
     gap: spacing.sm,
   },
@@ -1878,22 +2149,60 @@ const styles = StyleSheet.create({
   },
   commentSheetSubTitle: {
     fontSize: fontSize.footnote,
+    marginTop: 3,
+  },
+  commentSheetHint: {
+    fontSize: fontSize.caption2,
     marginTop: 2,
   },
+  commentSheetHeaderActions: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.xs,
+  },
   commentRefreshButton: {
-    width: 30,
-    height: 30,
-    borderRadius: 15,
+    width: 32,
+    height: 32,
+    borderRadius: 16,
     borderWidth: StyleSheet.hairlineWidth,
     alignItems: 'center',
     justifyContent: 'center',
   },
+  commentInlineError: {
+    marginHorizontal: spacing.md,
+    marginBottom: spacing.xs,
+    borderRadius: borderRadius.md,
+    borderWidth: StyleSheet.hairlineWidth,
+    paddingHorizontal: spacing.sm,
+    paddingVertical: spacing.xs,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.xs,
+  },
+  commentInlineErrorText: {
+    flex: 1,
+    fontSize: fontSize.caption1,
+  },
+  commentInlineErrorAction: {
+    minWidth: 42,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  commentInlineErrorActionText: {
+    fontSize: fontSize.caption1,
+    fontWeight: '600',
+  },
   commentSheetList: {
+    paddingHorizontal: spacing.md,
     paddingBottom: spacing.sm,
+  },
+  commentSheetListEmpty: {
+    flexGrow: 1,
   },
   commentStateWrap: {
     paddingHorizontal: spacing.md,
-    paddingVertical: spacing.lg,
+    paddingVertical: spacing.lg + 2,
+    minHeight: 180,
     alignItems: 'center',
     justifyContent: 'center',
     gap: spacing.xs,
@@ -1917,9 +2226,11 @@ const styles = StyleSheet.create({
     fontWeight: '600',
   },
   commentItem: {
-    paddingHorizontal: spacing.md,
+    marginTop: spacing.sm,
+    paddingHorizontal: spacing.sm,
     paddingVertical: spacing.sm,
-    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderRadius: borderRadius.lg,
     gap: spacing.xs,
   },
   commentItemHeader: {
@@ -1934,15 +2245,15 @@ const styles = StyleSheet.create({
     flex: 1,
   },
   commentAvatar: {
-    width: 28,
-    height: 28,
-    borderRadius: 14,
+    width: 32,
+    height: 32,
+    borderRadius: 16,
     marginRight: spacing.xs,
   },
   commentAvatarFallback: {
-    width: 28,
-    height: 28,
-    borderRadius: 14,
+    width: 32,
+    height: 32,
+    borderRadius: 16,
     marginRight: spacing.xs,
     alignItems: 'center',
     justifyContent: 'center',
@@ -1968,7 +2279,34 @@ const styles = StyleSheet.create({
   },
   commentContent: {
     fontSize: fontSize.callout,
-    lineHeight: Math.round(fontSize.callout * 1.4),
+    lineHeight: Math.round(fontSize.callout * 1.45),
+  },
+  commentListFooter: {
+    paddingVertical: spacing.sm + 2,
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: spacing.xs,
+  },
+  commentFooterText: {
+    fontSize: fontSize.caption1,
+    textAlign: 'center',
+    paddingHorizontal: spacing.lg,
+  },
+  commentFooterRetryButton: {
+    minWidth: 86,
+    minHeight: 30,
+    borderRadius: borderRadius.full,
+    borderWidth: StyleSheet.hairlineWidth,
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: spacing.md,
+  },
+  commentFooterRetryText: {
+    fontSize: fontSize.caption1,
+    fontWeight: '600',
+  },
+  commentFooterSpacer: {
+    height: spacing.sm,
   },
   queueSheetOverlay: {
     ...StyleSheet.absoluteFillObject,
