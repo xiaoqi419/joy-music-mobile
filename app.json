@@ -20,7 +20,11 @@
       "bundleIdentifier": "com.joymusic.mobile",
       "buildNumber": "1.0.0-beta",
       "infoPlist": {
-        "UIBackgroundModes": ["audio"]
+        "UIBackgroundModes": ["audio"],
+        "NSAppTransportSecurity": {
+          "NSAllowsArbitraryLoads": true,
+          "NSAllowsArbitraryLoadsForMedia": true
+        }
       }
     },
     "android": {
