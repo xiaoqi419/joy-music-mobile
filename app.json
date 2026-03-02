@@ -23,25 +23,9 @@
         "UIBackgroundModes": ["audio"],
         "NSAppTransportSecurity": {
           "NSAllowsArbitraryLoads": true,
+          "NSAllowsArbitraryLoadsInWebContent": true,
           "NSAllowsArbitraryLoadsForMedia": true,
-          "NSExceptionDomains": {
-            "kuwo.cn": {
-              "NSIncludesSubdomains": true,
-              "NSTemporaryExceptionAllowsInsecureHTTPLoads": true
-            },
-            "kugou.com": {
-              "NSIncludesSubdomains": true,
-              "NSTemporaryExceptionAllowsInsecureHTTPLoads": true
-            },
-            "qq.com": {
-              "NSIncludesSubdomains": true,
-              "NSTemporaryExceptionAllowsInsecureHTTPLoads": true
-            },
-            "126.net": {
-              "NSIncludesSubdomains": true,
-              "NSTemporaryExceptionAllowsInsecureHTTPLoads": true
-            }
-          }
+          "NSAllowsLocalNetworking": true
         }
       }
     },
@@ -50,6 +34,7 @@
         "foregroundImage": "./assets/adaptive-icon.png",
         "backgroundColor": "#1a1a1a"
       },
+      "usesCleartextTraffic": true,
       "package": "com.joymusic.mobile"
     },
     "web": {

@@ -28,6 +28,12 @@ const SUPPORTED_EXTS = new Set([
   'mp4',
 ])
 
+const AUDIO_CACHE_DOWNLOAD_HEADERS = {
+  Accept: '*/*',
+  'User-Agent':
+    'Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Mobile/15E148',
+}
+
 export interface AudioCacheSettings {
   enabled: boolean
 }
@@ -75,6 +81,21 @@ function inferFileExtension(url: string): string {
   if (rawExt === 'm4s') return 'm4a'
   if (SUPPORTED_EXTS.has(rawExt)) return rawExt
   return 'mp3'
+}
+
+function getDownloadCandidates(url: string): string[] {
+  const first = String(url || '').trim()
+  if (!first) return []
+  const candidates = [first]
+  if (/^http:\/\//i.test(first)) {
+    candidates.push(first.replace(/^http:/i, 'https:'))
+  }
+  return Array.from(new Set(candidates))
+}
+
+function formatCacheError(error: unknown): string {
+  if (error instanceof Error) return `${error.name}: ${error.message}`
+  return String(error)
 }
 
 async function getCacheDir(): Promise<string> {
@@ -224,6 +245,7 @@ class AudioFileCacheManager {
     if (existingTask) return existingTask
 
     const task = (async() => {
+      console.log(`[AudioCache] Start cache task for ${musicId}`)
       const dir = await this.ensureDir()
       const index = await this.readIndex()
       const previous = index[musicId]
@@ -231,6 +253,7 @@ class AudioFileCacheManager {
       if (previous?.fileUri) {
         const previousInfo = await FileSystem.getInfoAsync(previous.fileUri)
         if (previousInfo.exists && previous.source === source && previous.quality === quality) {
+          console.log(`[AudioCache] Skip existing cache for ${musicId}`)
           return
         }
       }
@@ -238,10 +261,39 @@ class AudioFileCacheManager {
       const ext = inferFileExtension(url)
       const fileName = `${safeFileName(musicId)}_${Date.now()}.${ext}`
       const targetUri = `${dir}${fileName}`
-      const downloadResult = await FileSystem.downloadAsync(url, targetUri)
-      if (downloadResult.status < 200 || downloadResult.status >= 300) {
-        await this.removeFileIfExists(targetUri)
-        throw new Error(`download failed: ${downloadResult.status}`)
+
+      let downloadResult: FileSystem.FileSystemDownloadResult | null = null
+      let usedUrl = url
+      const candidates = getDownloadCandidates(url)
+
+      for (let i = 0; i < candidates.length; i++) {
+        const candidateUrl = candidates[i]
+        try {
+          console.log(
+            `[AudioCache] Downloading ${musicId} (${i + 1}/${candidates.length}) ${candidateUrl}`
+          )
+          const result = await FileSystem.downloadAsync(candidateUrl, targetUri, {
+            headers: AUDIO_CACHE_DOWNLOAD_HEADERS,
+          })
+          if (result.status >= 200 && result.status < 300) {
+            downloadResult = result
+            usedUrl = candidateUrl
+            break
+          }
+          await this.removeFileIfExists(targetUri)
+          console.warn(
+            `[AudioCache] Download status ${result.status} for ${musicId} (${candidateUrl})`
+          )
+        } catch (error) {
+          await this.removeFileIfExists(targetUri)
+          console.warn(
+            `[AudioCache] Download failed for ${musicId} (${candidateUrl}): ${formatCacheError(error)}`
+          )
+        }
+      }
+
+      if (!downloadResult) {
+        throw new Error(`download failed for ${musicId}`)
       }
 
       const fileInfo = await FileSystem.getInfoAsync(downloadResult.uri)
@@ -261,13 +313,21 @@ class AudioFileCacheManager {
         artist,
       }
       await this.saveIndex(index)
+      console.log(
+        `[AudioCache] Cached file saved for ${musicId} (${size} bytes, ${usedUrl})`
+      )
 
       if (previous?.fileUri && previous.fileUri !== downloadResult.uri) {
         await this.removeFileIfExists(previous.fileUri)
       }
     })()
       .catch((error) => {
-        console.warn('[AudioCache] Cache store failed:', error)
+        console.warn('[AudioCache] Cache store failed:', formatCacheError(error), {
+          musicId,
+          source,
+          quality,
+          url,
+        })
       })
       .finally(() => {
         this.inFlightTasks.delete(musicId)

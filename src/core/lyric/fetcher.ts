@@ -23,8 +23,14 @@ export interface LyricData {
 }
 
 const EMPTY_LYRIC: LyricData = { lines: [], rawLrc: '', rawTlrc: '' }
-const CERU_API_URL = 'https://c.wwwweb.top'
-const CERU_API_KEY = 'KAWANG_2544c96a-DEABFNVMBU4C0RAF'
+const TX_OFFICIAL_LYRIC_URL =
+  'https://c.y.qq.com/lyric/fcgi-bin/fcg_query_lyric_new.fcg'
+const TX_OFFICIAL_LYRIC_HEADERS = {
+  Referer: 'https://y.qq.com/',
+  Origin: 'https://y.qq.com',
+  'User-Agent':
+    'Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Mobile/15E148',
+}
 const MG_RESOURCE_INFO_URL =
   'https://c.musicapp.migu.cn/MIGUM2.0/v1.0/content/resourceinfo.do?resourceType=2'
 const KG_HEADERS = {
@@ -62,20 +68,20 @@ function orderedImportedSources(
 function extractLyricPayload(
   payload: any
 ): { rawLrc: string; rawTlrc: string } {
-  const rawLrc = String(
+  const rawLrc = decodeMaybeBase64Lyric(String(
     payload?.data?.lyric ||
       payload?.data?.lrc ||
       payload?.lyric ||
       payload?.lrc ||
       ''
-  )
-  const rawTlrc = String(
+  ))
+  const rawTlrc = decodeMaybeBase64Lyric(String(
     payload?.data?.trans ||
       payload?.data?.tlyric ||
       payload?.trans ||
       payload?.tlyric ||
       ''
-  )
+  ))
   return { rawLrc, rawTlrc }
 }
 
@@ -88,6 +94,26 @@ function buildLyricData(rawLrc: string, rawTlrc = ''): LyricData {
     lines = mergeLyricTranslation(lines, translations)
   }
   return { lines, rawLrc, rawTlrc }
+}
+
+function isLikelyGarbledLyric(input: string): boolean {
+  const content = String(input || '')
+    .replace(/\[[^\]]*\]/g, '')
+    .replace(/\s+/g, '')
+
+  if (content.length < 12) return false
+
+  const replacementCount = (content.match(/�/g) || []).length
+  if (replacementCount >= 2 && replacementCount / content.length > 0.015) {
+    return true
+  }
+
+  const mojibakeCount = (content.match(/[ÃÂÐÊÍÅÒÓÔÕÖ×ØÙÚÛÜÝÞß]/g) || []).length
+  if (mojibakeCount >= 4 && mojibakeCount / content.length > 0.05) {
+    return true
+  }
+
+  return false
 }
 
 function decodeBase64Binary(input: string): string {
@@ -126,6 +152,30 @@ function decodeBase64Utf8(input: string): string {
     return decodeURIComponent(percentEncoded)
   } catch {
     return binary
+  }
+}
+
+function decodeMaybeBase64Lyric(input: string): string {
+  const text = String(input || '').trim()
+  if (!text) return ''
+  if (/\[[0-9]{1,2}:[0-9]{1,2}/.test(text)) return text
+  if (!/^[A-Za-z0-9+/=]+$/.test(text) || text.length % 4 !== 0) return text
+
+  const decoded = decodeBase64Utf8(text).trim()
+  if (!decoded) return text
+  return decoded
+}
+
+function parseJsonOrJsonp(input: string): any {
+  const text = String(input || '').trim()
+  if (!text) return {}
+
+  try {
+    return JSON.parse(text)
+  } catch {
+    const match = text.match(/^[\w$.]+\(([\s\S]*)\)\s*;?$/)
+    if (!match) throw new Error('invalid json/jsonp payload')
+    return JSON.parse(match[1])
   }
 }
 
@@ -205,6 +255,49 @@ async function withImportedSourceFallback(
   return fetchLyricFromImportedSource(source, songmid)
 }
 
+async function fetchTxOfficialLyric(songmid: string): Promise<LyricData> {
+  const query = new URLSearchParams({
+    songmid,
+    g_tk: '5381',
+    format: 'json',
+    inCharset: 'utf8',
+    outCharset: 'utf-8',
+    nobase64: '1',
+    platform: 'yqq.json',
+    needNewCode: '0',
+    notice: '0',
+  })
+
+  const raw = await requestText(`${TX_OFFICIAL_LYRIC_URL}?${query.toString()}`, {
+    headers: TX_OFFICIAL_LYRIC_HEADERS,
+  })
+  const payload = parseJsonOrJsonp(raw)
+  const code = Number(payload?.code ?? payload?.retcode ?? 0)
+  if (Number.isFinite(code) && code !== 0 && code !== 200) return EMPTY_LYRIC
+
+  const rawLrc = decodeMaybeBase64Lyric(
+    String(
+      payload?.lyric ||
+        payload?.data?.lyric ||
+        payload?.lyric_lrc ||
+        payload?.data?.lyric_lrc ||
+        ''
+    )
+  )
+  const rawTlrc = decodeMaybeBase64Lyric(
+    String(
+      payload?.trans ||
+        payload?.data?.trans ||
+        payload?.tlyric ||
+        payload?.data?.tlyric ||
+        payload?.lyric_translate ||
+        payload?.data?.lyric_translate ||
+        ''
+    )
+  )
+  return buildLyricData(rawLrc, rawTlrc)
+}
+
 /**
  * 获取 KW（酷我）歌词。
  * 使用 m.kuwo.cn 简单 JSON 接口，无需加密。
@@ -233,7 +326,15 @@ async function fetchKwLyric(songmid: string): Promise<LyricData> {
     lrcLines.push(`${tag}${item.lineLyric || ''}`)
   }
 
-  return buildLyricData(lrcLines.join('\n'))
+  const rawLrc = lrcLines.join('\n')
+  if (isLikelyGarbledLyric(rawLrc)) {
+    console.warn(
+      `[LyricFetcher] KW lyric appears garbled, fallback to imported sources (${songmid})`
+    )
+    return EMPTY_LYRIC
+  }
+
+  return buildLyricData(rawLrc)
 }
 
 /**
@@ -260,22 +361,10 @@ async function fetchWyLyric(songmid: string): Promise<LyricData> {
 
 /**
  * 获取 TX（QQ 音乐）歌词。
- * 通过 CeruMusic 同源接口请求，避免 QRC 解密与复杂签名。
+ * 优先使用 QQ 官方歌词接口，失败时由外层走导入音源兜底。
  */
 async function fetchTxLyric(songmid: string): Promise<LyricData> {
-  const resp = await requestJson<any>(`${CERU_API_URL}/music/lyric`, {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      'X-Api-Key': CERU_API_KEY,
-    },
-    body: JSON.stringify({ source: 'tx', musicId: songmid }),
-  })
-  if (Number(resp?.code) !== 200) return EMPTY_LYRIC
-
-  const rawLrc = String(resp?.data?.lyric || '')
-  const rawTlrc = String(resp?.data?.trans || '')
-  return buildLyricData(rawLrc, rawTlrc)
+  return fetchTxOfficialLyric(songmid)
 }
 
 /**
