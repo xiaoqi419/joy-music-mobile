@@ -88,7 +88,8 @@ function getDownloadCandidates(url: string): string[] {
   if (!first) return []
   const candidates = [first]
   if (/^http:\/\//i.test(first)) {
-    candidates.push(first.replace(/^http:/i, 'https:'))
+    const httpsVersion = first.replace(/^http:/i, 'https:')
+    return Array.from(new Set([httpsVersion, first]))
   }
   return Array.from(new Set(candidates))
 }
@@ -259,16 +260,18 @@ class AudioFileCacheManager {
       }
 
       const ext = inferFileExtension(url)
-      const fileName = `${safeFileName(musicId)}_${Date.now()}.${ext}`
-      const targetUri = `${dir}${fileName}`
+      const fileNamePrefix = `${safeFileName(musicId)}_${Date.now()}`
 
       let downloadResult: FileSystem.FileSystemDownloadResult | null = null
       let usedUrl = url
+      let usedTargetUri = ''
       const candidates = getDownloadCandidates(url)
 
       for (let i = 0; i < candidates.length; i++) {
         const candidateUrl = candidates[i]
+        const targetUri = `${dir}${fileNamePrefix}_${i}.${ext}`
         try {
+          await this.ensureDir()
           console.log(
             `[AudioCache] Downloading ${musicId} (${i + 1}/${candidates.length}) ${candidateUrl}`
           )
@@ -278,6 +281,7 @@ class AudioFileCacheManager {
           if (result.status >= 200 && result.status < 300) {
             downloadResult = result
             usedUrl = candidateUrl
+            usedTargetUri = targetUri
             break
           }
           await this.removeFileIfExists(targetUri)
@@ -296,7 +300,8 @@ class AudioFileCacheManager {
         throw new Error(`download failed for ${musicId}`)
       }
 
-      const fileInfo = await FileSystem.getInfoAsync(downloadResult.uri)
+      const finalUri = usedTargetUri || downloadResult.uri
+      const fileInfo = await FileSystem.getInfoAsync(finalUri)
       if (!fileInfo.exists) {
         throw new Error('download file missing after complete')
       }
@@ -304,7 +309,7 @@ class AudioFileCacheManager {
       const size = typeof fileInfo.size === 'number' ? fileInfo.size : 0
       index[musicId] = {
         musicId,
-        fileUri: downloadResult.uri,
+        fileUri: finalUri,
         quality,
         source,
         size,
@@ -317,7 +322,7 @@ class AudioFileCacheManager {
         `[AudioCache] Cached file saved for ${musicId} (${size} bytes, ${usedUrl})`
       )
 
-      if (previous?.fileUri && previous.fileUri !== downloadResult.uri) {
+      if (previous?.fileUri && previous.fileUri !== finalUri) {
         await this.removeFileIfExists(previous.fileUri)
       }
     })()

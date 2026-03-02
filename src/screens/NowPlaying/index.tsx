@@ -42,6 +42,7 @@ import { getTrackComments, type TrackComment } from '../../core/comment';
 import LyricsView from '../../components/common/LyricsView';
 import type { RootState } from '../../store';
 import type { Track } from '../../types/music';
+import { normalizeImageUrl } from '../../utils/url';
 
 const SCREEN_WIDTH = Dimensions.get('window').width;
 const SCREEN_HEIGHT = Dimensions.get('window').height;
@@ -237,6 +238,10 @@ export default function NowPlaying({ onClose }: NowPlayingProps) {
   const [displayTrack, setDisplayTrack] = useState<Track | null>(null);
   const fallbackTrack = queueDraft.find(Boolean) || queue.find(Boolean) || controllerQueue.find(Boolean) || null;
   const renderTrack = activeTrack || displayTrack || fallbackTrack;
+  const renderCoverUrl = useMemo(
+    () => normalizeImageUrl(renderTrack?.coverUrl || renderTrack?.picUrl, 500),
+    [renderTrack?.coverUrl, renderTrack?.picUrl]
+  );
   const getTrackIdentityToken = useCallback((track: Track | null | undefined): string => {
     if (!track) return '';
     const raw = track.id || track.songmid || track.hash || track.copyrightId;
@@ -811,6 +816,7 @@ export default function NowPlaying({ onClose }: NowPlayingProps) {
   ]);
 
   const renderCommentItem = useCallback(({ item: comment }: ListRenderItemInfo<TrackComment>) => {
+    const avatarUrl = normalizeImageUrl(comment.avatarUrl, 240);
     return (
       <View
         style={[
@@ -823,8 +829,8 @@ export default function NowPlaying({ onClose }: NowPlayingProps) {
       >
         <View style={styles.commentItemHeader}>
           <View style={styles.commentUserRow}>
-            {comment.avatarUrl ? (
-              <Image source={{ uri: comment.avatarUrl }} style={styles.commentAvatar} />
+            {avatarUrl ? (
+              <Image source={{ uri: avatarUrl }} style={styles.commentAvatar} />
             ) : (
               <View
                 style={[
@@ -1120,9 +1126,9 @@ export default function NowPlaying({ onClose }: NowPlayingProps) {
         end={{ x: 0.9, y: 1 }}
         style={StyleSheet.absoluteFill}
       />
-      {renderTrack.coverUrl && (
+      {renderCoverUrl && (
         <Image
-          source={{ uri: renderTrack.coverUrl }}
+          source={{ uri: renderCoverUrl }}
           style={styles.backdropImage}
           blurRadius={48}
         />
@@ -1319,9 +1325,9 @@ export default function NowPlaying({ onClose }: NowPlayingProps) {
                     },
                   ]}
                 >
-                  {renderTrack.coverUrl ? (
+                  {renderCoverUrl ? (
                     <Image
-                      source={{ uri: renderTrack.coverUrl }}
+                      source={{ uri: renderCoverUrl }}
                       style={styles.cover}
                     />
                   ) : (

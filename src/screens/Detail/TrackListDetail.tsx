@@ -2,7 +2,7 @@
  * Track list detail screen for leaderboard/playlist detail views
  */
 
-import React, { useCallback, useEffect, useRef } from 'react'
+import React, { useCallback, useEffect, useMemo, useRef } from 'react'
 import {
   View,
   Text,
@@ -24,6 +24,7 @@ import { usePlayerStatus } from '../../hooks/usePlayerStatus'
 import { useSwipeBack } from '../../hooks/useSwipeBack'
 import { Track, type TrackMoreActionHandler } from '../../types/music'
 import { emitScrollTopState, subscribeScrollToTop } from '../../core/ui/scrollToTopBus'
+import { normalizeImageUrl } from '../../utils/url'
 
 const SCREEN_WIDTH = Dimensions.get('window').width
 const HEADER_HEIGHT = 280
@@ -60,6 +61,7 @@ export default function TrackListDetail({
   const { isPlaying, currentTrack } = usePlayerStatus()
   const { panX, panHandlers } = useSwipeBack(onBack)
   const listRef = useRef<FlatList<Track> | null>(null)
+  const normalizedCoverUrl = useMemo(() => normalizeImageUrl(coverUrl, 500), [coverUrl])
 
   useEffect(() => {
     return subscribeScrollToTop(() => {
@@ -94,8 +96,8 @@ export default function TrackListDetail({
 
         {/* Cover and info */}
         <View style={styles.headerContent}>
-          {coverUrl ? (
-            <Image source={{ uri: coverUrl }} style={styles.headerCover} />
+          {normalizedCoverUrl ? (
+            <Image source={{ uri: normalizedCoverUrl }} style={styles.headerCover} />
           ) : (
             <View style={[styles.headerCover, { backgroundColor: 'rgba(255,255,255,0.15)' }]}>
               <Ionicons name="musical-notes" size={40} color="rgba(255,255,255,0.6)" />

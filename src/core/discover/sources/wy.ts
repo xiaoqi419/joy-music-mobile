@@ -14,6 +14,7 @@ import {
 import { httpRequest, withRetry } from '../http'
 import { wyRequest } from '../wyCrypto'
 import { DiscoverSourceAdapter } from './types'
+import { normalizeImageUrl } from '../../../utils/url'
 
 const SONG_LIMIT = 30
 const DETAIL_LIMIT = 1000
@@ -64,10 +65,10 @@ function mapTrack(item: any): Track {
     album: item.al?.name || '',
     duration: ms(item.dt),
     url: '',
-    coverUrl: item.al?.picUrl,
+    coverUrl: normalizeImageUrl(item.al?.picUrl, 500),
     source,
     songmid,
-    picUrl: item.al?.picUrl,
+    picUrl: normalizeImageUrl(item.al?.picUrl, 500),
     // @ts-expect-error keep runtime metadata for URL resolver fallback
     _types: qualitys,
   }
@@ -164,7 +165,7 @@ async function getList(sortId: string, tagId: string, page: number): Promise<Son
       id: String(item.id),
       name: item.name || '',
       author: item.creator?.nickname || '',
-      coverUrl: item.coverImgUrl || '',
+      coverUrl: normalizeImageUrl(item.coverImgUrl, 500) || '',
       playCount: toPlayCount(item.playCount),
       description: item.description || '',
       total: Number(item.trackCount || 0),
@@ -241,7 +242,7 @@ async function getListDetail(id: string, page: number): Promise<SongListDetail> 
     maxPage: Math.max(1, Math.ceil(total / limit)),
     info: {
       name: playlist.name || '',
-      coverUrl: playlist.coverImgUrl || '',
+      coverUrl: normalizeImageUrl(playlist.coverImgUrl, 500) || '',
       description: playlist.description || '',
       author: playlist.creator?.nickname || '',
       playCount: toPlayCount(playlist.playCount),
@@ -265,7 +266,7 @@ function parseDynamicBoards(rawList: any[]): LeaderboardBoardList['list'] {
       id: `wy__${bangId}`,
       name,
       bangId,
-      coverUrl: rawCover || undefined,
+      coverUrl: normalizeImageUrl(rawCover, 500),
       updateFrequency: rawUpdate || undefined,
       source: 'wy',
     })

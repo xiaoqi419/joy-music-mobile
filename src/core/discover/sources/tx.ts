@@ -8,6 +8,7 @@ import {
 } from '../../../types/discover'
 import { httpRequest, withRetry } from '../http'
 import { DiscoverSourceAdapter } from './types'
+import { normalizeImageUrl } from '../../../utils/url'
 
 const SONG_LIMIT = 36
 const TOP_LIMIT = 200
@@ -77,10 +78,10 @@ function mapTrack(item: any): Track {
     album: item.album?.name || '',
     duration: Math.max(0, Number(item.interval || 0) * 1000),
     url: '',
-    coverUrl: picByAlbum || picBySinger || undefined,
+    coverUrl: normalizeImageUrl(picByAlbum || picBySinger, 500),
     source: 'tx',
     songmid,
-    picUrl: picByAlbum || picBySinger || undefined,
+    picUrl: normalizeImageUrl(picByAlbum || picBySinger, 500),
     // @ts-expect-error keep runtime metadata compatible with URL resolver
     _types: qualitys,
   }
@@ -206,7 +207,7 @@ async function getList(sortId: string, tagId: string, page: number): Promise<Son
       id: String(id || ''),
       name: String(basic.title || ''),
       author: String((tagId ? basic.creator?.nick : basic.creator_info?.nick) || ''),
-      coverUrl: cover || undefined,
+      coverUrl: normalizeImageUrl(cover, 500),
       playCount: toPlayCount(play),
       description: unescapeHtml(String(basic.desc || '')).replace(/<br>/g, '\n'),
       total: Number(basic.song_ids?.length || 0),
@@ -273,7 +274,7 @@ async function getListDetail(id: string, page: number): Promise<SongListDetail> 
     maxPage: 1,
     info: {
       name: String(cd?.dissname || ''),
-      coverUrl: cd?.logo || '',
+      coverUrl: normalizeImageUrl(cd?.logo, 500) || '',
       description: unescapeHtml(String(cd?.desc || '')).replace(/<br>/g, '\n'),
       author: String(cd?.nickname || ''),
       playCount: toPlayCount(cd?.visitnum),
@@ -319,7 +320,7 @@ function parseDynamicBoards(rawList: any[]): LeaderboardBoardList['list'] {
       id: `tx__${bangId}`,
       name,
       bangId,
-      coverUrl: rawCover ? rawCover.replace(/^http:/, 'https:') : undefined,
+      coverUrl: normalizeImageUrl(rawCover, 500),
       updateFrequency: rawUpdate || undefined,
       source: 'tx',
       listen: Number(item?.listenCount || 0),

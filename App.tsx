@@ -53,7 +53,9 @@ import { installRuntimeLogger } from './src/core/logging/runtimeLogger'
 
 // Keep the splash screen visible while we fetch resources
 installRuntimeLogger()
-SplashScreen.preventAutoHideAsync()
+void SplashScreen.preventAutoHideAsync().catch(() => {
+  // ignore startup race
+})
 
 interface DetailView {
   title: string
@@ -247,7 +249,9 @@ function AppContent() {
       } catch (e) {
         console.error('Player init error:', e)
       } finally {
-        SplashScreen.hideAsync()
+        void SplashScreen.hideAsync().catch(() => {
+          // ignore startup race
+        })
       }
     }
     void init()

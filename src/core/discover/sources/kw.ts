@@ -8,6 +8,7 @@ import {
 } from '../../../types/discover'
 import { httpRequest, withRetry } from '../http'
 import { DiscoverSourceAdapter } from './types'
+import { normalizeImageUrl } from '../../../utils/url'
 
 const SONG_LIMIT = 36
 const DETAIL_LIMIT = 100
@@ -68,7 +69,7 @@ function parseQualityTypes(raw: string | undefined) {
 /** 将 KW 封面 URL 升级为高清（120px → 500px） */
 const toHiResCover = (url: string | undefined): string | undefined => {
   if (!url) return undefined
-  return url.replace('/albumcover/120/', '/albumcover/500/')
+  return normalizeImageUrl(url.replace('/albumcover/120/', '/albumcover/500/'), 500)
 }
 
 function mapTrack(item: any): Track {
@@ -171,7 +172,7 @@ async function getSongList(sortId: string, tagId: string, page: number): Promise
       id: `digest-${item.digest}__${item.id}`,
       name: item.name || '',
       author: item.uname || '',
-      coverUrl: item.img || undefined,
+      coverUrl: normalizeImageUrl(item.img, 500),
       playCount: toPlayCount(item.listencnt),
       description: item.desc || '',
       total: Number(item.total || 0),
@@ -206,7 +207,7 @@ async function getSongListDetail(id: string, page: number): Promise<SongListDeta
     })
   )
   const body = resp.data
-  const playlistCover = body?.pic || ''
+  const playlistCover = normalizeImageUrl(body?.pic, 500) || ''
   const list = (body?.musiclist || []).map((item: any) => {
     const track = mapTrack(item)
     // KW 歌单详情 API 的 musiclist 不含歌曲封面，用歌单封面兜底
@@ -228,12 +229,26 @@ async function getSongListDetail(id: string, page: number): Promise<SongListDeta
     maxPage: Math.max(1, Math.ceil(total / limit)),
     info: {
       name: body?.title || '',
-      coverUrl: body?.pic || '',
+      coverUrl: playlistCover,
       description: body?.info || '',
       author: body?.uname || '',
       playCount: toPlayCount(body?.playnum),
     },
   }
+}
+
+function flattenBoardsTree(rawList: any[]): any[] {
+  const queue = [...(rawList || [])]
+  const flat: any[] = []
+  while (queue.length) {
+    const node = queue.shift()
+    if (!node) continue
+    flat.push(node)
+    if (Array.isArray(node.child) && node.child.length) {
+      queue.push(...node.child)
+    }
+  }
+  return flat
 }
 
 /**
@@ -251,7 +266,7 @@ function parseDynamicBoards(rawList: any[]): LeaderboardBoardList['list'] {
     listen: number
   }> = []
 
-  for (const item of rawList) {
+  for (const item of flattenBoardsTree(rawList)) {
     const bangId = String(item?.sourceid || item?.id || '').trim()
     const name = String(item?.name || '').trim()
     if (!bangId || !name) continue
@@ -262,7 +277,7 @@ function parseDynamicBoards(rawList: any[]): LeaderboardBoardList['list'] {
       id: `kw__${bangId}`,
       name,
       bangId,
-      coverUrl: rawCover || undefined,
+      coverUrl: normalizeImageUrl(rawCover, 500),
       updateFrequency: rawUpdate || undefined,
       source: 'kw',
       listen: Number(item?.listen || 0),

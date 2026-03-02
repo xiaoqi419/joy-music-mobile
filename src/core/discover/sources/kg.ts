@@ -8,6 +8,7 @@ import {
 } from '../../../types/discover'
 import { httpRequest, withRetry } from '../http'
 import { DiscoverSourceAdapter } from './types'
+import { normalizeImageUrl } from '../../../utils/url'
 
 const SONG_LIMIT = 30
 const TOP_LIMIT = 100
@@ -18,6 +19,12 @@ const sortList = [
   { id: '7', tid: 'new', name: 'New' },
   { id: '8', tid: 'rise', name: 'Rise' },
 ]
+const KG_FALLBACK_HOT_TAGS: SongListTagInfo[] = [
+  { id: 'dj', name: 'DJ', source: 'kg' },
+  { id: 'hot', name: '热门', source: 'kg' },
+  { id: 'acg', name: 'ACG', source: 'kg' },
+  { id: 'classic', name: '经典', source: 'kg' },
+]
 
 const STATIC_TOP_LIST = [
   { id: 'kg__8888', name: 'TOP500', bangId: '8888' },
@@ -27,8 +34,7 @@ const STATIC_TOP_LIST = [
   { id: 'kg__24971', name: 'DJ Hot', bangId: '24971' },
 ]
 const KG_MOBILE_API_HOSTS = [
-  'http://mobilecdngz.kugou.com',
-  'http://mobilecdnbj.kugou.com',
+  'https://mobiles.kugou.com',
 ]
 
 function trimDecimal(value: number): string {
@@ -83,14 +89,6 @@ const decodeName = (value: string): string =>
     .replace(/&#39;/g, "'")
     .replace(/&quot;/g, '"')
 
-function normalizeTagField(value: unknown): string {
-  const text = String(value ?? '').trim()
-  if (!text) return ''
-  const lower = text.toLowerCase()
-  if (lower === 'undefined' || lower === 'null') return ''
-  return text
-}
-
 function parseDurationMs(raw: any): number {
   const value = Number(raw || 0)
   if (!Number.isFinite(value) || value <= 0) return 0
@@ -112,15 +110,14 @@ function parseFilenameMeta(filenameRaw: unknown): { title: string; artist: strin
 }
 
 function resolveKgCover(item: any): string | undefined {
-  const raw = String(
+  return normalizeImageUrl(
     item.img ||
       item.imgurl ||
       item.album_img ||
       item.trans_param?.union_cover ||
-      ''
-  ).trim()
-  if (!raw) return undefined
-  return raw.includes('{size}') ? raw.replace('{size}', '500') : raw
+      '',
+    500
+  )
 }
 
 function parseKgListId(input: string): string {
@@ -128,6 +125,10 @@ function parseKgListId(input: string): string {
   if (id.startsWith('id_')) return id.slice(3)
   const m = /special\/single\/(\d+)/.exec(id)
   if (m) return m[1]
+  const m2 = /(?:\?|&)specialid=(\d+)/.exec(id)
+  if (m2) return m2[1]
+  const m3 = /plist\/list\/(\d+)/.exec(id)
+  if (m3) return m3[1]
   return id
 }
 
@@ -144,6 +145,94 @@ async function requestKgMobileApi<T = any>(
     }
   }
   throw lastError || new Error(`KG mobile API failed: ${path}`)
+}
+
+function extractScriptJsonByName(html: string, varName: string): string | null {
+  const marker = new RegExp(`var\\s+${varName}\\s*=\\s*`, 'i')
+  const matched = marker.exec(html)
+  if (!matched) return null
+
+  let start = matched.index + matched[0].length
+  while (start < html.length && /\s/.test(html[start])) start += 1
+  const openChar = html[start]
+  const closeChar = openChar === '[' ? ']' : openChar === '{' ? '}' : ''
+  if (!closeChar) return null
+
+  let depth = 0
+  let inString = false
+  let quoteChar = ''
+  let escaped = false
+
+  for (let index = start; index < html.length; index += 1) {
+    const char = html[index]
+    if (inString) {
+      if (escaped) {
+        escaped = false
+        continue
+      }
+      if (char === '\\') {
+        escaped = true
+        continue
+      }
+      if (char === quoteChar) {
+        inString = false
+      }
+      continue
+    }
+
+    if (char === '"' || char === '\'') {
+      inString = true
+      quoteChar = char
+      continue
+    }
+
+    if (char === openChar) {
+      depth += 1
+      continue
+    }
+
+    if (char === closeChar) {
+      depth -= 1
+      if (depth === 0) {
+        return html.slice(start, index + 1)
+      }
+    }
+  }
+
+  return null
+}
+
+function parseScriptJson<T>(html: string, varName: string): T | null {
+  const text = extractScriptJsonByName(html, varName)
+  if (!text) return null
+  try {
+    return JSON.parse(text) as T
+  } catch {
+    return null
+  }
+}
+
+async function fetchKgPlaylistPage(page: number): Promise<{
+  list: any[]
+  total: number
+  limit: number
+}> {
+  const resp = await withRetry(() =>
+    httpRequest('https://m.kugou.com/plist/index', {
+      query: {
+        json: 'true',
+        page,
+      },
+    })
+  )
+  const list = Array.isArray(resp.data?.plist?.list?.info) ? resp.data.plist.list.info : []
+  const total = Number(resp.data?.plist?.list?.total || list.length)
+  const limit = Number(resp.data?.plist?.pagesize || SONG_LIMIT)
+  return {
+    list,
+    total,
+    limit: limit > 0 ? limit : SONG_LIMIT,
+  }
 }
 
 function mapKgTrack(item: any): Track {
@@ -201,110 +290,51 @@ async function fetchPlaylistInfoFromHtml(
   listId: string
 ): Promise<{ name?: string; coverUrl?: string; description?: string }> {
   const resp = await withRetry(() =>
-    httpRequest(`http://www2.kugou.kugou.com/yueku/v9/special/single/${listId}-5-9999.html`)
+    httpRequest('https://m.kugou.com/plist/list', {
+      query: { specialid: listId },
+    })
   )
   const html = String(resp.data || '')
   const result: { name?: string; coverUrl?: string; description?: string } = {}
 
-  const infoMatch = /global = \{[\s\S]+?name: "([^"]+)"[\s\S]+?pic: "([^"]+)"[\s\S]+?\};/.exec(html)
-  if (infoMatch) {
-    result.name = decodeName(infoMatch[1])
-    result.coverUrl = infoMatch[2]
-  }
-
-  const descPrefix = '<div class="pc_specail_text pc_singer_tab_content" id="specailIntroduceWrap">'
-  const descStart = html.indexOf(descPrefix)
-  if (descStart >= 0) {
-    const after = html.slice(descStart + descPrefix.length)
-    const descEnd = after.indexOf('</div>')
-    if (descEnd > 0) {
-      result.description = decodeName(after.slice(0, descEnd).trim())
-    }
+  const specialInfo = parseScriptJson<any>(
+    html,
+    'specialInfo'
+  )
+  if (specialInfo) {
+    result.name = decodeName(String(specialInfo.name || ''))
+    result.coverUrl = normalizeImageUrl(specialInfo.image || specialInfo.imgurl || '', 500)
+    result.description = decodeName(String(specialInfo.intro || ''))
   }
 
   return result
 }
 
 async function getTags(): Promise<{ tags: SongListTagInfo[]; hotTags: SongListTagInfo[] }> {
-  const resp = await withRetry(() =>
-    httpRequest('http://www2.kugou.kugou.com/yueku/v9/special/getSpecial', {
-      query: { is_smarty: 1 },
-    })
-  )
-
-  if (resp.data?.status !== 1) throw new Error('KG tags API failed')
-
-  const hotTags: SongListTagInfo[] = []
-  for (const tag of Object.values(resp.data?.data?.hotTag || {})) {
-    const id = normalizeTagField((tag as any)?.special_id)
-    const name = normalizeTagField((tag as any)?.special_name)
-    if (!id || !name) continue
-    hotTags.push({
-      id,
-      name,
-      source: 'kg',
-    })
+  // m.kugou 的歌单广场未提供稳定标签接口，这里返回安全兜底标签，
+  // 保证筛选 UI 可用且不会触发网络报错。
+  return {
+    tags: [],
+    hotTags: KG_FALLBACK_HOT_TAGS,
   }
-
-  const tags: SongListTagInfo[] = []
-  const groups = resp.data?.data?.tagids || {}
-  for (const groupName of Object.keys(groups)) {
-    for (const tag of groups[groupName]?.data || []) {
-      const id = normalizeTagField(tag.id)
-      const name = normalizeTagField(tag.name)
-      if (!id || !name) continue
-      tags.push({
-        id,
-        name,
-        parentId: normalizeTagField(tag.parent_id),
-        parentName: normalizeTagField(tag.pname || groupName),
-        source: 'kg',
-      })
-    }
-  }
-
-  return { tags, hotTags }
 }
 
 async function getList(sortId: string, tagId: string, page: number): Promise<SongListPage> {
-  const resp = await withRetry(() =>
-    httpRequest('http://www2.kugou.kugou.com/yueku/v9/special/getSpecial', {
-      query: {
-        is_ajax: 1,
-        cdn: 'cdn',
-        t: sortId || '5',
-        c: tagId || '',
-        p: page,
-      },
-    })
-  )
-
-  if (resp.data?.status !== 1) throw new Error('KG song list API failed')
-
-  const list = (resp.data?.special_db || []).map((item: any) => ({
+  const { list: rawList, total, limit } = await fetchKgPlaylistPage(page)
+  const list = rawList.map((item: any) => ({
     id: `id_${item.specialid}`,
     name: String(item.specialname || ''),
-    author: String(item.nickname || ''),
-    coverUrl: item.img || item.imgurl || undefined,
-    playCount: toPlayCount(item.total_play_count) || toPlayCount(item.play_count) || '0',
+    author: String(item.username || item.nickname || ''),
+    coverUrl: resolveKgCover(item),
+    playCount:
+      toPlayCount(item.play_count_text) ||
+      toPlayCount(item.playcount) ||
+      toPlayCount(item.collectcount) ||
+      '0',
     description: String(item.intro || ''),
     total: Number(item.songcount || 0),
     source: 'kg' as const,
   }))
-
-  const infoResp = await withRetry(() =>
-    httpRequest('http://www2.kugou.kugou.com/yueku/v9/special/getSpecial', {
-      query: {
-        is_smarty: 1,
-        cdn: 'cdn',
-        t: 5,
-        c: tagId || '',
-      },
-    })
-  )
-
-  const total = Number(infoResp.data?.data?.params?.total || list.length)
-  const limit = Number(infoResp.data?.data?.params?.pagesize || SONG_LIMIT)
 
   return {
     list,
@@ -320,48 +350,84 @@ async function getList(sortId: string, tagId: string, page: number): Promise<Son
 
 async function getListDetail(id: string, page: number): Promise<SongListDetail> {
   const listId = parseKgListId(id)
-
-  const resp = await requestKgMobileApi('/api/v3/special/song', {
-    version: 9108,
-    specialid: listId,
-    plat: 0,
-    pagesize: TOP_LIMIT,
-    page,
-    area_code: 1,
-  })
-
-  if (resp.data?.errcode !== 0) throw new Error('KG song list detail API failed')
-
-  const rawList = resp.data?.data?.info || []
-  const total = Number(resp.data?.data?.total || rawList.length)
-  const limit = Number(resp.data?.data?.pagesize || TOP_LIMIT)
   let htmlInfo: { name?: string; coverUrl?: string; description?: string } = {}
-  const remoteName = String(resp.data?.data?.specialname || '')
-  const remoteCover = String(resp.data?.data?.imgurl || '')
-  const remoteDesc = String(resp.data?.data?.intro || '')
-  if (!remoteName || !remoteCover || !remoteDesc) {
-    try {
-      htmlInfo = await fetchPlaylistInfoFromHtml(listId)
-    } catch {
-      htmlInfo = {}
-    }
+  try {
+    htmlInfo = await fetchPlaylistInfoFromHtml(listId)
+  } catch {
+    htmlInfo = {}
   }
 
-  return {
-    id: listId,
-    source: 'kg',
-    list: rawList.map((item: any) => mapKgTrack(item)),
-    total,
-    page,
-    limit,
-    maxPage: Math.max(1, Math.ceil(total / limit)),
-    info: {
-      name: remoteName || htmlInfo.name || '',
-      coverUrl: remoteCover || htmlInfo.coverUrl || '',
-      description: remoteDesc || htmlInfo.description || '',
-      author: String(resp.data?.data?.nickname || ''),
-      playCount: toPlayCount(resp.data?.data?.playcount) || '0',
-    },
+  try {
+    const resp = await requestKgMobileApi('/api/v3/special/song', {
+      version: 9108,
+      specialid: listId,
+      plat: 0,
+      pagesize: TOP_LIMIT,
+      page,
+      area_code: 1,
+    })
+
+    if (resp.data?.errcode !== 0) throw new Error('KG song list detail API failed')
+
+    const rawList = resp.data?.data?.info || []
+    const total = Number(resp.data?.data?.total || rawList.length)
+    const limit = Number(resp.data?.data?.pagesize || TOP_LIMIT)
+    const remoteName = String(resp.data?.data?.specialname || '')
+    const remoteCover = String(resp.data?.data?.imgurl || '')
+    const remoteDesc = String(resp.data?.data?.intro || '')
+
+    return {
+      id: listId,
+      source: 'kg',
+      list: rawList.map((item: any) => mapKgTrack(item)),
+      total,
+      page,
+      limit,
+      maxPage: Math.max(1, Math.ceil(total / limit)),
+      info: {
+        name: remoteName || htmlInfo.name || '',
+        coverUrl: normalizeImageUrl(remoteCover || htmlInfo.coverUrl || '', 500) || '',
+        description: remoteDesc || htmlInfo.description || '',
+        author: String(resp.data?.data?.nickname || ''),
+        playCount: toPlayCount(resp.data?.data?.playcount) || '0',
+      },
+    }
+  } catch (mobileError) {
+    const detailResp = await withRetry(() =>
+      httpRequest('https://m.kugou.com/plist/list', {
+        query: { specialid: listId },
+      })
+    )
+    const html = String(detailResp.data || '')
+    const embeddedList = parseScriptJson<any[]>(html, 'data') || []
+    const specialInfo = parseScriptJson<any>(html, 'specialInfo') || {}
+    if (!embeddedList.length) throw mobileError
+
+    const allTracks = embeddedList.map((item) => mapKgTrack(item))
+    const limit = TOP_LIMIT
+    const total = allTracks.length
+    const start = Math.max(0, (page - 1) * limit)
+    const list = allTracks.slice(start, start + limit)
+    return {
+      id: listId,
+      source: 'kg',
+      list,
+      total,
+      page,
+      limit,
+      maxPage: Math.max(1, Math.ceil(total / limit)),
+      info: {
+        name: decodeName(String(specialInfo.name || htmlInfo.name || '')),
+        coverUrl:
+          normalizeImageUrl(
+            specialInfo.image || specialInfo.imgurl || htmlInfo.coverUrl || '',
+            500
+          ) || '',
+        description: decodeName(String(specialInfo.intro || htmlInfo.description || '')),
+        author: decodeName(String(specialInfo.nickname || '')),
+        playCount: toPlayCount(specialInfo.playcount) || toPlayCount(specialInfo.play_count) || '',
+      },
+    }
   }
 }
 
@@ -390,7 +456,7 @@ function parseDynamicBoards(rawList: any[]): LeaderboardBoardList['list'] {
       id: `kg__${bangId}`,
       name,
       bangId,
-      coverUrl: rawCover ? rawCover.replace('{size}', '500') : undefined,
+      coverUrl: normalizeImageUrl(rawCover, 500),
       updateFrequency: rawUpdate || undefined,
       source: 'kg',
       playTimes: Number(item?.play_times || 0),
