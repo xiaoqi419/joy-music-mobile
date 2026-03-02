@@ -1,326 +1,164 @@
-# Joy Music Mobile - iOS Edition with Expo
+# 悦音（YueYin）
 
-一款基于 React Native + Expo 开发的 iOS 音乐播放器，参考 LX Music 的架构和功能特性。
+基于 React Native + Expo 的多源音乐播放器项目，当前以 iOS 体验为主进行持续迭代。
 
-**重要**: 使用 Expo，您可以在 **Windows 上完全开发 iOS 应用**，无需 macOS！
+## 项目状态
 
-## 项目概览
+- 当前版本：`1.0.0`
+- 代码仓库名：`joy-music-mobile`
+- 维护重点：播放稳定性、音源能力、UI 体验重构、自动化发布链路
 
-Joy Music Mobile 是一个专门为 iOS 平台设计和优化的现代音乐播放应用，具有以下特点：
+## 已完成功能清单（按代码实现盘点）
 
-- ✅ React Native + Expo 跨平台开发（无需 Xcode）
-- ✅ iOS 原生特性集成
-- ✅ Redux 状态管理
-- ✅ TypeScript 类型安全
-- ✅ 模块化架构设计
-- ✅ 离线播放支持
-- ✅ Expo Go 应用快速预览
+### 1. 播放与控制
 
-## 📱 快速开始（3 步）
+- 全局播放器内核初始化与状态同步（Redux 联动）
+- MiniPlayer：封面、歌曲信息、实时歌词、进度拖动、播放暂停
+- 全屏 Now Playing：
+  - 封面/歌词双视图切换
+  - 旋转封面动效
+  - 进度拖动、上一首/下一首、播放暂停
+  - 播放模式切换（顺序一次/列表循环/单曲循环/随机）
+- 播放队列管理：
+  - 下一首播放
+  - 队列列表查看与点击切播
+  - 队列单曲移除
+  - 一键清空队列
 
-### 1️⃣ 进入项目目录
+### 2. 歌词与评论
 
-```bash
-cd "e:\project\Joy Music\JoyMusicMobile"
-```
+- 多平台歌词拉取与解析（KW/WY/TX/KG/MG）
+- LRC 解析、翻译歌词合并、歌词缓存
+- 歌曲评论：
+  - 网易云评论获取
+  - 下拉刷新
+  - 分页加载更多
+  - 失败回退与缓存
 
-### 2️⃣ 安装依赖
+### 3. 发现 / 搜索 / 榜单 / 详情
+
+- 发现页：
+  - 推荐歌单加载
+  - 平台切换
+  - 更多筛选（排序/标签/平台）
+  - 筛选状态持久化
+- 排行榜页：
+  - 多平台榜单
+  - 手动刷新
+  - 更新时间显示
+- 搜索页：
+  - 多平台搜索（KW/WY/TX/KG）
+  - 热搜词
+  - 分页加载
+  - 竞态保护与去重
+- 详情页（歌单/榜单）：
+  - 歌曲列表
+  - 播放全部
+  - 收藏导入到自定义歌单
+
+### 4. 歌单与本地管理
+
+- 自定义歌单新建/删除/更新
+- 从播放队列导入歌单
+- 本地 JSON 导入（单歌单/多歌单/曲目数组）
+- 网络导入（支持 `wy/tx/kw/kg/mg`）
+- 歌单详情内搜索、排序、分批加载
+- 歌单导出并系统分享
+
+### 5. 音源、音质、缓存、更新
+
+- 自定义音源管理：
+  - 手动添加
+  - URL 导入
+  - 本地 JS 导入
+  - 启用/禁用/编辑/删除
+- 音质偏好与播放降级重试
+- 本地音频缓存与缓存统计
+- GitHub Release 更新检查：
+  - 版本比较
+  - release notes 提示
+  - 更新页跳转
+
+### 6. 工程与发布
+
+- TypeScript + Redux + Expo 架构
+- iOS unsigned IPA 构建工作流
+- 自动版本发布链路：
+  - 同步版本文件
+  - 自动打 tag
+  - 自动触发 IPA 构建
+  - 自动上传 Release 资产
+- 已提供版本号规范文档与发版教程文档
+
+## 待办列表（新增功能）
+
+> 当前优先级：**UI 全量重构**
+
+### P0（当前主线）
+
+- 全局 UI 重构（信息层级、视觉一致性、组件统一）
+- 发现/搜索/播放页的交互细节重构（动效、手势反馈、状态反馈）
+- 列表卡片与详情页视觉系统统一（间距、字体、配色、层级）
+
+### P1（功能补齐）
+
+- 评论能力扩展到非 WY 平台
+- 歌单/榜单详情页增加分页加载（而非仅首屏）
+- 发现页更多筛选结果支持分页/无限滚动
+- 搜索建议词 UI 接入（`getSuggestions`）
+
+### P2（体验与工程）
+
+- 缓存治理完善：容量上限、淘汰策略、更多缓存类型可视化管理
+- 更新检查策略完善：自动检查/静默检查
+- 测试覆盖扩展（歌单导入、缓存链路、更新检查）
+- 发布工作流接入质量门禁（lint/test）
+
+## 快速开始
 
 ```bash
 npm install
-npm install -g expo-cli  # 全局安装 Expo CLI
+npm run start
 ```
 
-### 3️⃣ 启动应用
+常用命令：
 
 ```bash
-npm start
-
-# 然后选择运行方式：
-# - 'w' - 在网页浏览器中打开
-# - 'i' - 在 iOS 模拟器中打开 (需要 macOS)
-# - 'a' - 在 Android 模拟器中打开
-# - 扫描二维码 - 用 iPhone 的 Expo Go 应用扫描
-```
-
-## 📲 在真实 iPhone 上运行（推荐！）
-
-### 使用 Expo Go（最简单）
-
-1. 在 iPhone 上从 App Store 安装 **[Expo Go](https://apps.apple.com/app/expo-go/id982107779)**
-2. 运行 `npm start`
-3. 用 iPhone 的相机扫描二维码
-4. 应用自动启动！
-
-### 无需本地网络（使用 Tunnel）
-
-```bash
-npm run tunnel
-```
-
-然后扫描二维码即可。
-
-## 🛠️ 常用命令
-
-```bash
-# 启动开发服务器
-npm start
-
-# 在网页浏览器中运行
+npm run ios
+npm run android
 npm run web
-
-# 代码检查
 npm run lint
-
-# 修复代码格式问题
-npm run lint:fix
-
-# 运行测试
-npm test
+npm run test
 ```
 
-## 📦 iOS 自签发包（Beta 通道）
+## 发布与版本
 
-当前仓库已支持 **无 Mac 的 iOS unsigned IPA 云构建**，适用于自签分发：
+### 自动发布（推荐）
 
-- 工作流文件：
-  - `.github/workflows/release-tag.yml`（自动改版本 + 提交 + 打 tag）
-  - `.github/workflows/ios-unsigned-ipa.yml`（按 tag 自动发 IPA）
-- 推荐触发链路（自动）：
-  1. 手动触发 `Release Tag`，输入版本号（如 `1.0.1`）
-  2. 工作流自动创建 `v1.0.1` tag
-  3. `iOS Unsigned IPA` 被 tag 触发并构建产物
-  4. IPA 自动上传到对应 GitHub Release
-- 兼容触发方式：
-  - 手动触发 `iOS Unsigned IPA`
-  - 直接推送 tag：`v*` 或 `ios-v*`
-- 产物命名：`JoyMusicMobile-<version>-unsigned.ipa`
-- 产物位置：GitHub Actions Artifacts + GitHub Release Assets
+1. 在 GitHub Actions 触发 `Release Tag`
+2. 输入版本号（例如 `1.0.1` 或 `1.0.1-beta.1`）
+3. 自动创建 `v<version>` tag
+4. 自动触发 `iOS Unsigned IPA` 构建并上传 Release 资产
 
-> 该通道属于“安装包分发”，不是 App Store/TestFlight 正式发版。
-
-详细安装与分发流程见：[`docs/ios-self-sign.md`](./docs/ios-self-sign.md)
-
-## ⚠️ iOS 分发风险提示（自签）
-
-1. 用户需自行重签安装（Sideloadly/AltStore）；
-2. 免费 Apple ID 证书通常有效期短（常见 7 天）；
-3. 安装与证书信任流程门槛较高，不适合非技术用户大规模分发；
-4. 如需“公开长期发版”，需加入 Apple Developer Program 并走 TestFlight/App Store。
-
-## 📁 项目结构
-
-```
-joy-music-mobile/
-├── src/
-│   ├── app.ts                 # 应用入口
-│   ├── components/            # UI 组件库
-│   ├── config/                # 配置文件
-│   ├── core/                  # 核心业务逻辑
-│   │   ├── music/             # 音乐管理
-│   │   ├── player/            # 播放器控制
-│   │   └── search/            # 搜索功能
-│   ├── event/                 # 事件系统
-│   ├── lang/                  # 国际化
-│   ├── navigation/            # 导航管理
-│   ├── plugins/               # 插件系统
-│   ├── resources/             # 资源文件
-│   ├── screens/               # 页面组件
-│   │   └── Home/              # 主页面
-│   ├── store/                 # Redux 存储
-│   ├── theme/                 # 主题管理
-│   ├── types/                 # TypeScript 类型
-│   └── utils/                 # 工具函数
-├── assets/                    # 应用图标和启动屏幕
-├── app.json                   # Expo 配置
-├── App.tsx                    # 应用主组件
-├── index.js                   # 应用入口
-├── package.json               # 依赖配置
-├── README.md                  # 本文档
-├── QUICK_START.md             # 快速开始指南
-├── EXPO_SETUP.md              # Expo 迁移指南
-└── STRUCTURE.md               # 详细结构说明
-```
-
-## 🔧 技术栈
-
-### 核心技术
-
-- **React** 18.2.0 - UI 框架
-- **React Native** 0.73.11 - 移动应用框架
-- **Expo** 51.0.0 - React Native 开发平台
-- **Redux** 5.0.0 - 状态管理
-- **TypeScript** 5.8.3 - 类型检查
-
-### 主要依赖
-
-- **expo-av** - 音频/视频播放
-- **react-native-safe-area-context** - 安全区域处理
-- **@react-native-async-storage/async-storage** - 本地存储
-- **@react-native-community/slider** - 进度条组件
-
-### 开发工具
-
-- **ESLint** - 代码检查
-- **Prettier** - 代码格式化
-- **Jest** - 单元测试
-- **Babel** - 代码转译
-
-## ✨ 项目特性
-
-### 已实现功能
-
-- 🎵 基础播放器界面
-- 📱 响应式设计
-- 🌙 深色模式支持
-- 📚 本地音乐库管理
-- 🎼 播放列表功能
-- 🚀 Expo 快速预览
-
-### 开发中功能
-
-- 🔍 音乐搜索和发现
-- ☁️ 云同步功能
-- 🎨 主题自定义
-- 📱 高级播放控制
-- 🎙️ 歌词显示
-
-### 计划功能
-
-- 🎵 流媒体服务集成
-- 👤 用户账户系统
-- 📊 播放统计分析
-- 🎧 均衡器和音效
-
-## 🎯 Expo 的优势
-
-| 优势                | 说明                                       |
-| ------------------- | ------------------------------------------ |
-| 📱 **Windows 开发** | 无需 macOS，直接在 Windows 上开发 iOS 应用 |
-| 🚀 **快速部署**     | 一键部署到 Expo Go，实时查看结果           |
-| ♨️ **热重载**       | 修改代码立即在设备上看到变化               |
-| 🔧 **无需配置**     | 无需处理复杂的原生设置                     |
-| ☁️ **云构建**       | 通过 EAS 云服务生成 IPA 文件               |
-| 🌐 **跨平台**       | 同代码库支持 iOS、Android、Web             |
-
-## 📖 文档
-
-- **[QUICK_START.md](./QUICK_START.md)** - 快速开始指南
-- **[EXPO_SETUP.md](./EXPO_SETUP.md)** - Expo 迁移和配置指南
-- **[STRUCTURE.md](./STRUCTURE.md)** - 项目结构详解
-- **[PROJECT_SUMMARY.md](./PROJECT_SUMMARY.md)** - 项目创建总结
-- **[docs/ios-self-sign.md](./docs/ios-self-sign.md)** - iOS 自签分发与安装说明
-- **[docs/versioning.md](./docs/versioning.md)** - 版本号标识规范（Major/Minor/Patch）
-
-## 🤝 开发指南
-
-### 添加新功能
-
-1. **创建页面组件**
-
-   ```bash
-   mkdir src/screens/NewScreen
-   touch src/screens/NewScreen/index.tsx
-   ```
-
-2. **添加 Redux 状态**
-
-   ```typescript
-   // src/store/reducers/newState.ts
-   export default function newStateReducer(state = initialState, action) {
-     // reducer logic
-   }
-   ```
-
-3. **连接数据流**
-
-   ```typescript
-   import { useSelector, useDispatch } from 'react-redux';
-
-   export function MyComponent() {
-     const state = useSelector(state => state.newState);
-     const dispatch = useDispatch();
-     // component logic
-   }
-   ```
-
-### 调试技巧
-
-1. **查看日志**
-
-   ```bash
-   npm start  # 所有日志显示在终端
-   ```
-
-2. **使用开发菜单**
-
-   - 在 Expo Go 中摇动设备打开菜单
-   - 选择 "Open Debugger" 使用 Chrome DevTools
-
-3. **Redux DevTools**
-   - 在开发菜单中启用 Redux DevTools
-   - 实时查看状态变化
-
-## 🐛 常见问题
-
-### Q: 为什么选择 Expo？
-
-A: Expo 让您无需 Xcode 或 macOS 就能开发 iOS 应用。您可以在 Windows 上开发，通过 Expo Go 在真实 iPhone 上测试。
-
-### Q: 可以发布到 App Store 吗？
-
-A: 可以，但前提是加入 Apple Developer Program。  
-当前仓库默认提供的是 **iOS 自签 Beta 分发**（unsigned IPA + 用户自签安装），不等价于 TestFlight/App Store 正式发布。
-
-### Q: 支持原生模块吗？
-
-A: Expo 有大部分常用的原生 API。如需使用未支持的模块，可使用 Expo Modules 或 expo-modules-core。
-
-### Q: 性能如何？
-
-A: Expo 基于 React Native，性能接近原生应用。对于大多数应用足够。
-
-## 📚 学习资源
-
-- [Expo 官方文档](https://docs.expo.dev/)
-- [React Native 文档](https://reactnative.dev/)
-- [Redux 官方教程](https://redux.js.org/)
-- [TypeScript 官方文档](https://www.typescriptlang.org/)
-
-## 🚀 下一步
-
-1. 运行 `npm install` 安装依赖
-2. 运行 `npm start` 启动开发服务器
-3. 在手机上安装 Expo Go
-4. 扫描二维码启动应用
-5. 开始修改代码！
-
-## 💡 Tips
-
-- 使用 Expo Go 快速原型和测试
-- 对于生产版本，使用 EAS Build 云构建
-- 定期更新 Expo 和 React Native 版本
-- 参考 [QUICK_START.md](./QUICK_START.md) 了解更多命令
-
-## 📄 许可证
-
-本项目采用 MIT 许可证。详见 [LICENSE](./LICENSE) 文件。
-
-## 🎵 参考项目
-
-本项目参考了以下开源项目的架构：
-
-- [LX Music Mobile](https://github.com/lyswhut/lx-music-mobile) - 音乐应用架构参考
-
-## 🎉 开始开发
+### 版本同步命令
 
 ```bash
-# 一键启动！
-npm install && npm start
+npm run release:version -- 1.0.1
 ```
 
----
+会同步：
 
-**祝您编码愉快！** 🎵🚀
+- `package.json -> version`
+- `app.json -> expo.version`
+- `app.json -> expo.ios.buildNumber`
+- `src/config/index.ts -> appConfig.version`
 
-现在您可以在 **Windows 上完全开发 iOS 应用** 了！
+## 文档
+
+- [iOS 自签发包发布教程](./docs/ios-self-sign.md)
+- [版本号标识规范](./docs/versioning.md)
+
+## 说明
+
+- 当前分发链路为 **unsigned IPA 自签分发**，不是 App Store/TestFlight 正式发布链路。
+- 如需正式上架，请接入 Apple Developer Program 的签名与发版流程。

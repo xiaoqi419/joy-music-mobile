@@ -5,6 +5,10 @@
  */
 
 import { Track } from '../../types/music'
+import {
+  ImportedMusicSource,
+  loadMusicSourceSettings,
+} from '../config/musicSource'
 import { LyricLine, parseLrc, mergeLyricTranslation } from './parser'
 import { wyRequest } from '../discover/wyCrypto'
 
@@ -35,6 +39,45 @@ const MG_TEXT_HEADERS = {
   channel: '0146921',
 }
 const BASE64_TABLE = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/='
+
+function normalizeApiBaseUrl(apiUrl: string): string {
+  const normalized = String(apiUrl || '').trim().replace(/\/+$/, '')
+  return normalized.replace(/\/music\/(?:url|lyric)$/i, '')
+}
+
+function orderedImportedSources(
+  selectedSourceId: string,
+  importedSources: ImportedMusicSource[]
+): ImportedMusicSource[] {
+  const enabled = importedSources.filter((item) => item.enabled && item.apiUrl)
+  if (!enabled.length) return []
+
+  const selected = selectedSourceId
+    ? enabled.find((item) => item.id === selectedSourceId)
+    : enabled[0]
+  if (!selected) return enabled
+  return [selected, ...enabled.filter((item) => item.id !== selected.id)]
+}
+
+function extractLyricPayload(
+  payload: any
+): { rawLrc: string; rawTlrc: string } {
+  const rawLrc = String(
+    payload?.data?.lyric ||
+      payload?.data?.lrc ||
+      payload?.lyric ||
+      payload?.lrc ||
+      ''
+  )
+  const rawTlrc = String(
+    payload?.data?.trans ||
+      payload?.data?.tlyric ||
+      payload?.trans ||
+      payload?.tlyric ||
+      ''
+  )
+  return { rawLrc, rawTlrc }
+}
 
 function buildLyricData(rawLrc: string, rawTlrc = ''): LyricData {
   if (!rawLrc) return EMPTY_LYRIC
@@ -96,6 +139,70 @@ async function requestText(url: string, init?: RequestInit): Promise<string> {
   const resp = await fetch(url, init)
   if (!resp.ok) throw new Error(`HTTP ${resp.status}: ${url}`)
   return resp.text()
+}
+
+async function fetchLyricFromImportedSource(
+  source: string,
+  songmid: string
+): Promise<LyricData> {
+  const settings = await loadMusicSourceSettings()
+  const candidates = orderedImportedSources(
+    settings.selectedSourceId,
+    settings.importedSources
+  )
+  if (!candidates.length) return EMPTY_LYRIC
+
+  for (const sourceConfig of candidates) {
+    try {
+      const requestUrl = `${normalizeApiBaseUrl(sourceConfig.apiUrl)}/music/lyric`
+      const headers: Record<string, string> = {
+        'Content-Type': 'application/json',
+      }
+      if (sourceConfig.apiKey) {
+        headers['X-Api-Key'] = sourceConfig.apiKey
+      }
+
+      const payload = await requestJson<any>(requestUrl, {
+        method: 'POST',
+        headers,
+        body: JSON.stringify({
+          source,
+          musicId: songmid,
+        }),
+      })
+
+      const code = Number(payload?.code)
+      if (Number.isFinite(code) && code !== 200) {
+        continue
+      }
+
+      const { rawLrc, rawTlrc } = extractLyricPayload(payload)
+      const lyricData = buildLyricData(rawLrc, rawTlrc)
+      if (lyricData.lines.length) {
+        console.log(
+          `[LyricFetcher] Imported source lyric hit: ${sourceConfig.name || sourceConfig.id} (${source}:${songmid})`
+        )
+        return lyricData
+      }
+    } catch {
+      // ignore and try next source
+    }
+  }
+
+  return EMPTY_LYRIC
+}
+
+async function withImportedSourceFallback(
+  source: string,
+  songmid: string,
+  primaryTask: () => Promise<LyricData>
+): Promise<LyricData> {
+  const primary = await primaryTask()
+  if (primary.lines.length) return primary
+  console.warn(
+    `[LyricFetcher] Built-in lyric empty, trying imported sources (${source}:${songmid})`
+  )
+  return fetchLyricFromImportedSource(source, songmid)
 }
 
 /**
@@ -274,15 +381,25 @@ export async function fetchLyric(track: Track): Promise<LyricData> {
   try {
     switch (source) {
       case 'kw':
-        return await fetchKwLyric(songmid)
+        return await withImportedSourceFallback(source, songmid, () =>
+          fetchKwLyric(songmid)
+        )
       case 'wy':
-        return await fetchWyLyric(songmid)
+        return await withImportedSourceFallback(source, songmid, () =>
+          fetchWyLyric(songmid)
+        )
       case 'tx':
-        return await fetchTxLyric(songmid)
+        return await withImportedSourceFallback(source, songmid, () =>
+          fetchTxLyric(songmid)
+        )
       case 'kg':
-        return await fetchKgLyric(track)
+        return await withImportedSourceFallback(source, songmid, () =>
+          fetchKgLyric(track)
+        )
       case 'mg':
-        return await fetchMgLyric(track)
+        return await withImportedSourceFallback(source, songmid, () =>
+          fetchMgLyric(track)
+        )
       default:
         return EMPTY_LYRIC
     }

@@ -100,7 +100,7 @@ function parseSongListId(id: string): string {
 
 async function getSongListTags(): Promise<{ tags: SongListTagInfo[]; hotTags: SongListTagInfo[] }> {
   const tagsResp = await withRetry(() =>
-    httpRequest('http://wapi.kuwo.cn/api/pc/classify/playlist/getTagList', {
+    httpRequest('https://wapi.kuwo.cn/api/pc/classify/playlist/getTagList', {
       query: {
         cmd: 'rcm_keyword_playlist',
         user: 0,
@@ -113,7 +113,7 @@ async function getSongListTags(): Promise<{ tags: SongListTagInfo[]; hotTags: So
     })
   )
   const hotResp = await withRetry(() =>
-    httpRequest('http://wapi.kuwo.cn/api/pc/classify/playlist/getRcmTagList', {
+    httpRequest('https://wapi.kuwo.cn/api/pc/classify/playlist/getRcmTagList', {
       query: { loginUid: 0, loginSid: 0, appUid: 76039576 },
     })
   )
@@ -142,7 +142,7 @@ async function getSongListTags(): Promise<{ tags: SongListTagInfo[]; hotTags: So
 }
 
 async function getSongList(sortId: string, tagId: string, page: number): Promise<SongListPage> {
-  let url = 'http://wapi.kuwo.cn/api/pc/classify/playlist/getRcmPlayList'
+  let url = 'https://wapi.kuwo.cn/api/pc/classify/playlist/getRcmPlayList'
   let query: Record<string, string | number> = {
     loginUid: 0,
     loginSid: 0,
@@ -155,7 +155,7 @@ async function getSongList(sortId: string, tagId: string, page: number): Promise
   if (tagId) {
     const [id, digest] = tagId.split('-')
     if (digest === '10000') {
-      url = 'http://wapi.kuwo.cn/api/pc/classify/playlist/getTagPlayList'
+      url = 'https://wapi.kuwo.cn/api/pc/classify/playlist/getTagPlayList'
       query = { ...query, id }
     }
   }
@@ -190,7 +190,7 @@ async function getSongList(sortId: string, tagId: string, page: number): Promise
 async function getSongListDetail(id: string, page: number): Promise<SongListDetail> {
   const parsedId = parseSongListId(id)
   const resp = await withRetry(() =>
-    httpRequest('http://nplserver.kuwo.cn/pl.svc', {
+    httpRequest('https://nplserver.kuwo.cn/pl.svc', {
       query: {
         op: 'getlistinfo',
         pid: parsedId,
@@ -290,7 +290,7 @@ function parseDynamicBoards(rawList: any[]): LeaderboardBoardList['list'] {
 async function getBoards(): Promise<LeaderboardBoardList> {
   try {
     const resp = await withRetry(() =>
-      httpRequest('http://qukudata.kuwo.cn/q.k', {
+      httpRequest('https://qukudata.kuwo.cn/q.k', {
         query: {
           op: 'query',
           cont: 'tree',
@@ -323,7 +323,7 @@ async function getBoards(): Promise<LeaderboardBoardList> {
 async function getBoardList(boardId: string, page: number): Promise<LeaderboardDetail> {
   const id = boardId.replace(/^kw__/, '')
   const resp = await withRetry(() =>
-    httpRequest('http://kbangserver.kuwo.cn/ksong.s', {
+    httpRequest('https://kbangserver.kuwo.cn/ksong.s', {
       query: {
         from: 'pc',
         fmt: 'json',

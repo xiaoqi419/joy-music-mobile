@@ -26,6 +26,10 @@ const STATIC_TOP_LIST = [
   { id: 'kg__23784', name: 'Network Hits', bangId: '23784' },
   { id: 'kg__24971', name: 'DJ Hot', bangId: '24971' },
 ]
+const KG_MOBILE_API_HOSTS = [
+  'http://mobilecdngz.kugou.com',
+  'http://mobilecdnbj.kugou.com',
+]
 
 function trimDecimal(value: number): string {
   if (!Number.isFinite(value)) return '0'
@@ -125,6 +129,21 @@ function parseKgListId(input: string): string {
   const m = /special\/single\/(\d+)/.exec(id)
   if (m) return m[1]
   return id
+}
+
+async function requestKgMobileApi<T = any>(
+  path: string,
+  query: Record<string, string | number | boolean | null | undefined>
+) {
+  let lastError: unknown
+  for (const host of KG_MOBILE_API_HOSTS) {
+    try {
+      return await withRetry(() => httpRequest<T>(`${host}${path}`, { query }))
+    } catch (error) {
+      lastError = error
+    }
+  }
+  throw lastError || new Error(`KG mobile API failed: ${path}`)
 }
 
 function mapKgTrack(item: any): Track {
@@ -302,18 +321,14 @@ async function getList(sortId: string, tagId: string, page: number): Promise<Son
 async function getListDetail(id: string, page: number): Promise<SongListDetail> {
   const listId = parseKgListId(id)
 
-  const resp = await withRetry(() =>
-    httpRequest('http://mobilecdnbj.kugou.com/api/v3/special/song', {
-      query: {
-        version: 9108,
-        specialid: listId,
-        plat: 0,
-        pagesize: TOP_LIMIT,
-        page,
-        area_code: 1,
-      },
-    })
-  )
+  const resp = await requestKgMobileApi('/api/v3/special/song', {
+    version: 9108,
+    specialid: listId,
+    plat: 0,
+    pagesize: TOP_LIMIT,
+    page,
+    area_code: 1,
+  })
 
   if (resp.data?.errcode !== 0) throw new Error('KG song list detail API failed')
 
@@ -402,19 +417,15 @@ function parseDynamicBoards(rawList: any[]): LeaderboardBoardList['list'] {
 
 async function getBoards(): Promise<LeaderboardBoardList> {
   try {
-    const resp = await withRetry(() =>
-      httpRequest('http://mobilecdnbj.kugou.com/api/v5/rank/list', {
-        query: {
-          version: 9108,
-          plat: 0,
-          showtype: 2,
-          parentid: 0,
-          apiver: 6,
-          area_code: 1,
-          withsong: 1,
-        },
-      })
-    )
+    const resp = await requestKgMobileApi('/api/v5/rank/list', {
+      version: 9108,
+      plat: 0,
+      showtype: 2,
+      parentid: 0,
+      apiver: 6,
+      area_code: 1,
+      withsong: 1,
+    })
     if (resp.data?.errcode !== 0) {
       throw new Error('KG dynamic leaderboard API failed')
     }
@@ -440,20 +451,16 @@ async function getBoards(): Promise<LeaderboardBoardList> {
 
 async function getBoardList(boardId: string, page: number): Promise<LeaderboardDetail> {
   const bangId = boardId.replace(/^kg__/, '')
-  const resp = await withRetry(() =>
-    httpRequest('http://mobilecdnbj.kugou.com/api/v3/rank/song', {
-      query: {
-        version: 9108,
-        ranktype: 1,
-        plat: 0,
-        pagesize: TOP_LIMIT,
-        area_code: 1,
-        page,
-        rankid: bangId,
-        with_res_tag: 0,
-      },
-    })
-  )
+  const resp = await requestKgMobileApi('/api/v3/rank/song', {
+    version: 9108,
+    ranktype: 1,
+    plat: 0,
+    pagesize: TOP_LIMIT,
+    area_code: 1,
+    page,
+    rankid: bangId,
+    with_res_tag: 0,
+  })
 
   if (resp.data?.errcode !== 0) throw new Error('KG leaderboard API failed')
 

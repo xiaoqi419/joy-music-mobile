@@ -175,7 +175,7 @@ const normalizeKgCover = (value: unknown): string | undefined => {
 const getKwCoverBySongmid = async (songmid: string): Promise<string | undefined> => {
   try {
     const resp = await withRetry(() =>
-      httpRequest('http://artistpicserver.kuwo.cn/pic.web', {
+      httpRequest('https://artistpicserver.kuwo.cn/pic.web', {
         query: {
           corp: 'kuwo',
           type: 'rid_pic',
@@ -384,7 +384,7 @@ function mapKgTrack(item: any): Track | null {
 
 async function searchKw(query: string, page: number, limit: number): Promise<SearchTracksPageResult> {
   const resp = await withRetry(() =>
-    httpRequest('http://search.kuwo.cn/r.s', {
+    httpRequest('https://search.kuwo.cn/r.s', {
       query: {
         client: 'kt',
         all: query,
@@ -660,7 +660,7 @@ async function searchKg(query: string, page: number, limit: number): Promise<Sea
 
 async function getKwHotSearch(limit: number): Promise<string[]> {
   const resp = await withRetry(() =>
-    httpRequest('http://hotword.kuwo.cn/hotword.s', {
+    httpRequest('https://hotword.kuwo.cn/hotword.s', {
       query: {
         prod: 'kwplayer_ar_9.3.0.1',
         corp: 'kuwo',

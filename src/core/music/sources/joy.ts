@@ -36,9 +36,11 @@ interface JoyMusicInfo {
 }
 
 interface MusicUrlResponse {
-  code: number
+  code?: number
   url?: string
   message?: string
+  data?: any
+  [key: string]: any
 }
 
 interface JoyRuntimeConfig {
@@ -99,22 +101,59 @@ const httpFetch = async(
   }
 
   let responseBody = ''
+  let responseStatus: number | null = null
+  let responseContentType = ''
   try {
     const response = await fetch(url, fetchOptions)
+    responseStatus = response.status
+    responseContentType = response.headers.get('content-type') || ''
     responseBody = await response.text()
   } catch (error) {
     throw new Error(`Network error: ${error instanceof Error ? error.message : 'Unknown error'}`)
   }
 
+  const trimmedBody = responseBody.trim()
+  if (/^https?:\/\//i.test(trimmedBody)) {
+    return {
+      code: 200,
+      url: trimmedBody,
+    }
+  }
+
   try {
-    return JSON.parse(responseBody)
+    return JSON.parse(trimmedBody || '{}')
   } catch {
-    throw new Error('Source API returned non-JSON response')
+    const bodyPreview = trimmedBody
+      .replace(/\s+/g, ' ')
+      .slice(0, 180)
+    throw new Error(
+      `Source API returned non-JSON response (status=${responseStatus ?? 'unknown'}, contentType=${responseContentType || 'unknown'}, body=${bodyPreview || '<empty>'})`
+    )
   }
 }
 
 function normalizeApiBaseUrl(apiUrl: string): string {
-  return apiUrl.replace(/\/+$/, '')
+  const normalized = String(apiUrl || '').trim().replace(/\/+$/, '')
+  return normalized.replace(/\/music\/url$/i, '')
+}
+
+function resolveResponseUrl(response: MusicUrlResponse): string {
+  const candidates: unknown[] = [
+    response.url,
+    response.data?.url,
+    response.data?.musicUrl,
+    response.data?.data?.url,
+    response.data?.data?.musicUrl,
+  ]
+
+  for (const candidate of candidates) {
+    const url = String(candidate || '').trim()
+    if (/^https?:\/\//i.test(url)) {
+      return url
+    }
+  }
+
+  return ''
 }
 
 function getSongId(musicInfo: JoyMusicInfo): string {
@@ -213,16 +252,21 @@ const requestMusicUrl = async(
     },
   })
 
-  if (!response || typeof response.code !== 'number') {
+  const resolvedUrl = resolveResponseUrl(response)
+  const responseCode = typeof response?.code === 'number'
+    ? response.code
+    : (resolvedUrl ? 200 : NaN)
+
+  if (!response || !Number.isFinite(responseCode)) {
     throw new Error('Unknown API error')
   }
 
-  switch (response.code) {
+  switch (responseCode) {
     case 200:
-      if (!response.url) {
+      if (!resolvedUrl) {
         throw new Error('No URL returned')
       }
-      return response.url
+      return resolvedUrl
     case 403:
       throw new Error('API key invalid or expired')
     case 429:

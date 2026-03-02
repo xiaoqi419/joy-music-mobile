@@ -9,15 +9,15 @@ const SONG_LIST_KEY = '@joy_discover_songlist_setting'
 const LEADERBOARD_KEY = '@joy_discover_leaderboard_setting'
 
 export const DEFAULT_SONGLIST_SETTING: SongListSetting = {
-  source: 'kw',
-  sortId: 'new',
+  source: 'tx',
+  sortId: 'hot',
   tagId: '',
   tagName: '',
 }
 
 export const DEFAULT_LEADERBOARD_SETTING: LeaderboardSetting = {
-  source: 'kw',
-  boardId: 'kw__16',
+  source: 'tx',
+  boardId: 'tx__26',
 }
 
 let songListCache: SongListSetting | null = null
@@ -26,7 +26,7 @@ let saveSongListTimer: ReturnType<typeof setTimeout> | null = null
 let saveLeaderboardTimer: ReturnType<typeof setTimeout> | null = null
 
 function safeSource(input: any): DiscoverSourceId {
-  return ['kw', 'wy', 'tx', 'kg'].includes(input) ? input : 'kw'
+  return ['kw', 'wy', 'tx', 'kg'].includes(input) ? input : 'tx'
 }
 
 export async function getSongListSetting(): Promise<SongListSetting> {

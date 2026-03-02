@@ -43,6 +43,8 @@ web-build/
 # lx-music-mobile reference repository
 lx-music-mobile/
 
+lx-music-desktop/
+
 CeruMusic/
 
 .claude/
