@@ -1,0 +1,152 @@
+name: iOS Unsigned IPA
+
+on:
+  workflow_dispatch:
+    inputs:
+      upload_release:
+        description: Upload IPA to GitHub Release
+        type: boolean
+        default: false
+      release_tag:
+        description: Release tag (required when upload_release=true in manual trigger)
+        type: string
+        required: false
+  push:
+    tags:
+      - "v*"
+      - "ios-v*"
+
+permissions:
+  contents: write
+
+jobs:
+  build-unsigned-ipa:
+    runs-on: macos-latest
+    timeout-minutes: 60
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Setup Ruby
+        uses: ruby/setup-ruby@v1
+        with:
+          ruby-version: "3.2"
+
+      - name: Install iOS gems
+        run: bundle install --jobs 4 --retry 3
+
+      - name: Prebuild iOS project
+        run: npx expo prebuild --platform ios --clean --non-interactive
+
+      - name: Install CocoaPods
+        run: bundle exec pod install --project-directory=ios
+
+      - name: Build unsigned archive and package ipa
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          APP_VERSION=$(node -p "require('./app.json').expo.version")
+          IPA_NAME="YueYin-${APP_VERSION}-unsigned.ipa"
+          echo "IPA_NAME=${IPA_NAME}" >> "$GITHUB_ENV"
+
+          WORKSPACE_PATH=$(find ios -maxdepth 1 -name "*.xcworkspace" | head -n 1)
+          if [[ -z "${WORKSPACE_PATH}" ]]; then
+            echo "No xcworkspace found under ios/" >&2
+            exit 1
+          fi
+
+          # 自动解析 scheme，避免手写项目名导致 CI 脆弱。
+          SCHEME=$(xcodebuild -workspace "${WORKSPACE_PATH}" -list -json | ruby -rjson -e 'd = JSON.parse(STDIN.read); puts(d.dig("workspace", "schemes")&.first || "")')
+          if [[ -z "${SCHEME}" ]]; then
+            echo "No iOS scheme found in workspace: ${WORKSPACE_PATH}" >&2
+            exit 1
+          fi
+          echo "Detected scheme: ${SCHEME}"
+
+          ARCHIVE_PATH="ios/build/${SCHEME}.xcarchive"
+          rm -rf ios/build dist "${IPA_NAME}"
+          mkdir -p ios/build dist/Payload
+
+          xcodebuild \
+            -workspace "${WORKSPACE_PATH}" \
+            -scheme "${SCHEME}" \
+            -configuration Release \
+            -sdk iphoneos \
+            -archivePath "${ARCHIVE_PATH}" \
+            CODE_SIGNING_ALLOWED=NO \
+            CODE_SIGNING_REQUIRED=NO \
+            CODE_SIGN_IDENTITY="" \
+            archive
+
+          APP_PATH=$(find "${ARCHIVE_PATH}/Products/Applications" -maxdepth 1 -name "*.app" | head -n 1)
+          if [[ -z "${APP_PATH}" ]]; then
+            echo "No .app found in archive: ${ARCHIVE_PATH}" >&2
+            exit 1
+          fi
+
+          cp -R "${APP_PATH}" dist/Payload/
+          (
+            cd dist
+            /usr/bin/zip -qry "../${IPA_NAME}" Payload
+          )
+
+      - name: Upload IPA artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ env.IPA_NAME }}
+          path: ${{ env.IPA_NAME }}
+          if-no-files-found: error
+          retention-days: 14
+
+      - name: Resolve release upload flag
+        id: release_flag
+        shell: bash
+        run: |
+          SHOULD_UPLOAD="false"
+          TAG_NAME=""
+          IS_PRERELEASE="false"
+
+          detect_prerelease() {
+            local tag="$1"
+            if [[ "${tag}" =~ [0-9]+\.[0-9]+\.[0-9]+- ]]; then
+              echo "true"
+              return
+            fi
+            echo "false"
+          }
+
+          if [[ "${GITHUB_REF_TYPE}" == "tag" ]]; then
+            SHOULD_UPLOAD="true"
+            TAG_NAME="${GITHUB_REF_NAME}"
+            IS_PRERELEASE="$(detect_prerelease "${TAG_NAME}")"
+          fi
+
+          if [[ "${{ github.event_name }}" == "workflow_dispatch" && "${{ inputs.upload_release }}" == "true" ]]; then
+            SHOULD_UPLOAD="true"
+            TAG_NAME="${{ inputs.release_tag }}"
+            IS_PRERELEASE="$(detect_prerelease "${TAG_NAME}")"
+          fi
+
+          echo "should_upload=${SHOULD_UPLOAD}" >> "$GITHUB_OUTPUT"
+          echo "tag_name=${TAG_NAME}" >> "$GITHUB_OUTPUT"
+          echo "is_prerelease=${IS_PRERELEASE}" >> "$GITHUB_OUTPUT"
+
+      - name: Upload IPA to GitHub Release
+        if: steps.release_flag.outputs.should_upload == 'true' && steps.release_flag.outputs.tag_name != ''
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.release_flag.outputs.tag_name }}
+          files: ${{ env.IPA_NAME }}
+          generate_release_notes: true
+          prerelease: ${{ steps.release_flag.outputs.is_prerelease }}

@@ -1,0 +1,81 @@
+name: Release Tag
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: Version (semver), e.g. 1.2.3 or 1.2.3-beta.1
+        required: true
+        type: string
+
+permissions:
+  contents: write
+
+jobs:
+  create-release-tag:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Bump version files
+        run: npm run release:version -- "${{ inputs.version }}"
+
+      - name: Configure git identity
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+      - name: Commit version changes (if any)
+        env:
+          VERSION: ${{ inputs.version }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [[ -n "$(git status --porcelain)" ]]; then
+            git add package.json app.json src/config/index.ts
+            git commit -m "🔖 chore(release): 发布 v${VERSION}" \
+              -m "需求实现:
+1. 同步 package/app/config 三处版本号，保证版本来源一致。
+2. 为本次发版创建标准化版本提交，供 CI 自动发包复用。"
+          else
+            echo "No version file changed, continue to tagging."
+          fi
+
+      - name: Create and push tag
+        env:
+          VERSION: ${{ inputs.version }}
+          TARGET_BRANCH: ${{ github.ref_name }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          TAG_NAME="v${VERSION}"
+
+          if git ls-remote --tags origin "refs/tags/${TAG_NAME}" | grep -q "${TAG_NAME}$"; then
+            echo "Tag ${TAG_NAME} already exists on remote." >&2
+            exit 1
+          fi
+
+          git tag -a "${TAG_NAME}" -m "release: ${TAG_NAME}"
+          git push origin "HEAD:${TARGET_BRANCH}"
+          git push origin "${TAG_NAME}"
+
+      - name: Summary
+        env:
+          VERSION: ${{ inputs.version }}
+        run: |
+          echo "Release tag workflow finished."
+          echo "Created tag: v${VERSION}"

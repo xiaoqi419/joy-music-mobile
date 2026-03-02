@@ -43,6 +43,14 @@ function buildLatestReleaseApiUrl(owner: string, repo: string): string {
   return `https://api.github.com/repos/${owner}/${repo}/releases/latest`
 }
 
+function extractSemverFromTag(tagName: string): string {
+  const raw = String(tagName || '').trim()
+  if (!raw) return ''
+  const matched = raw.match(/(\d+\.\d+\.\d+)/)
+  if (!matched?.[1]) return ''
+  return normalizeVersion(matched[1])
+}
+
 function parseErrorReason(status: number): string {
   if (status === 403 || status === 429) return 'GitHub API rate limit reached. Please try again later.'
   if (status === 404) return 'No release found. Please publish a GitHub Release first.'
@@ -87,7 +95,8 @@ export async function checkGithubReleaseUpdate(input: CheckGithubReleaseUpdateIn
     }
 
     const data = await resp.json() as GithubReleaseResponse
-    const latestVersion = normalizeVersion(String(data.tag_name || '0.0.0'))
+    const rawTagName = String(data.tag_name || '')
+    const latestVersion = extractSemverFromTag(rawTagName)
     const notes = String(data.body || '').trim()
     const releaseUrl = String(data.html_url || releaseHomeUrl)
     const ipaAsset = Array.isArray(data.assets)
@@ -95,12 +104,12 @@ export async function checkGithubReleaseUpdate(input: CheckGithubReleaseUpdateIn
       : undefined
     const ipaUrl = ipaAsset?.browser_download_url ? String(ipaAsset.browser_download_url) : undefined
 
-    if (!latestVersion || latestVersion === '0.0.0') {
+    if (!latestVersion) {
       return {
         status: 'failed',
         currentVersion,
         releaseUrl,
-        reason: 'Invalid latest version tag. Please check your release tag format.',
+        reason: `Invalid latest version tag "${rawTagName}". Expected format like v1.2.3.`,
       }
     }
 

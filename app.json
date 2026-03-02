@@ -1,6 +1,6 @@
 {
   "expo": {
-    "name": "Joy Music Mobile",
+    "name": "悦音",
     "slug": "joy-music-mobile",
     "version": "1.0.0",
     "orientation": "portrait",
@@ -37,7 +37,7 @@
       [
         "expo-audio",
         {
-          "microphonePermission": "Allow Joy Music to access your microphone.",
+          "microphonePermission": "Allow 悦音 to access your microphone.",
           "recordAudioAndroid": false
         }
       ]

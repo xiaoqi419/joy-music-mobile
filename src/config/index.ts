@@ -4,7 +4,7 @@
 
 export const appConfig = {
   // App info
-  name: 'Joy Music Mobile',
+  name: '悦音',
   version: '1.0.0',
   description: 'A modern music player for iOS',
 
@@ -37,8 +37,8 @@ export const appConfig = {
 
   // App update
   update: {
-    githubOwner: 'your-github-owner',
-    githubRepo: 'your-github-repo',
+    githubOwner: 'xiaoqi419',
+    githubRepo: 'joy-music-mobile',
     requestTimeoutMs: 8000,
   },
 

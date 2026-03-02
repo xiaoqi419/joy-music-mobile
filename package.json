@@ -4,14 +4,15 @@
   "description": "A React Native music player for iOS using Expo",
   "private": true,
   "scripts": {
-    "start": "expo start",
+    "start": "npx expo start",
     "ios": "expo start --ios",
     "android": "expo start --android",
     "web": "expo start --web",
     "tunnel": "expo start --tunnel",
     "lint": "eslint . --ext .js,.jsx,.ts,.tsx",
     "lint:fix": "eslint . --ext .js,.jsx,.ts,.tsx --fix",
-    "test": "jest"
+    "test": "jest",
+    "release:version": "node scripts/release-tag.mjs"
   },
   "dependencies": {
     "@expo/vector-icons": "^15.0.3",

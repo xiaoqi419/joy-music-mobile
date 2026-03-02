@@ -79,6 +79,35 @@ npm run lint:fix
 npm test
 ```
 
+## 📦 iOS 自签发包（Beta 通道）
+
+当前仓库已支持 **无 Mac 的 iOS unsigned IPA 云构建**，适用于自签分发：
+
+- 工作流文件：
+  - `.github/workflows/release-tag.yml`（自动改版本 + 提交 + 打 tag）
+  - `.github/workflows/ios-unsigned-ipa.yml`（按 tag 自动发 IPA）
+- 推荐触发链路（自动）：
+  1. 手动触发 `Release Tag`，输入版本号（如 `1.0.1`）
+  2. 工作流自动创建 `v1.0.1` tag
+  3. `iOS Unsigned IPA` 被 tag 触发并构建产物
+  4. IPA 自动上传到对应 GitHub Release
+- 兼容触发方式：
+  - 手动触发 `iOS Unsigned IPA`
+  - 直接推送 tag：`v*` 或 `ios-v*`
+- 产物命名：`JoyMusicMobile-<version>-unsigned.ipa`
+- 产物位置：GitHub Actions Artifacts + GitHub Release Assets
+
+> 该通道属于“安装包分发”，不是 App Store/TestFlight 正式发版。
+
+详细安装与分发流程见：[`docs/ios-self-sign.md`](./docs/ios-self-sign.md)
+
+## ⚠️ iOS 分发风险提示（自签）
+
+1. 用户需自行重签安装（Sideloadly/AltStore）；
+2. 免费 Apple ID 证书通常有效期短（常见 7 天）；
+3. 安装与证书信任流程门槛较高，不适合非技术用户大规模分发；
+4. 如需“公开长期发版”，需加入 Apple Developer Program 并走 TestFlight/App Store。
+
 ## 📁 项目结构
 
 ```
@@ -180,6 +209,7 @@ joy-music-mobile/
 - **[EXPO_SETUP.md](./EXPO_SETUP.md)** - Expo 迁移和配置指南
 - **[STRUCTURE.md](./STRUCTURE.md)** - 项目结构详解
 - **[PROJECT_SUMMARY.md](./PROJECT_SUMMARY.md)** - 项目创建总结
+- **[docs/ios-self-sign.md](./docs/ios-self-sign.md)** - iOS 自签分发与安装说明
 
 ## 🤝 开发指南
 
@@ -238,7 +268,8 @@ A: Expo 让您无需 Xcode 或 macOS 就能开发 iOS 应用。您可以在 Wind
 
 ### Q: 可以发布到 App Store 吗？
 
-A: 可以！使用 `eas build --platform ios` 生成 IPA 文件，然后上传到 App Store。
+A: 可以，但前提是加入 Apple Developer Program。  
+当前仓库默认提供的是 **iOS 自签 Beta 分发**（unsigned IPA + 用户自签安装），不等价于 TestFlight/App Store 正式发布。
 
 ### Q: 支持原生模块吗？
 
