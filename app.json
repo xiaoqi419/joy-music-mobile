@@ -2,7 +2,7 @@
   "expo": {
     "name": "悦音",
     "slug": "joy-music-mobile",
-    "version": "1.0.0",
+    "version": "1.0.0-beta",
     "orientation": "portrait",
     "icon": "./assets/icon.png",
     "userInterfaceStyle": "dark",
@@ -18,7 +18,7 @@
     "ios": {
       "supportsTablet": true,
       "bundleIdentifier": "com.jomusic.mobile",
-      "buildNumber": "1.0.0",
+      "buildNumber": "1.0.0-beta",
       "infoPlist": {
         "UIBackgroundModes": ["audio"]
       }
