@@ -11,10 +11,14 @@ on:
         description: Release tag (required when upload_release=true in manual trigger)
         type: string
         required: false
+      release_notes:
+        description: Optional release notes to append before generated notes
+        type: string
+        required: false
   push:
     tags:
-      - "v*"
-      - "ios-v*"
+      - 'v*'
+      - 'ios-v*'
 
 permissions:
   contents: write
@@ -31,7 +35,7 @@ jobs:
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: "20"
+          node-version: '20'
           cache: npm
 
       - name: Install dependencies
@@ -40,7 +44,7 @@ jobs:
       - name: Setup Ruby
         uses: ruby/setup-ruby@v1
         with:
-          ruby-version: "3.2"
+          ruby-version: '3.2'
 
       - name: Install iOS gems
         run: bundle install --jobs 4 --retry 3
@@ -116,6 +120,7 @@ jobs:
           SHOULD_UPLOAD="false"
           TAG_NAME=""
           IS_PRERELEASE="false"
+          RELEASE_NOTES=""
 
           detect_prerelease() {
             local tag="$1"
@@ -136,11 +141,17 @@ jobs:
             SHOULD_UPLOAD="true"
             TAG_NAME="${{ inputs.release_tag }}"
             IS_PRERELEASE="$(detect_prerelease "${TAG_NAME}")"
+            RELEASE_NOTES="${{ inputs.release_notes }}"
           fi
 
           echo "should_upload=${SHOULD_UPLOAD}" >> "$GITHUB_OUTPUT"
           echo "tag_name=${TAG_NAME}" >> "$GITHUB_OUTPUT"
           echo "is_prerelease=${IS_PRERELEASE}" >> "$GITHUB_OUTPUT"
+          {
+            echo "release_notes<<EOF"
+            printf '%s\n' "${RELEASE_NOTES}"
+            echo "EOF"
+          } >> "$GITHUB_OUTPUT"
 
       - name: Upload IPA to GitHub Release
         if: steps.release_flag.outputs.should_upload == 'true' && steps.release_flag.outputs.tag_name != ''
@@ -148,5 +159,7 @@ jobs:
         with:
           tag_name: ${{ steps.release_flag.outputs.tag_name }}
           files: ${{ env.IPA_NAME }}
+          body: ${{ steps.release_flag.outputs.release_notes }}
+          append_body: true
           generate_release_notes: true
           prerelease: ${{ steps.release_flag.outputs.is_prerelease }}

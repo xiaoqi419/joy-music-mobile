@@ -7,9 +7,14 @@ on:
         description: Version (semver), e.g. 1.2.3 or 1.2.3-beta.1
         required: true
         type: string
+      release_notes:
+        description: Optional release notes for GitHub Release body
+        required: false
+        type: string
 
 permissions:
   contents: write
+  actions: write
 
 jobs:
   create-release-tag:
@@ -71,9 +76,33 @@ jobs:
           git push origin "HEAD:${TARGET_BRANCH}"
           git push origin "${TAG_NAME}"
 
+      - name: Trigger iOS unsigned IPA workflow
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          VERSION: ${{ inputs.version }}
+          TARGET_BRANCH: ${{ github.ref_name }}
+          RELEASE_NOTES: ${{ inputs.release_notes }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          TAG_NAME="v${VERSION}"
+          PAYLOAD=$(jq -n \
+            --arg ref "${TARGET_BRANCH}" \
+            --arg tag "${TAG_NAME}" \
+            --arg notes "${RELEASE_NOTES}" \
+            '{ref:$ref, inputs:{upload_release:"true", release_tag:$tag, release_notes:$notes}}')
+          curl -sS -L \
+            -X POST \
+            -H "Accept: application/vnd.github+json" \
+            -H "Authorization: Bearer ${GITHUB_TOKEN}" \
+            "https://api.github.com/repos/${REPO}/actions/workflows/ios-unsigned-ipa.yml/dispatches" \
+            -d "${PAYLOAD}"
+
       - name: Summary
         env:
           VERSION: ${{ inputs.version }}
         run: |
           echo "Release tag workflow finished."
           echo "Created tag: v${VERSION}"
+          echo "Triggered workflow: iOS Unsigned IPA"
