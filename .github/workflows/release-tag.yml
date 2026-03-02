@@ -25,7 +25,7 @@ jobs:
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: "20"
+          node-version: '20'
           cache: npm
 
       - name: Install dependencies
@@ -48,9 +48,7 @@ jobs:
           if [[ -n "$(git status --porcelain)" ]]; then
             git add package.json app.json src/config/index.ts
             git commit -m "🔖 chore(release): 发布 v${VERSION}" \
-              -m "需求实现:
-1. 同步 package/app/config 三处版本号，保证版本来源一致。
-2. 为本次发版创建标准化版本提交，供 CI 自动发包复用。"
+              -m $'需求实现:\n1. 同步 package/app/config 三处版本号，保证版本来源一致。\n2. 为本次发版创建标准化版本提交，供 CI 自动发包复用。'
           else
             echo "No version file changed, continue to tagging."
           fi
