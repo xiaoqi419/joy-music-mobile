@@ -70,8 +70,14 @@ jobs:
             exit 1
           fi
 
-          # 自动解析 scheme，避免手写项目名导致 CI 脆弱。
-          SCHEME=$(xcodebuild -workspace "${WORKSPACE_PATH}" -list -json | ruby -rjson -e 'd = JSON.parse(STDIN.read); puts(d.dig("workspace", "schemes")&.first || "")')
+          # 自动解析 scheme，优先选择非 Pods 的主工程 scheme。
+          SCHEMES=$(xcodebuild -workspace "${WORKSPACE_PATH}" -list -json | ruby -rjson -e 'd = JSON.parse(STDIN.read); puts((d.dig("workspace", "schemes") || []).join("\n"))')
+          echo "Detected schemes:"
+          echo "${SCHEMES}"
+          SCHEME=$(printf '%s\n' "${SCHEMES}" | grep -vE '^(Pods-|.*Tests$)' | head -n 1 || true)
+          if [[ -z "${SCHEME}" ]]; then
+            SCHEME=$(printf '%s\n' "${SCHEMES}" | head -n 1 || true)
+          fi
           if [[ -z "${SCHEME}" ]]; then
             echo "No iOS scheme found in workspace: ${WORKSPACE_PATH}" >&2
             exit 1
@@ -82,16 +88,22 @@ jobs:
           rm -rf ios/build dist "${IPA_NAME}"
           mkdir -p ios/build dist/Payload
 
-          xcodebuild \
+          set -o pipefail
+          if ! xcodebuild \
             -workspace "${WORKSPACE_PATH}" \
             -scheme "${SCHEME}" \
             -configuration Release \
             -sdk iphoneos \
+            -destination "generic/platform=iOS" \
             -archivePath "${ARCHIVE_PATH}" \
             CODE_SIGNING_ALLOWED=NO \
             CODE_SIGNING_REQUIRED=NO \
             CODE_SIGN_IDENTITY="" \
-            archive
+            archive 2>&1 | tee xcodebuild.log; then
+            echo "xcodebuild archive failed. Extracting error lines..."
+            grep -nE "error:|fatal error:|\\*\\* ARCHIVE FAILED \\*\\*" xcodebuild.log | tail -n 120 || true
+            exit 1
+          fi
 
           APP_PATH=$(find "${ARCHIVE_PATH}/Products/Applications" -maxdepth 1 -name "*.app" | head -n 1)
           if [[ -z "${APP_PATH}" ]]; then
@@ -104,6 +116,15 @@ jobs:
             cd dist
             /usr/bin/zip -qry "../${IPA_NAME}" Payload
           )
+
+      - name: Upload xcodebuild log (on failure)
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: xcodebuild-log
+          path: xcodebuild.log
+          if-no-files-found: ignore
+          retention-days: 14
 
       - name: Upload IPA artifact
         uses: actions/upload-artifact@v4
