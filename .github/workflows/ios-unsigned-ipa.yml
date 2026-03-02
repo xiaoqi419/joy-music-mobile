@@ -89,20 +89,59 @@ jobs:
           mkdir -p ios/build dist/Payload
 
           set -o pipefail
-          if ! xcodebuild \
-            -workspace "${WORKSPACE_PATH}" \
-            -scheme "${SCHEME}" \
-            -configuration Release \
-            -sdk iphoneos \
-            -destination "generic/platform=iOS" \
-            -archivePath "${ARCHIVE_PATH}" \
-            CODE_SIGNING_ALLOWED=NO \
-            CODE_SIGNING_REQUIRED=NO \
-            CODE_SIGN_IDENTITY="" \
-            archive 2>&1 | tee xcodebuild.log; then
+          run_archive() {
+            xcodebuild \
+              -workspace "${WORKSPACE_PATH}" \
+              -scheme "${SCHEME}" \
+              -configuration Release \
+              -sdk iphoneos \
+              -destination "generic/platform=iOS" \
+              -archivePath "${ARCHIVE_PATH}" \
+              CODE_SIGNING_ALLOWED=NO \
+              CODE_SIGNING_REQUIRED=NO \
+              CODE_SIGN_IDENTITY="" \
+              archive 2>&1 | tee xcodebuild.log
+          }
+
+          print_archive_errors() {
             echo "xcodebuild archive failed. Extracting error lines..."
             grep -nE "error:|fatal error:|\\*\\* ARCHIVE FAILED \\*\\*" xcodebuild.log | tail -n 120 || true
-            exit 1
+          }
+
+          sync_codegen_generated_sources() {
+            local generated_dir=""
+            generated_dir=$(grep -oE "\\[Codegen\\] Generated artifacts: .*" xcodebuild.log | sed 's/.*Generated artifacts: //' | tail -n 1 || true)
+
+            if [[ -z "${generated_dir}" || ! -d "${generated_dir}" ]]; then
+              generated_dir=$(find "${HOME}/Library/Developer/Xcode/DerivedData" \
+                -type d \
+                -path "*/ReactCodegen.build/DerivedSources/generated/source/codegen/out/build/generated/ios" \
+                2>/dev/null | tail -n 1 || true)
+            fi
+
+            if [[ -z "${generated_dir}" || ! -d "${generated_dir}" ]]; then
+              echo "No generated iOS codegen directory found for sync." >&2
+              return 1
+            fi
+
+            mkdir -p ios/build/generated/ios
+            echo "Syncing codegen artifacts from ${generated_dir} -> ios/build/generated/ios"
+            rsync -a "${generated_dir}/" "ios/build/generated/ios/"
+          }
+
+          if ! run_archive; then
+            if grep -qE "Build input file cannot be found: '.*ios/build/generated/ios/" xcodebuild.log; then
+              echo "Detected missing ios/build/generated/ios inputs, try sync + retry once..."
+              if sync_codegen_generated_sources && run_archive; then
+                echo "Archive succeeded after syncing generated codegen artifacts."
+              else
+                print_archive_errors
+                exit 1
+              fi
+            else
+              print_archive_errors
+              exit 1
+            fi
           fi
 
           APP_PATH=$(find "${ARCHIVE_PATH}/Products/Applications" -maxdepth 1 -name "*.app" | head -n 1)
