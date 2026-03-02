@@ -5,10 +5,10 @@
     "version": "1.0.0-beta",
     "orientation": "portrait",
     "icon": "./assets/icon.png",
-    "userInterfaceStyle": "dark",
+    "userInterfaceStyle": "automatic",
     "splash": {
       "image": "./assets/splash.png",
-      "resizeMode": "contain",
+      "resizeMode": "cover",
       "backgroundColor": "#1a1a1a"
     },
     "updates": {
@@ -23,6 +23,7 @@
         "UIBackgroundModes": ["audio"],
         "NSAppTransportSecurity": {
           "NSAllowsArbitraryLoads": true,
+          "NSAllowsArbitraryLoadsForMedia": true,
           "NSExceptionDomains": {
             "kuwo.cn": {
               "NSIncludesSubdomains": true,

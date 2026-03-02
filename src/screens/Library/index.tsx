@@ -215,6 +215,7 @@ export default function LibraryScreen(_props: LibraryScreenProps) {
   const { colors } = useTheme()
   const dispatch = useDispatch()
   const insets = useSafeAreaInsets()
+  const normalizedTopInset = Math.min(insets.top, 44)
   const playerState = useSelector((state: RootState) => state.player)
   const themeMode = useSelector((state: RootState) => state.config.theme)
   const musicSourceState = useSelector((state: RootState) => state.musicSource)
@@ -645,6 +646,14 @@ export default function LibraryScreen(_props: LibraryScreenProps) {
   }, [subPage, loadAudioCacheStats])
 
   useEffect(() => {
+    if (subPage !== 'main' && subPage !== 'cache') return
+    const timer = setInterval(() => {
+      void loadAudioCacheStats(true)
+    }, 4000)
+    return () => clearInterval(timer)
+  }, [loadAudioCacheStats, subPage])
+
+  useEffect(() => {
     return subscribeScrollToTop(() => {
       if (subPage === 'main') {
         mainListRef.current?.scrollToOffset({ offset: 0, animated: true })
@@ -722,7 +731,7 @@ export default function LibraryScreen(_props: LibraryScreenProps) {
   }), [subPage])
 
   const renderHeader = useCallback(() => (
-    <View style={[styles.header, { paddingTop: insets.top + spacing.sm }]}>
+    <View style={[styles.header, { paddingTop: normalizedTopInset + spacing.sm }]}>
       {subPage === 'main' ? (
         <View style={styles.headerSidePlaceholder} />
       ) : (
@@ -741,7 +750,7 @@ export default function LibraryScreen(_props: LibraryScreenProps) {
       <Text style={[styles.largeTitle, { color: colors.text }]}>{pageTitle}</Text>
       <View style={styles.headerSidePlaceholder} />
     </View>
-  ), [colors.surface, colors.text, colors.textSecondary, insets.top, pageTitle, reduceMotionEnabled, subPage])
+  ), [colors.surface, colors.text, colors.textSecondary, normalizedTopInset, pageTitle, reduceMotionEnabled, subPage])
 
   const mainListHeader = useMemo(() => (
     <>

@@ -6,7 +6,6 @@
 
 import AsyncStorage from '@react-native-async-storage/async-storage'
 import * as FileSystem from 'expo-file-system/legacy'
-import { Platform } from 'react-native'
 import { Quality } from './source'
 
 const AUDIO_CACHE_SETTINGS_KEY = '@joy_music_audio_cache_settings'
@@ -217,10 +216,6 @@ class AudioFileCacheManager {
   async cacheFromUrl(request: AudioCacheStoreRequest): Promise<void> {
     const { musicId, url, quality, source, title, artist } = request
     if (!musicId || !/^https?:\/\//i.test(url || '')) return
-    if (Platform.OS === 'ios' && /^http:\/\//i.test(url || '')) {
-      // iOS download task 对 HTTP 直链会触发 ATS(-1022)，跳过缓存避免噪声报错。
-      return
-    }
 
     const settings = await this.readSettings()
     if (!settings.enabled) return
