@@ -40,11 +40,40 @@ export default function playerReducer(
         currentTrack: action.payload,
       }
 
-    case 'PLAYER_SYNC_STATE':
+    case 'PLAYER_SYNC_STATE': {
+      const p = action.payload
+      // 仅当结构字段有变化时才生成新 state，纯 position 变化走轻量路径
+      const trackChanged = p.currentTrack !== state.currentTrack
+        && (p.currentTrack?.id !== state.currentTrack?.id)
+      const structChanged = trackChanged
+        || p.isPlaying !== state.isPlaying
+        || p.currentIndex !== state.currentIndex
+        || p.playlist !== state.playlist
+        || p.repeatMode !== state.repeatMode
+        || p.shuffleMode !== state.shuffleMode
+        || p.volume !== state.volume
+
+      if (!structChanged
+        && p.currentTime === state.currentTime
+        && p.duration === state.duration) {
+        return state
+      }
+
+      if (!structChanged) {
+        // 仅 position/duration 变化：仍需新对象以触发依赖的组件更新，
+        // 但跳过不必要的属性复制
+        return {
+          ...state,
+          currentTime: p.currentTime ?? state.currentTime,
+          duration: p.duration ?? state.duration,
+        }
+      }
+
       return {
         ...state,
-        ...action.payload,
+        ...p,
       }
+    }
 
     case 'PLAYER_PLAY':
       return {

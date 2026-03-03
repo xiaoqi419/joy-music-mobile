@@ -180,6 +180,18 @@ export default function TrackListDetail({
     tracks.length,
   ])
 
+  const renderTrackItem = useCallback(({ item, index }: { item: Track; index: number }) => (
+      <TrackListItem
+        track={item}
+        index={index}
+        showIndex
+        isCurrentTrack={currentTrackId === item.id}
+        isPlaying={isPlaying && currentTrackId === item.id}
+        onPress={onTrackPress}
+        onMorePress={onTrackMorePress}
+      />
+    ), [currentTrackId, isPlaying, onTrackPress, onTrackMorePress])
+
   return (
     <Animated.View
       style={[
@@ -199,17 +211,7 @@ export default function TrackListDetail({
         keyExtractor={(item) => item.id}
         ListHeaderComponent={listHeader}
         contentContainerStyle={{ paddingBottom: BOTTOM_INSET + spacing.md }}
-        renderItem={({ item, index }) => (
-          <TrackListItem
-            track={item}
-            index={index}
-            showIndex
-            isCurrentTrack={currentTrackId === item.id}
-            isPlaying={isPlaying && currentTrackId === item.id}
-            onPress={onTrackPress}
-            onMorePress={onTrackMorePress}
-          />
-        )}
+        renderItem={renderTrackItem}
       />
     </Animated.View>
   )

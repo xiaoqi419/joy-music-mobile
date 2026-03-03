@@ -889,30 +889,30 @@ function AppContent() {
 
       {/* Main content area */}
       <View style={styles.content}>
-        {activeTab === 'discover' && (
+        <View style={[styles.tabPane, activeTab !== 'discover' && styles.tabPaneHidden]}>
           <DiscoverScreen
             onPlaylistPress={handlePlaylistPress}
             onMorePageVisibilityChange={setIsDiscoverMoreVisible}
           />
-        )}
-        {activeTab === 'leaderboard' && (
+        </View>
+        <View style={[styles.tabPane, activeTab !== 'leaderboard' && styles.tabPaneHidden]}>
           <LeaderboardScreen
             onLeaderboardPress={handleLeaderboardPress}
           />
-        )}
-        {activeTab === 'search' && (
+        </View>
+        <View style={[styles.tabPane, activeTab !== 'search' && styles.tabPaneHidden]}>
           <SearchScreen onTrackPress={handleTrackPress} onTrackMorePress={handleTrackMorePress} />
-        )}
-        {activeTab === 'playlist' && (
+        </View>
+        <View style={[styles.tabPane, activeTab !== 'playlist' && styles.tabPaneHidden]}>
           <PlaylistScreen
             onTrackPress={handleTrackPress}
             onTrackMorePress={handleTrackMorePress}
             onPlayAll={handlePlaylistPlayAll}
           />
-        )}
-        {activeTab === 'library' && (
+        </View>
+        <View style={[styles.tabPane, activeTab !== 'library' && styles.tabPaneHidden]}>
           <LibraryScreen onTrackPress={handleTrackPress} onTrackMorePress={handleTrackMorePress} />
-        )}
+        </View>
       </View>
 
       {/* Detail overlay */}
@@ -1047,6 +1047,12 @@ const styles = StyleSheet.create({
   },
   content: {
     flex: 1,
+  },
+  tabPane: {
+    flex: 1,
+  },
+  tabPaneHidden: {
+    display: 'none',
   },
   loadingOverlay: {
     ...StyleSheet.absoluteFillObject,

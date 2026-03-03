@@ -31,7 +31,7 @@ interface TrackListItemProps {
   onMorePress?: (track: Track) => void;
 }
 
-export default function TrackListItem({
+export default React.memo(function TrackListItem({
   track,
   index,
   isPlaying = false,
@@ -124,7 +124,7 @@ export default function TrackListItem({
       </TouchableOpacity>
     </TouchableOpacity>
   );
-}
+})
 
 const styles = StyleSheet.create({
   container: {

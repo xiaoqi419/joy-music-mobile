@@ -23,7 +23,7 @@ import { LinearGradient } from 'expo-linear-gradient'
 import { useTheme, spacing, fontSize, borderRadius, BOTTOM_INSET } from '../../theme'
 import TrackListItem from '../../components/common/TrackListItem'
 import SourceChips from '../../components/common/SourceChips'
-import { usePlayerStatus } from '../../hooks/usePlayerStatus'
+import { usePlayerTrack } from '../../hooks/usePlayerStatus'
 import musicSearch from '../../core/search'
 import { emitScrollTopState, subscribeScrollToTop } from '../../core/ui/scrollToTopBus'
 import { DiscoverSourceId } from '../../types/discover'
@@ -61,7 +61,7 @@ const dedupeTracks = (tracks: Track[]): Track[] => {
 export default function SearchScreen({ onTrackPress, onTrackMorePress }: SearchScreenProps) {
   const { colors, isDark } = useTheme()
   const insets = useSafeAreaInsets()
-  const { isPlaying, currentTrack } = usePlayerStatus()
+  const { isPlaying, currentTrack } = usePlayerTrack()
 
   const [source, setSource] = useState<DiscoverSourceId>('kw')
   const [query, setQuery] = useState('')

@@ -132,15 +132,23 @@ export function installRuntimeLogger(): void {
   const originalWarn = console.warn.bind(console)
   const originalError = console.error.bind(console)
 
+  // 生产环境只采集 warn/error，跳过 debug/info 的序列化和存储开销。
+  // 业务代码直接调用 appendRuntimeLog() 不受此限制。
+  const captureVerbose = typeof __DEV__ !== 'undefined' ? __DEV__ : true
+
   console.log = (...args: unknown[]) => {
-    const { message, meta } = normalizeArgs(args)
-    appendRuntimeLog('debug', message, meta)
+    if (captureVerbose) {
+      const { message, meta } = normalizeArgs(args)
+      appendRuntimeLog('debug', message, meta)
+    }
     originalLog(...args)
   }
 
   console.info = (...args: unknown[]) => {
-    const { message, meta } = normalizeArgs(args)
-    appendRuntimeLog('info', message, meta)
+    if (captureVerbose) {
+      const { message, meta } = normalizeArgs(args)
+      appendRuntimeLog('info', message, meta)
+    }
     originalInfo(...args)
   }
 

@@ -2,13 +2,15 @@
  * 现代化歌词滚动组件。
  * 自动跟随播放进度滚动到当前行，支持点击行跳转。
  * 当前行高亮放大并带有平滑过渡动画，远离行渐隐，形成聚光灯效果。
+ *
+ * 使用 FlatList 窗口化渲染，仅实例化可见区域附近的歌词行。
  */
 
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
   View,
   Text,
-  ScrollView,
+  FlatList,
   StyleSheet,
   TouchableOpacity,
   ActivityIndicator,
@@ -101,7 +103,7 @@ const LyricLineItem = React.memo(function LyricLineItem({
     <TouchableOpacity
       activeOpacity={0.7}
       onPress={() => onPress(line.time)}
-      style={[styles.lineWrap, { minHeight: lineHeight }]}
+      style={[styles.lineWrap, { height: lineHeight }]}
     >
       <Animated.View
         style={{
@@ -157,7 +159,7 @@ export default function LyricsView({
   onSeek,
 }: LyricsViewProps) {
   const { colors } = useTheme()
-  const scrollRef = useRef<ScrollView>(null)
+  const listRef = useRef<FlatList<LyricLine>>(null)
   const [containerHeight, setContainerHeight] = useState(300)
   const firstPositionSyncRef = useRef(true)
 
@@ -172,6 +174,15 @@ export default function LyricsView({
     [lyrics, position]
   )
 
+  const getItemLayout = useCallback(
+    (_data: ArrayLike<LyricLine> | null | undefined, index: number) => ({
+      length: lineHeight,
+      offset: lineHeight * index,
+      index,
+    }),
+    [lineHeight]
+  )
+
   /** 容器尺寸变化时记录高度，用于居中计算 */
   const handleLayout = useCallback((e: LayoutChangeEvent) => {
     setContainerHeight(e.nativeEvent.layout.height)
@@ -179,18 +190,22 @@ export default function LyricsView({
 
   /** 当前行变化时自动滚动居中 */
   useEffect(() => {
-    if (currentIndex >= 0 && containerHeight > 0) {
-      const targetY = Math.max(0, currentIndex * lineHeight + lineHeight / 2)
+    if (currentIndex >= 0 && containerHeight > 0 && lyrics.length > 0) {
       const shouldAnimate = active && !firstPositionSyncRef.current
-      scrollRef.current?.scrollTo({
-        y: targetY,
-        animated: shouldAnimate,
-      })
+      try {
+        listRef.current?.scrollToIndex({
+          index: currentIndex,
+          animated: shouldAnimate,
+          viewPosition: 0.5,
+        })
+      } catch {
+        // scrollToIndex may fail if layout hasn't completed
+      }
       firstPositionSyncRef.current = false
     }
-  }, [currentIndex, lineHeight, containerHeight, active])
+  }, [currentIndex, lineHeight, containerHeight, active, lyrics.length])
 
-  /** 切歌后首次定位不做动画，避免“闪回到当前行”的观感 */
+  /** 切歌后首次定位不做动画，避免"闪回到当前行"的观感 */
   useEffect(() => {
     firstPositionSyncRef.current = true
   }, [lyrics])
@@ -201,6 +216,30 @@ export default function LyricsView({
       onSeek?.(time)
     },
     [onSeek]
+  )
+
+  const renderItem = useCallback(
+    ({ item, index }: { item: LyricLine; index: number }) => {
+      const isCurrent = index === currentIndex
+      const distance = Math.abs(index - currentIndex)
+      return (
+        <LyricLineItem
+          key={`${item.time}-${index}`}
+          line={item}
+          index={index}
+          isCurrent={isCurrent}
+          distance={distance}
+          lineHeight={lineHeight}
+          onPress={handleLinePress}
+        />
+      )
+    },
+    [currentIndex, lineHeight, handleLinePress]
+  )
+
+  const keyExtractor = useCallback(
+    (item: LyricLine, index: number) => `${item.time}-${index}`,
+    []
   )
 
   if (loading) {
@@ -224,8 +263,12 @@ export default function LyricsView({
   const verticalPad = containerHeight / 2
 
   return (
-    <ScrollView
-      ref={scrollRef}
+    <FlatList
+      ref={listRef}
+      data={lyrics}
+      renderItem={renderItem}
+      keyExtractor={keyExtractor}
+      getItemLayout={getItemLayout}
       style={styles.container}
       contentContainerStyle={{
         paddingTop: verticalPad,
@@ -233,24 +276,10 @@ export default function LyricsView({
       }}
       showsVerticalScrollIndicator={false}
       onLayout={handleLayout}
-    >
-      {lyrics.map((line, index) => {
-        const isCurrent = index === currentIndex
-        const distance = Math.abs(index - currentIndex)
-
-        return (
-          <LyricLineItem
-            key={`${line.time}-${index}`}
-            line={line}
-            index={index}
-            isCurrent={isCurrent}
-            distance={distance}
-            lineHeight={lineHeight}
-            onPress={handleLinePress}
-          />
-        )
-      })}
-    </ScrollView>
+      initialNumToRender={15}
+      maxToRenderPerBatch={10}
+      windowSize={11}
+    />
   )
 }
 

@@ -5,7 +5,7 @@
 import React from 'react'
 import { View, StyleSheet, Text } from 'react-native'
 import TrackListItem from '../../components/common/TrackListItem'
-import { usePlayerStatus } from '../../hooks/usePlayerStatus'
+import { usePlayerTrack } from '../../hooks/usePlayerStatus'
 import { fontSize, useTheme } from '../../theme'
 import { Track, type TrackMoreActionHandler } from '../../types/music'
 
@@ -24,7 +24,7 @@ export default function HotTracksSection({
   onTrackPress,
   onTrackMorePress,
 }: HotTracksSectionProps) {
-  const { isPlaying, currentTrack } = usePlayerStatus()
+  const { isPlaying, currentTrack } = usePlayerTrack()
   const { colors } = useTheme()
 
   if (loading) {

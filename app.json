@@ -15,7 +15,10 @@
       "fallbackToCacheTimeout": 0
     },
     "assetBundlePatterns": [
-      "**/*"
+      "assets/icon.png",
+      "assets/adaptive-icon.png",
+      "assets/splash.png",
+      "assets/favicon.png"
     ],
     "ios": {
       "supportsTablet": true,
