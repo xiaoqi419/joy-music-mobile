@@ -5,6 +5,8 @@
  */
 
 import * as FileSystem from 'expo-file-system/legacy'
+import { File as NativeFile } from 'expo-file-system'
+import { fetch as expoFetch } from 'expo/fetch'
 import { Quality } from './source'
 import { getPlayableAudioUrlCandidates, normalizePlayableAudioUrl } from '../../utils/url'
 import {
@@ -38,6 +40,8 @@ const AUDIO_CACHE_DOWNLOAD_HEADERS = {
   'User-Agent':
     'Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Mobile/15E148',
 }
+
+const AUDIO_CACHE_DOWNLOAD_TIMEOUT_MS = 45000
 
 export interface AudioCacheSettings {
   enabled: boolean
@@ -95,6 +99,61 @@ function getDownloadCandidates(url: string): string[] {
 function formatCacheError(error: unknown): string {
   if (error instanceof Error) return `${error.name}: ${error.message}`
   return String(error)
+}
+
+async function downloadAudioByStreaming(url: string, targetUri: string): Promise<number> {
+  const controller = typeof AbortController !== 'undefined' ? new AbortController() : null
+  const timeout = setTimeout(() => {
+    controller?.abort()
+  }, AUDIO_CACHE_DOWNLOAD_TIMEOUT_MS)
+
+  let handle: { close: () => void; writeBytes: (bytes: Uint8Array) => void } | null = null
+  try {
+    const response = await expoFetch(url, {
+      headers: AUDIO_CACHE_DOWNLOAD_HEADERS,
+      signal: controller?.signal,
+    })
+
+    if (!response.ok) {
+      throw new Error(`http status ${response.status}`)
+    }
+
+    const targetFile = new NativeFile(targetUri)
+    targetFile.create({
+      intermediates: true,
+      overwrite: true,
+    })
+    handle = targetFile.open()
+
+    const bodyStream = response.body
+    if (bodyStream && typeof bodyStream.getReader === 'function') {
+      // 分片写入：逐块落盘，避免一次性占用过多内存。
+      const reader = bodyStream.getReader()
+      while (true) {
+        const { done, value } = await reader.read()
+        if (done) break
+        if (value && value.length > 0) {
+          handle.writeBytes(value)
+        }
+      }
+    } else {
+      const bytes = await response.bytes()
+      if (bytes && bytes.length > 0) {
+        handle.writeBytes(bytes)
+      }
+    }
+
+    return response.status
+  } finally {
+    clearTimeout(timeout)
+    if (handle) {
+      try {
+        handle.close()
+      } catch {
+        // ignore
+      }
+    }
+  }
 }
 
 async function getCacheDir(): Promise<string> {
@@ -314,9 +373,13 @@ class AudioFileCacheManager {
           console.log(
             `[AudioCache] Downloading ${musicId} (${i + 1}/${candidates.length}) ${candidateUrl} -> ${targetUri}`
           )
-          const result = await FileSystem.downloadAsync(candidateUrl, targetUri, {
-            headers: AUDIO_CACHE_DOWNLOAD_HEADERS,
-          })
+          const status = await downloadAudioByStreaming(candidateUrl, targetUri)
+          const result: FileSystem.FileSystemDownloadResult = {
+            uri: targetUri,
+            status,
+            headers: {},
+            mimeType: null,
+          }
           if (result.status >= 200 && result.status < 300) {
             downloadResult = result
             usedUrl = candidateUrl
