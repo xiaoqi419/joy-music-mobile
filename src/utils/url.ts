@@ -127,7 +127,7 @@ export function getPlayableAudioUrlCandidates(raw: unknown): string[] {
 
   if (protocol === 'http:') {
     const httpsUrl = normalized.replace(/^http:/i, 'https:')
-    return Array.from(new Set([httpsUrl, normalized]))
+    return Array.from(new Set([normalized, httpsUrl]))
   }
 
   const httpUrl = normalized.replace(/^https:/i, 'http:')

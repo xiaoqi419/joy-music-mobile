@@ -312,7 +312,7 @@ class AudioFileCacheManager {
         try {
           await this.ensureDir()
           console.log(
-            `[AudioCache] Downloading ${musicId} (${i + 1}/${candidates.length}) ${candidateUrl}`
+            `[AudioCache] Downloading ${musicId} (${i + 1}/${candidates.length}) ${candidateUrl} -> ${targetUri}`
           )
           const result = await FileSystem.downloadAsync(candidateUrl, targetUri, {
             headers: AUDIO_CACHE_DOWNLOAD_HEADERS,
@@ -336,7 +336,9 @@ class AudioFileCacheManager {
       }
 
       if (!downloadResult) {
-        throw new Error(`download failed for ${musicId}`)
+        throw new Error(
+          `download failed for ${musicId}, candidates=${JSON.stringify(candidates)}`
+        )
       }
 
       const finalUri = usedTargetUri || downloadResult.uri

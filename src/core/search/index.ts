@@ -7,6 +7,7 @@ import { DiscoverSourceId } from '../../types/discover'
 import { SearchResult, Track } from '../../types/music'
 import { httpRequest, withRetry } from '../discover/http'
 import { wyRequest } from '../discover/wyCrypto'
+import { normalizeImageUrl } from '../../utils/url'
 import CryptoJS from 'crypto-js'
 
 interface SearchOptions {
@@ -271,6 +272,7 @@ function mapKwTrack(item: any): Track | null {
 function mapWyTrack(item: any): Track | null {
   const songmid = String(item?.id || '')
   if (!songmid) return null
+  const cover = normalizeImageUrl(item?.al?.picUrl, 500)
 
   const quality: Record<string, boolean> = {}
   if (item?.hr) quality.flac24bit = true
@@ -287,10 +289,10 @@ function mapWyTrack(item: any): Track | null {
     album: decodeHtml(item?.al?.name),
     duration: toDurationMs(item?.dt),
     url: '',
-    coverUrl: item?.al?.picUrl || undefined,
+    coverUrl: cover,
     source: 'wy',
     songmid,
-    picUrl: item?.al?.picUrl || undefined,
+    picUrl: cover,
   }
 
   if (Object.keys(quality).length) {
