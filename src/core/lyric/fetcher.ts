@@ -8,6 +8,7 @@ import { Track } from '../../types/music'
 import { LyricLine, parseLrc, mergeLyricTranslation } from './parser'
 import { wyRequest } from '../discover/wyCrypto'
 import { inflate } from 'pako'
+import { decodeByIconvCompat } from './iconvCompat'
 
 /** 歌词数据 */
 export interface LyricData {
@@ -263,6 +264,13 @@ function parseKwSecondsToMs(raw: unknown): number | undefined {
   return Math.max(0, Math.round(value * 1000))
 }
 
+function normalizeKwSongmid(raw: unknown): string {
+  return String(raw ?? '')
+    .trim()
+    .replace(/^kw_/i, '')
+    .replace(/^MUSIC_/i, '')
+}
+
 function parseLrcTimestampToMs(raw: string): number | undefined {
   const matched = String(raw || '').trim().match(/^(\d{1,2}):(\d{1,2})(?:\.(\d{1,3}))?$/)
   if (!matched) return undefined
@@ -411,9 +419,16 @@ function findBytesIndex(source: Uint8Array, pattern: number[]): number {
 }
 
 function decodeBytesByEncoding(bytes: Uint8Array, encoding: string): string | undefined {
-  if (typeof globalThis.TextDecoder !== 'function') return undefined
+  if (typeof globalThis.TextDecoder === 'function') {
+    try {
+      return new TextDecoder(encoding).decode(bytes)
+    } catch {
+      // ignore and fallback below
+    }
+  }
+
   try {
-    return new TextDecoder(encoding).decode(bytes)
+    return decodeByIconvCompat(bytes, encoding)
   } catch {
     return undefined
   }
@@ -443,7 +458,13 @@ function buildKwNewlyricQuery(songmid: string, isGetLyricx = true): string {
     }
   }
 
-  return encodeBase64Bytes(new Uint8Array(output.buffer))
+  // 与 CeruMusic / lx-music-desktop 行为一致：按 Uint16Array 的元素值逐字节编码，
+  // 不能直接取底层 buffer（会夹带 0x00，导致 newlyric 返回 TP=DENY REQUEST）。
+  const encodedBytes = new Uint8Array(output.length)
+  for (let index = 0; index < output.length; index += 1) {
+    encodedBytes[index] = output[index] & 0xff
+  }
+  return encodeBase64Bytes(encodedBytes)
 }
 
 function decodeKwNewlyricRaw(raw: Uint8Array, isGetLyricx: boolean): string | undefined {
@@ -689,7 +710,8 @@ async function fetchMgLyric(track: Track): Promise<LyricData> {
  */
 export async function fetchLyric(track: Track): Promise<LyricData> {
   const source = track.source || 'kw'
-  const songmid = track.songmid || track.id
+  const rawSongmid = track.songmid || track.id
+  const songmid = source === 'kw' ? normalizeKwSongmid(rawSongmid) : rawSongmid
 
   if (!songmid) return EMPTY_LYRIC
 

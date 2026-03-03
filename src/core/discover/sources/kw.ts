@@ -40,6 +40,22 @@ const formatDuration = (seconds: number): number => {
   return Math.max(0, Math.floor(seconds * 1000))
 }
 
+function normalizeKwSongmid(raw: unknown): string {
+  return String(raw ?? '')
+    .trim()
+    .replace(/^kw_/i, '')
+    .replace(/^MUSIC_/i, '')
+}
+
+function extractKwRidFromParam(param: unknown): string {
+  const text = String(param ?? '').trim()
+  if (!text) return ''
+  const parts = text.split(';')
+  const ridPart = parts.find(part => /^MUSIC_/i.test(String(part || '').trim()))
+  if (!ridPart) return ''
+  return normalizeKwSongmid(ridPart)
+}
+
 function parseQualityTypes(raw: string | undefined) {
   if (!raw) return {}
   const types: Record<string, boolean> = {}
@@ -72,17 +88,29 @@ const toHiResCover = (url: string | undefined): string | undefined => {
   return normalizeImageUrl(url.replace('/albumcover/120/', '/albumcover/500/'), 500)
 }
 
-function mapTrack(item: any): Track {
-  const songmid = String(item.id || item.rid || item.musicrid || '')
+function mapTrack(item: any): Track | null {
+  const songmid = normalizeKwSongmid(
+    item.id || item.rid || item.musicrid || extractKwRidFromParam(item.param)
+  )
+  if (!songmid) return null
   const source = 'kw'
   const qualitys = parseQualityTypes(item.N_MINFO || item.minfo)
-  const cover = toHiResCover(item.pic || item.img || item.albumpic)
+  const cover = toHiResCover(
+    item.pic ||
+      item.img ||
+      item.albumpic ||
+      item.web_albumpic_short ||
+      item.web_albumpic ||
+      item.album_pic
+  )
   return {
     id: `${source}_${songmid}`,
     title: item.name || item.NAME || '',
     artist: item.artist || item.ARTIST || '',
     album: item.album || item.ALBUM || '',
-    duration: formatDuration(Number(item.duration || item.DURATION || 0)),
+    duration: formatDuration(
+      Number(item.song_duration || item.SONG_DURATION || item.duration || item.DURATION || 0)
+    ),
     url: '',
     coverUrl: cover,
     source,
@@ -208,15 +236,18 @@ async function getSongListDetail(id: string, page: number): Promise<SongListDeta
   )
   const body = resp.data
   const playlistCover = normalizeImageUrl(body?.pic, 500) || ''
-  const list = (body?.musiclist || []).map((item: any) => {
-    const track = mapTrack(item)
-    // KW 歌单详情 API 的 musiclist 不含歌曲封面，用歌单封面兜底
-    if (!track.coverUrl && playlistCover) {
-      track.coverUrl = playlistCover
-      track.picUrl = playlistCover
-    }
-    return track
-  })
+  const list = (body?.musiclist || [])
+    .map((item: any) => {
+      const track = mapTrack(item)
+      if (!track) return null
+      // KW 歌单详情 API 的 musiclist 不含歌曲封面，用歌单封面兜底
+      if (!track.coverUrl && playlistCover) {
+        track.coverUrl = playlistCover
+        track.picUrl = playlistCover
+      }
+      return track
+    })
+    .filter((item): item is Track => !!item)
   const total = Number(body?.total || list.length)
   const limit = Number(body?.rn || DETAIL_LIMIT)
   return {
@@ -355,7 +386,9 @@ async function getBoardList(boardId: string, page: number): Promise<LeaderboardD
   )
 
   const body = resp.data
-  const list = (body?.musiclist || body?.list || []).map((item: any) => mapTrack(item))
+  const list = (body?.musiclist || body?.list || [])
+    .map((item: any) => mapTrack(item))
+    .filter((item): item is Track => !!item)
   const total = Number(body?.num || body?.total || list.length)
   const limit = Number(body?.rn || TOP_LIMIT)
   return {

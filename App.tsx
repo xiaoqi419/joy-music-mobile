@@ -607,11 +607,19 @@ function AppContent() {
         Alert.alert('暂无可播放内容', `${board.source.toUpperCase()} 当前榜单为空，请切换平台重试。`)
         return
       }
+      const detailTracks = detail.list.map((track) => {
+        if (track.coverUrl || track.picUrl || !board.coverUrl) return track
+        return {
+          ...track,
+          coverUrl: board.coverUrl,
+          picUrl: board.coverUrl,
+        }
+      })
       setDetailView({
         title: board.name,
         description: `${board.source.toUpperCase()} 榜单`,
         coverUrl: board.coverUrl,
-        tracks: detail.list,
+        tracks: detailTracks,
         favoritePayload: {
           type: 'leaderboard',
           source: board.source,

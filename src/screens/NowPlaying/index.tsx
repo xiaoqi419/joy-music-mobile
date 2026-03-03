@@ -39,6 +39,7 @@ import musicManager, { type Quality } from '../../core/music';
 import { ALL_QUALITIES } from '../../core/config/musicSource';
 import { getLyric, LyricData } from '../../core/lyric';
 import { getTrackComments, type TrackComment } from '../../core/comment';
+import { httpRequest } from '../../core/discover/http';
 import LyricsView from '../../components/common/LyricsView';
 import type { RootState } from '../../store';
 import type { Track } from '../../types/music';
@@ -109,6 +110,13 @@ function formatMs(ms: number): string {
   const m = Math.floor(totalSec / 60);
   const s = totalSec % 60;
   return `${m}:${String(s).padStart(2, '0')}`;
+}
+
+function normalizeKwSongmid(raw: unknown): string {
+  return String(raw ?? '')
+    .trim()
+    .replace(/^kw_/i, '')
+    .replace(/^MUSIC_/i, '');
 }
 
 function formatLikeCount(count: number): string {
@@ -236,11 +244,16 @@ export default function NowPlaying({ onClose }: NowPlayingProps) {
     reduxCurrentTrack,
   ]);
   const [displayTrack, setDisplayTrack] = useState<Track | null>(null);
+  const [kwCoverFallback, setKwCoverFallback] = useState<string | undefined>(undefined);
   const fallbackTrack = queueDraft.find(Boolean) || queue.find(Boolean) || controllerQueue.find(Boolean) || null;
   const renderTrack = activeTrack || displayTrack || fallbackTrack;
-  const renderCoverUrl = useMemo(
+  const baseCoverUrl = useMemo(
     () => normalizeImageUrl(renderTrack?.coverUrl || renderTrack?.picUrl, 500),
     [renderTrack?.coverUrl, renderTrack?.picUrl]
+  );
+  const renderCoverUrl = useMemo(
+    () => kwCoverFallback || baseCoverUrl,
+    [kwCoverFallback, baseCoverUrl]
   );
   const getTrackIdentityToken = useCallback((track: Track | null | undefined): string => {
     if (!track) return '';
@@ -296,6 +309,44 @@ export default function NowPlaying({ onClose }: NowPlayingProps) {
     if (!activeTrack) return;
     setDisplayTrack(activeTrack);
   }, [activeTrack]);
+
+  useEffect(() => {
+    setKwCoverFallback(undefined);
+  }, [renderTrack?.id, renderTrack?.songmid, renderTrack?.source]);
+
+  useEffect(() => {
+    if (!renderTrack) return;
+    if (baseCoverUrl) return;
+    if (String(renderTrack.source || '').toLowerCase() !== 'kw') return;
+
+    const songmid = normalizeKwSongmid(renderTrack.songmid || renderTrack.id);
+    if (!songmid) return;
+
+    let active = true;
+    void (async() => {
+      try {
+        const resp = await httpRequest('https://artistpicserver.kuwo.cn/pic.web', {
+          query: {
+            corp: 'kuwo',
+            type: 'rid_pic',
+            pictype: 500,
+            size: 500,
+            rid: songmid,
+          },
+        });
+        const resolved = normalizeImageUrl(String(resp.data ?? '').trim(), 500);
+        if (active && resolved) {
+          setKwCoverFallback(resolved);
+        }
+      } catch {
+        // ignore cover fallback failures
+      }
+    })();
+
+    return () => {
+      active = false;
+    };
+  }, [baseCoverUrl, renderTrack?.id, renderTrack?.songmid, renderTrack?.source]);
 
   useEffect(() => {
     setQueueDraft(resolveQueueSnapshot());
