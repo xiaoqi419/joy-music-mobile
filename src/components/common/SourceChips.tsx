@@ -67,7 +67,9 @@ const styles = StyleSheet.create({
     borderRadius: borderRadius.sm,
     borderWidth: 1,
     paddingHorizontal: 10,
-    paddingVertical: 5,
+    paddingVertical: 8,
+    minHeight: 44,
+    justifyContent: 'center',
   },
   chipText: {
     fontSize: fontSize.caption1,

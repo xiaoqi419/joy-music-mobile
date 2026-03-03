@@ -47,6 +47,8 @@ export default React.memo(function TrackListItem({
       style={[styles.container, { height: TRACK_ITEM_HEIGHT }]}
       onPress={() => onPress?.(track)}
       activeOpacity={0.6}
+      accessibilityRole="button"
+      accessibilityLabel={`播放 ${track.title}`}
     >
       {/* Left: Index or playing indicator */}
       {showIndex && (
@@ -172,8 +174,8 @@ const styles = StyleSheet.create({
     marginTop: 2,
   },
   moreButton: {
-    width: 36,
-    height: 36,
+    width: 44,
+    height: 44,
     alignItems: 'center',
     justifyContent: 'center',
   },

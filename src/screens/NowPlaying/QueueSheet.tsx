@@ -25,7 +25,8 @@ import {
 import { Ionicons } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useDispatch, useSelector } from 'react-redux';
-import { useTheme, spacing, fontSize, borderRadius } from '../../theme';
+import { useTheme, spacing, fontSize, borderRadius, motion } from '../../theme';
+import useReduceMotion from '../../hooks/useReduceMotion';
 import { playerController } from '../../core/player';
 import type { RootState } from '../../store';
 import type { Track } from '../../types/music';
@@ -52,6 +53,7 @@ function QueueSheet({
   onSyncStore,
 }: QueueSheetProps) {
   const { colors, isDark } = useTheme();
+  const reduceMotion = useReduceMotion();
   const insets = useSafeAreaInsets();
   const dispatch = useDispatch();
   const queue = useSelector((state: RootState) => state.player.playlist);
@@ -122,15 +124,20 @@ function QueueSheet({
 
   /* ── 关闭动画 ── */
   const closeQueueSheet = useCallback(() => {
+    if (reduceMotion) {
+      animValue.setValue(0);
+      onClose();
+      return;
+    }
     Animated.timing(animValue, {
       toValue: 0,
-      duration: 200,
+      duration: motion.duration.quick,
       easing: Easing.out(Easing.cubic),
       useNativeDriver: true,
     }).start(() => {
       onClose();
     });
-  }, [animValue, onClose]);
+  }, [animValue, onClose, reduceMotion]);
 
   /* ── 队列操作回调 ── */
   const handleAppendTrackToPlaylist = useCallback(

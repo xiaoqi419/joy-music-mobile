@@ -20,6 +20,7 @@ import {
 } from 'react-native'
 import { useTheme, spacing, fontSize } from '../../theme'
 import { LyricLine, findCurrentLineIndex } from '../../core/lyric'
+import useReduceMotion from '../../hooks/useReduceMotion'
 
 interface LyricsViewProps {
   /** 已解析的歌词行 */
@@ -70,6 +71,7 @@ const LyricLineItem = React.memo(function LyricLineItem({
   onPress,
 }: LyricLineItemProps) {
   const { colors } = useTheme()
+  const reduceMotion = useReduceMotion()
   const highlightAnim = useRef(new Animated.Value(isCurrent ? 1 : 0)).current
   const opacityAnim = useRef(
     new Animated.Value(isCurrent ? 1 : Math.max(0.25, 1 - distance * 0.18))
@@ -78,6 +80,11 @@ const LyricLineItem = React.memo(function LyricLineItem({
   /** isCurrent / distance 变化时平滑过渡 */
   useEffect(() => {
     const targetOpacity = isCurrent ? 1 : Math.max(0.25, 1 - distance * 0.18)
+    if (reduceMotion) {
+      highlightAnim.setValue(isCurrent ? 1 : 0)
+      opacityAnim.setValue(targetOpacity)
+      return
+    }
     Animated.parallel([
       Animated.timing(highlightAnim, {
         toValue: isCurrent ? 1 : 0,
@@ -92,7 +99,7 @@ const LyricLineItem = React.memo(function LyricLineItem({
         useNativeDriver: true,
       }),
     ]).start()
-  }, [isCurrent, distance, highlightAnim, opacityAnim])
+  }, [distance, highlightAnim, isCurrent, opacityAnim, reduceMotion])
 
   const scale = highlightAnim.interpolate({
     inputRange: [0, 1],

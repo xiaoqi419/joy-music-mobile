@@ -26,7 +26,8 @@ import {
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { useTheme, spacing, fontSize, borderRadius } from '../../theme';
+import { useTheme, spacing, fontSize, borderRadius, motion } from '../../theme';
+import useReduceMotion from '../../hooks/useReduceMotion';
 import { getTrackComments, type TrackComment } from '../../core/comment';
 import { normalizeImageUrl } from '../../utils/url';
 import type { Track } from '../../types/music';
@@ -97,6 +98,7 @@ interface CommentSheetProps {
 
 function CommentSheet({ visible, track, animValue, onClose }: CommentSheetProps) {
   const { colors, isDark } = useTheme();
+  const reduceMotion = useReduceMotion();
   const insets = useSafeAreaInsets();
 
   // ---- comment state ----
@@ -127,15 +129,20 @@ function CommentSheet({ visible, track, animValue, onClose }: CommentSheetProps)
 
   // ---- close handler ----
   const closeCommentSheet = useCallback(() => {
+    if (reduceMotion) {
+      animValue.setValue(0);
+      onClose();
+      return;
+    }
     Animated.timing(animValue, {
       toValue: 0,
-      duration: 200,
+      duration: motion.duration.quick,
       easing: Easing.out(Easing.cubic),
       useNativeDriver: true,
     }).start(() => {
       onClose();
     });
-  }, [animValue, onClose]);
+  }, [animValue, onClose, reduceMotion]);
 
   // ---- data loading ----
   const loadCommentsForTrack = useCallback(

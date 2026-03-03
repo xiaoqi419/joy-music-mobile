@@ -1,5 +1,5 @@
 /**
- * iOS 26 style spacing, typography, and border radius constants
+ * Spacing and typography tokens
  */
 
 export const spacing = {
@@ -26,10 +26,10 @@ export const fontSize = {
 } as const
 
 export const borderRadius = {
-  sm: 8,
-  md: 12,
-  lg: 16,
-  xl: 20,
+  sm: 12,
+  md: 16,
+  lg: 22,
+  xl: 30,
   full: 9999,
 } as const
 

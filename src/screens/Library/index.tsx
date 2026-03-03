@@ -4,7 +4,6 @@
 
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
-  AccessibilityInfo,
   ActivityIndicator,
   Alert,
   Animated,
@@ -55,6 +54,7 @@ import {
   subscribeRuntimeLogs,
   type RuntimeLogEntry,
 } from '../../core/logging/runtimeLogger'
+import useReduceMotion from '../../hooks/useReduceMotion'
 
 interface LibraryScreenProps {
   onTrackPress?: (track: Track) => void
@@ -139,6 +139,7 @@ const QUALITY_LABELS: Record<Quality, string> = {
   atmos_plus: '全景增强 (Atmos+)',
   master: '超清母带 (Master)',
 }
+const ON_ACCENT_COLOR = '#FFFFFF'
 
 function formatDateTime(timestamp: number | null): string {
   if (!timestamp) return '--'
@@ -149,6 +150,13 @@ function formatDateTime(timestamp: number | null): string {
   const mi = String(date.getMinutes()).padStart(2, '0')
   const ss = String(date.getSeconds()).padStart(2, '0')
   return `${mm}-${dd} ${hh}:${mi}:${ss}`
+}
+
+function withAlpha(color: string, alpha: number): string {
+  const match = /^#([0-9a-fA-F]{6})$/.exec(color)
+  if (!match) return color
+  const hexAlpha = Math.round(Math.max(0, Math.min(alpha, 1)) * 255).toString(16).padStart(2, '0')
+  return `#${match[1]}${hexAlpha}`
 }
 
 function MotionPressable({
@@ -228,7 +236,7 @@ export default function LibraryScreen(_props: LibraryScreenProps) {
   ])
 
   const [subPage, setSubPage] = useState<LibrarySubPage>('main')
-  const [reduceMotionEnabled, setReduceMotionEnabled] = useState(false)
+  const reduceMotionEnabled = useReduceMotion()
   const pageAnim = useRef(new Animated.Value(1)).current
   const mainListRef = useRef<FlatList<Track> | null>(null)
   const subPageScrollRef = useRef<ScrollView | null>(null)
@@ -678,24 +686,6 @@ export default function LibraryScreen(_props: LibraryScreenProps) {
   }, [subPage])
 
   useEffect(() => {
-    let mounted = true
-    void AccessibilityInfo.isReduceMotionEnabled()
-      .then((enabled) => {
-        if (mounted) setReduceMotionEnabled(Boolean(enabled))
-      })
-      .catch(() => {})
-
-    const subscription = AccessibilityInfo.addEventListener?.('reduceMotionChanged', (enabled) => {
-      setReduceMotionEnabled(Boolean(enabled))
-    })
-
-    return () => {
-      mounted = false
-      subscription?.remove?.()
-    }
-  }, [])
-
-  useEffect(() => {
     pageAnim.stopAnimation()
     pageAnim.setValue(0)
     Animated.timing(pageAnim, {
@@ -969,7 +959,7 @@ export default function LibraryScreen(_props: LibraryScreenProps) {
                   style={[styles.qualityChip, { backgroundColor: active ? colors.accent : colors.surfaceSecondary }]}
                 >
                   <View style={styles.qualityChipInner}>
-                    <Text style={[styles.qualityText, { color: active ? '#FFFFFF' : colors.textSecondary }]}>
+                    <Text style={[styles.qualityText, { color: active ? ON_ACCENT_COLOR : colors.textSecondary }]}>
                       {QUALITY_LABELS[quality]}
                     </Text>
                   </View>
@@ -1039,7 +1029,7 @@ export default function LibraryScreen(_props: LibraryScreenProps) {
                       { backgroundColor: enabled ? colors.accent : colors.surfaceSecondary },
                     ]}
                   >
-                    <Text style={[styles.sourceStatusBadgeText, { color: enabled ? '#FFFFFF' : colors.textSecondary }]}>
+                    <Text style={[styles.sourceStatusBadgeText, { color: enabled ? ON_ACCENT_COLOR : colors.textSecondary }]}>
                       {enabled ? '已启用' : '已停用'}
                     </Text>
                   </View>
@@ -1072,12 +1062,12 @@ export default function LibraryScreen(_props: LibraryScreenProps) {
                     style={[
                       styles.cardBtn,
                       {
-                        backgroundColor: enabled ? 'rgba(255,59,48,0.14)' : 'rgba(52,199,89,0.16)',
+                        backgroundColor: enabled ? withAlpha(colors.danger, 0.14) : withAlpha(colors.success, 0.16),
                       },
                     ]}
                   >
                     <View style={styles.cardBtnContent}>
-                      <Text style={[styles.cardBtnText, { color: enabled ? '#D70015' : '#16833D' }]}>
+                      <Text style={[styles.cardBtnText, { color: enabled ? colors.danger : colors.success }]}>
                         {enabled ? '停用' : '启用'}
                       </Text>
                     </View>
@@ -1173,7 +1163,7 @@ export default function LibraryScreen(_props: LibraryScreenProps) {
     const previewList = [...runtimeLogPreview].slice(-80).reverse()
     const levelColor = (level: RuntimeLogEntry['level']) => {
       if (level === 'error') return colors.danger
-      if (level === 'warn') return '#E68A00'
+      if (level === 'warn') return colors.warning
       if (level === 'info') return colors.accent
       return colors.textSecondary
     }
@@ -1231,7 +1221,7 @@ export default function LibraryScreen(_props: LibraryScreenProps) {
                 style={[
                   styles.logActionBtn,
                   {
-                    backgroundColor: runtimeLogCount === 0 ? colors.surfaceSecondary : 'rgba(255,59,48,0.14)',
+                    backgroundColor: runtimeLogCount === 0 ? colors.surfaceSecondary : withAlpha(colors.danger, 0.14),
                   },
                 ]}
               >
@@ -1380,7 +1370,7 @@ export default function LibraryScreen(_props: LibraryScreenProps) {
       </Animated.View>
 
       <Modal transparent visible={sponsorModalVisible} animationType="fade" onRequestClose={() => setSponsorModalVisible(false)}>
-        <View style={styles.modalMask}>
+        <View style={[styles.modalMask, { backgroundColor: colors.overlay }]}>
           <View style={[styles.modalCard, styles.sponsorModalCard, { backgroundColor: colors.surface }]}>
             <Text style={[styles.modalTitle, { color: colors.text }]}>赞助作者</Text>
             <Text style={[styles.sponsorHint, { color: colors.textSecondary }]}>微信扫一扫支持一下</Text>
@@ -1393,14 +1383,14 @@ export default function LibraryScreen(_props: LibraryScreenProps) {
               style={[styles.modalBtn, styles.sponsorCloseBtn, { backgroundColor: colors.accent }]}
               onPress={() => setSponsorModalVisible(false)}
             >
-              <Text style={[styles.cardBtnText, { color: '#FFFFFF' }]}>关闭</Text>
+              <Text style={[styles.cardBtnText, { color: ON_ACCENT_COLOR }]}>关闭</Text>
             </TouchableOpacity>
           </View>
         </View>
       </Modal>
 
       <Modal transparent visible={sourceModalVisible} animationType="fade" onRequestClose={() => setSourceModalVisible(false)}>
-        <View style={styles.modalMask}>
+        <View style={[styles.modalMask, { backgroundColor: colors.overlay }]}>
           <View style={[styles.modalCard, { backgroundColor: colors.surface }]}>
             <Text style={[styles.modalTitle, { color: colors.text }]}>{editingSourceId ? '编辑音源' : '添加 / URL 导入音源'}</Text>
 
@@ -1466,8 +1456,8 @@ export default function LibraryScreen(_props: LibraryScreenProps) {
               </TouchableOpacity>
               <TouchableOpacity style={[styles.modalBtn, { backgroundColor: colors.accent }]} onPress={handleSubmitSourceModal} disabled={sourceModalLoading}>
                 {sourceModalLoading
-                  ? <ActivityIndicator size="small" color="#FFFFFF" />
-                  : <Text style={[styles.cardBtnText, { color: '#FFFFFF' }]}>{editingSourceId ? '保存' : '确认'}</Text>}
+                  ? <ActivityIndicator size="small" color={ON_ACCENT_COLOR} />
+                  : <Text style={[styles.cardBtnText, { color: ON_ACCENT_COLOR }]}>{editingSourceId ? '保存' : '确认'}</Text>}
               </TouchableOpacity>
             </View>
           </View>
@@ -1502,10 +1492,10 @@ const styles = StyleSheet.create({
     overflow: 'hidden',
   },
   backButton: {
-    minHeight: 32,
+    minHeight: 44,
     flexDirection: 'row',
     alignItems: 'center',
-    paddingHorizontal: 4,
+    paddingHorizontal: spacing.xs,
   },
   backText: {
     fontSize: fontSize.caption1,
@@ -1649,7 +1639,7 @@ const styles = StyleSheet.create({
     overflow: 'hidden',
   },
   qualityChipInner: {
-    minHeight: 30,
+    minHeight: 44,
     paddingHorizontal: spacing.sm,
     justifyContent: 'center',
     alignItems: 'center',
@@ -1668,7 +1658,7 @@ const styles = StyleSheet.create({
     overflow: 'hidden',
   },
   actionBtnContent: {
-    minHeight: 42,
+    minHeight: 44,
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
@@ -1730,7 +1720,7 @@ const styles = StyleSheet.create({
     overflow: 'hidden',
   },
   cardBtnContent: {
-    height: 32,
+    minHeight: 44,
     alignItems: 'center',
     justifyContent: 'center',
     paddingHorizontal: spacing.sm,
@@ -1846,7 +1836,7 @@ const styles = StyleSheet.create({
 
   modalMask: {
     flex: 1,
-    backgroundColor: 'rgba(0,0,0,0.38)',
+    backgroundColor: 'transparent',
     alignItems: 'center',
     justifyContent: 'center',
     paddingHorizontal: spacing.md,
@@ -1862,7 +1852,7 @@ const styles = StyleSheet.create({
     marginBottom: spacing.sm,
   },
   segmentWrap: {
-    height: 34,
+    minHeight: 44,
     borderRadius: borderRadius.sm,
     padding: 2,
     flexDirection: 'row',
@@ -1879,7 +1869,7 @@ const styles = StyleSheet.create({
     fontWeight: '700',
   },
   input: {
-    height: 42,
+    minHeight: 44,
     borderWidth: StyleSheet.hairlineWidth,
     borderRadius: borderRadius.sm,
     paddingHorizontal: spacing.sm,
@@ -1888,7 +1878,7 @@ const styles = StyleSheet.create({
   modalActions: { flexDirection: 'row', gap: spacing.sm },
   modalBtn: {
     flex: 1,
-    height: 38,
+    minHeight: 44,
     borderRadius: borderRadius.sm,
     alignItems: 'center',
     justifyContent: 'center',

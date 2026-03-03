@@ -67,6 +67,7 @@ const IMPORT_SOURCE_OPTIONS: Array<{
 
 const DETAIL_TRACK_INITIAL_COUNT = 80
 const DETAIL_TRACK_BATCH_SIZE = 80
+const ON_ACCENT_COLOR = '#FFFFFF'
 
 type DetailTrackSortMode = 'default' | 'titleAsc' | 'artistAsc' | 'durationDesc' | 'durationAsc'
 
@@ -284,7 +285,7 @@ function hslToHex(hue: number, saturation: number, lightness: number): string {
  */
 function buildCoverGradientColors(coverUrl: string | undefined, isDark: boolean): [string, string] {
   if (!coverUrl) {
-    return isDark ? ['#5A3B1E', '#3A2818'] : ['#B77933', '#895826']
+    return isDark ? ['#16253C', '#0C1527'] : ['#D5E6FF', '#A4C3FF']
   }
 
   const seed = hashString(coverUrl)
@@ -878,9 +879,7 @@ export default function PlaylistScreen({ onTrackPress, onTrackMorePress, onPlayA
         style={({ pressed }) => [
           styles.detailTrackRow,
           {
-            backgroundColor: isCurrent
-              ? (isDark ? 'rgba(255,191,104,0.16)' : 'rgba(201,128,41,0.12)')
-              : 'transparent',
+            backgroundColor: isCurrent ? colors.accentLight : 'transparent',
             opacity: pressed ? 0.88 : 1,
           },
         ]}
@@ -923,7 +922,7 @@ export default function PlaylistScreen({ onTrackPress, onTrackMorePress, onPlayA
         </Pressable>
       </Pressable>
     )
-  }, [colors.accent, colors.surfaceSecondary, colors.text, colors.textSecondary, colors.textTertiary, currentTrackId, isDark, isPlaying, onTrackMorePress, onTrackPress, selectedPlaylistId])
+  }, [colors.accent, colors.accentLight, colors.surfaceSecondary, colors.text, colors.textSecondary, colors.textTertiary, currentTrackId, isPlaying, onTrackMorePress, onTrackPress, selectedPlaylistId])
 
   const renderPlaylistCard = useCallback(({ item }: { item: Playlist }) => {
     const isCurrent = item.id === currentPlaylistId
@@ -934,12 +933,8 @@ export default function PlaylistScreen({ onTrackPress, onTrackMorePress, onPlayA
         style={({ pressed }) => [
           styles.playlistCard,
           {
-            backgroundColor: isCurrent
-              ? (isDark ? 'rgba(184,125,67,0.28)' : '#FFF1E0')
-              : colors.surface,
-            borderColor: isCurrent
-              ? (isDark ? 'rgba(255,196,128,0.5)' : '#E3BA8D')
-              : colors.separator,
+            backgroundColor: isCurrent ? colors.accentLight : colors.surface,
+            borderColor: isCurrent ? colors.accentBlue : colors.separator,
             opacity: pressed ? 0.92 : 1,
           },
         ]}
@@ -991,13 +986,13 @@ export default function PlaylistScreen({ onTrackPress, onTrackMorePress, onPlayA
             ]}
             onPress={() => handlePlayAll(item)}
           >
-            <Ionicons name="play" size={14} color="#FFFFFF" />
-            <Text style={[styles.actionBtnText, { color: '#FFFFFF' }]}>播放全部</Text>
+            <Ionicons name="play" size={14} color={ON_ACCENT_COLOR} />
+            <Text style={[styles.actionBtnText, { color: ON_ACCENT_COLOR }]}>播放全部</Text>
           </Pressable>
         </View>
       </Pressable>
     )
-  }, [colors.accent, colors.separator, colors.surface, colors.surfaceSecondary, colors.text, colors.textSecondary, colors.textTertiary, currentPlaylistId, handleDeletePlaylist, handlePlayAll, isDark, openPlaylistDetail])
+  }, [colors.accent, colors.accentBlue, colors.accentLight, colors.separator, colors.surface, colors.surfaceSecondary, colors.text, colors.textSecondary, colors.textTertiary, currentPlaylistId, handleDeletePlaylist, handlePlayAll, openPlaylistDetail])
 
   const detailCover = useMemo(
     () => (selectedPlaylist ? normalizeImageUrl(getPlaylistCover(selectedPlaylist), 500) : undefined),
@@ -1025,21 +1020,23 @@ export default function PlaylistScreen({ onTrackPress, onTrackMorePress, onPlayA
           </View>
 
           <LinearGradient
-            colors={isDark ? ['#5A3B1E', '#3F2A17'] : ['#B57A3B', '#8C5B2B']}
+            colors={[colors.cardGradientStart, colors.cardGradientEnd]}
             start={{ x: 0, y: 0 }}
             end={{ x: 1, y: 1 }}
             style={styles.heroCard}
           >
             <View style={styles.heroTopRow}>
               <View style={styles.heroMain}>
-                <Text style={styles.heroTitle}>我的音乐库</Text>
-                <Text style={styles.heroSubtitle}>
+                <Text style={[styles.heroTitle, { color: colors.text }]}>我的音乐库</Text>
+                <Text style={[styles.heroSubtitle, { color: colors.textSecondary }]}>
                   {playlists.length} 个歌单 · {totalTracks} 首歌曲
                 </Text>
               </View>
-              <View style={styles.heroBadge}>
-                <Ionicons name="musical-notes-outline" size={14} color="#FDF4E7" />
-                <Text style={styles.heroBadgeText}>{currentPlaylistId ? '已选择当前歌单' : '未选择当前歌单'}</Text>
+              <View style={[styles.heroBadge, { backgroundColor: colors.glassSurface }]}>
+                <Ionicons name="musical-notes-outline" size={14} color={colors.textSecondary} />
+                <Text style={[styles.heroBadgeText, { color: colors.textSecondary }]}>
+                  {currentPlaylistId ? '已选择当前歌单' : '未选择当前歌单'}
+                </Text>
               </View>
             </View>
 
@@ -1047,23 +1044,28 @@ export default function PlaylistScreen({ onTrackPress, onTrackMorePress, onPlayA
               <Pressable
                 style={({ pressed }) => [
                   styles.heroPrimaryAction,
+                  { backgroundColor: colors.accentBlue },
                   { opacity: pressed ? 0.84 : 1 },
                 ]}
                 onPress={() => setShowCreateModal(true)}
               >
-                <Ionicons name="add-circle-outline" size={18} color="#5A3A1A" />
-                <Text style={styles.heroPrimaryActionText}>新建歌单</Text>
+                <Ionicons name="add-circle-outline" size={18} color={ON_ACCENT_COLOR} />
+                <Text style={[styles.heroPrimaryActionText, { color: ON_ACCENT_COLOR }]}>新建歌单</Text>
               </Pressable>
 
               <Pressable
                 style={({ pressed }) => [
                   styles.heroSecondaryAction,
+                  {
+                    backgroundColor: colors.glassSurface,
+                    borderColor: colors.glassBorder,
+                  },
                   { opacity: pressed ? 0.84 : 1 },
                 ]}
                 onPress={() => setShowImportModal(true)}
               >
-                <Ionicons name="download-outline" size={17} color="#FDF4E7" />
-                <Text style={styles.heroSecondaryActionText}>导入歌单</Text>
+                <Ionicons name="download-outline" size={17} color={colors.textSecondary} />
+                <Text style={[styles.heroSecondaryActionText, { color: colors.textSecondary }]}>导入歌单</Text>
               </Pressable>
             </View>
           </LinearGradient>
@@ -1128,34 +1130,47 @@ export default function PlaylistScreen({ onTrackPress, onTrackMorePress, onPlayA
                   <Pressable
                     style={({ pressed }) => [
                       styles.backButton,
-                      { backgroundColor: 'rgba(255,255,255,0.18)', opacity: pressed ? 0.82 : 1 },
+                      {
+                        backgroundColor: colors.glassSurface,
+                        borderColor: colors.glassBorder,
+                        opacity: pressed ? 0.82 : 1,
+                      },
                     ]}
                     onPress={closePlaylistDetail}
                   >
-                    <Ionicons name="chevron-back" size={18} color="#FFFFFF" />
+                    <Ionicons name="chevron-back" size={18} color={colors.text} />
                   </Pressable>
                 </View>
 
                 <View style={styles.detailHeroMain}>
                   <View style={styles.detailCoverOuter}>
-                    <View style={[styles.detailCover, styles.detailHeroCover, { backgroundColor: 'rgba(255,255,255,0.22)' }]}>
+                    <View
+                      style={[
+                        styles.detailCover,
+                        styles.detailHeroCover,
+                        {
+                          backgroundColor: colors.glassSurface,
+                          borderColor: colors.glassBorder,
+                        },
+                      ]}
+                    >
                       {detailCoverSource
                         ? <Image source={detailCoverSource} style={styles.detailCoverImage} resizeMode="cover" fadeDuration={0} />
-                        : <Ionicons name="albums-outline" size={32} color="#FFFFFF" />}
+                        : <Ionicons name="albums-outline" size={32} color={colors.text} />}
                     </View>
                   </View>
 
                   <View style={styles.detailHeroText}>
-                    <Text style={styles.detailHeroTitle} numberOfLines={2}>{selectedPlaylist.name}</Text>
+                    <Text style={[styles.detailHeroTitle, { color: colors.text }]} numberOfLines={2}>{selectedPlaylist.name}</Text>
                     <View style={styles.detailHeroBottomInfo}>
-                      <Text style={styles.detailHeroMeta} numberOfLines={1}>
+                      <Text style={[styles.detailHeroMeta, { color: colors.textSecondary }]} numberOfLines={1}>
                         {sourceLabel} · {selectedPlaylist.tracks.length} 首
                       </Text>
-                      <Text style={styles.detailHeroMeta} numberOfLines={1}>
+                      <Text style={[styles.detailHeroMeta, { color: colors.textSecondary }]} numberOfLines={1}>
                         更新于 {formatUpdatedAt(selectedPlaylist.updatedAt)}
                       </Text>
                       {!!detailHint && (
-                        <Text style={styles.detailHeroHint} numberOfLines={2}>
+                        <Text style={[styles.detailHeroHint, { color: colors.textSecondary }]} numberOfLines={2}>
                           {detailHint}
                         </Text>
                       )}
@@ -1165,30 +1180,48 @@ export default function PlaylistScreen({ onTrackPress, onTrackMorePress, onPlayA
 
                 <View style={styles.detailHeroActionRow}>
                   <Pressable
-                    style={({ pressed }) => [styles.detailActionCapsule, { opacity: pressed ? 0.84 : 1 }]}
+                    style={({ pressed }) => [
+                      styles.detailActionCapsule,
+                      {
+                        backgroundColor: colors.glassSurface,
+                        borderColor: colors.glassBorder,
+                        opacity: pressed ? 0.84 : 1,
+                      },
+                    ]}
                     onPress={() => { void handleExportPlaylist(selectedPlaylist) }}
                   >
-                    <Ionicons name="download-outline" size={15} color="#FFFFFF" />
-                    <Text style={styles.detailActionCapsuleText}>导出</Text>
-                  </Pressable>
-                  <Pressable
-                    style={({ pressed }) => [styles.detailActionCapsule, { opacity: pressed ? 0.84 : 1 }]}
-                    onPress={handleDetailQuickAction}
-                  >
-                    <Ionicons name="chatbubble-ellipses-outline" size={15} color="#FFFFFF" />
-                    <Text style={styles.detailActionCapsuleText}>评论</Text>
+                    <Ionicons name="download-outline" size={15} color={colors.text} />
+                    <Text style={[styles.detailActionCapsuleText, { color: colors.text }]}>导出</Text>
                   </Pressable>
                   <Pressable
                     style={({ pressed }) => [
                       styles.detailActionCapsule,
-                      !canFavoritePlaylist && styles.detailActionCapsuleDisabled,
+                      {
+                        backgroundColor: colors.glassSurface,
+                        borderColor: colors.glassBorder,
+                        opacity: pressed ? 0.84 : 1,
+                      },
+                    ]}
+                    onPress={handleDetailQuickAction}
+                  >
+                    <Ionicons name="chatbubble-ellipses-outline" size={15} color={colors.text} />
+                    <Text style={[styles.detailActionCapsuleText, { color: colors.text }]}>评论</Text>
+                  </Pressable>
+                  <Pressable
+                    style={({ pressed }) => [
+                      styles.detailActionCapsule,
+                      {
+                        backgroundColor: colors.glassSurface,
+                        borderColor: colors.glassBorder,
+                      },
+                      !canFavoritePlaylist && { backgroundColor: colors.surfaceSecondary },
                       { opacity: canFavoritePlaylist ? (pressed ? 0.84 : 1) : 0.56 },
                     ]}
                     onPress={() => handleFavoritePlaylist(selectedPlaylist)}
                     disabled={!canFavoritePlaylist}
                   >
-                    <Ionicons name="bookmark-outline" size={15} color="#FFFFFF" />
-                    <Text style={styles.detailActionCapsuleText}>
+                    <Ionicons name="bookmark-outline" size={15} color={colors.text} />
+                    <Text style={[styles.detailActionCapsuleText, { color: colors.text }]}>
                       {canFavoritePlaylist ? '收藏' : '已收藏'}
                     </Text>
                   </Pressable>
@@ -1204,7 +1237,7 @@ export default function PlaylistScreen({ onTrackPress, onTrackMorePress, onPlayA
                     ]}
                     onPress={() => handlePlayAll(selectedPlaylist)}
                   >
-                    <Ionicons name="play" size={20} color="#FFFFFF" />
+                    <Ionicons name="play" size={20} color={ON_ACCENT_COLOR} />
                   </Pressable>
 
                   <View style={styles.detailPlayTextWrap}>
@@ -1297,7 +1330,7 @@ export default function PlaylistScreen({ onTrackPress, onTrackMorePress, onPlayA
       {renderDetail()}
 
       <Modal transparent visible={showCreateModal} animationType="fade" onRequestClose={() => setShowCreateModal(false)}>
-        <View style={styles.modalMask}>
+        <View style={[styles.modalMask, { backgroundColor: colors.overlay }]}>
           <View style={[styles.modalCard, { backgroundColor: colors.surface }]}>
             <Text style={[styles.modalTitle, { color: colors.text }]}>新建歌单</Text>
             <TextInput
@@ -1331,7 +1364,7 @@ export default function PlaylistScreen({ onTrackPress, onTrackMorePress, onPlayA
                 ]}
                 onPress={handleCreatePlaylist}
               >
-                <Text style={[styles.modalBtnText, { color: '#FFFFFF' }]}>创建</Text>
+                <Text style={[styles.modalBtnText, { color: ON_ACCENT_COLOR }]}>创建</Text>
               </Pressable>
             </View>
           </View>
@@ -1339,7 +1372,7 @@ export default function PlaylistScreen({ onTrackPress, onTrackMorePress, onPlayA
       </Modal>
 
       <Modal transparent visible={showImportModal} animationType="fade" onRequestClose={() => setShowImportModal(false)}>
-        <View style={styles.modalMask}>
+        <View style={[styles.modalMask, { backgroundColor: colors.overlay }]}>
           <View style={[styles.modalCard, { backgroundColor: colors.surface }]}>
             <Text style={[styles.modalTitle, { color: colors.text }]}>导入歌单</Text>
 
@@ -1407,7 +1440,7 @@ export default function PlaylistScreen({ onTrackPress, onTrackMorePress, onPlayA
         animationType="fade"
         onRequestClose={closeNetworkImportModal}
       >
-        <View style={styles.modalMask}>
+        <View style={[styles.modalMask, { backgroundColor: colors.overlay }]}>
           <View style={[styles.modalCard, { backgroundColor: colors.surface }]}>
             <Text style={[styles.modalTitle, { color: colors.text }]}>网络歌单导入</Text>
             <Text style={[styles.networkHint, { color: colors.textSecondary }]}>选择平台并输入歌单链接或歌单 ID</Text>
@@ -1428,7 +1461,7 @@ export default function PlaylistScreen({ onTrackPress, onTrackMorePress, onPlayA
                     disabled={importLoading}
                     onPress={() => setNetworkSource(option.id)}
                   >
-                    <Text style={[styles.sourceChipText, { color: active ? '#FFFFFF' : colors.textSecondary }]}>
+                    <Text style={[styles.sourceChipText, { color: active ? ON_ACCENT_COLOR : colors.textSecondary }]}>
                       {option.label}
                     </Text>
                   </Pressable>
@@ -1466,13 +1499,13 @@ export default function PlaylistScreen({ onTrackPress, onTrackMorePress, onPlayA
                 disabled={importLoading}
               >
                 {importLoading
-                  ? <ActivityIndicator size="small" color="#FFFFFF" />
-                  : <Text style={[styles.modalBtnText, { color: '#FFFFFF' }]}>开始导入</Text>}
+                  ? <ActivityIndicator size="small" color={ON_ACCENT_COLOR} />
+                  : <Text style={[styles.modalBtnText, { color: ON_ACCENT_COLOR }]}>开始导入</Text>}
               </Pressable>
             </View>
           </View>
           {importLoading && (
-            <View style={styles.importGuardMask}>
+            <View style={[styles.importGuardMask, { backgroundColor: colors.overlay }]}>
               <View style={[styles.importGuardCard, { backgroundColor: colors.surfaceElevated, borderColor: colors.separator }]}>
                 <ActivityIndicator size="small" color={colors.accent} />
                 <Text style={[styles.importGuardText, { color: colors.textSecondary }]}>歌单导入中，请勿退出</Text>
@@ -1483,7 +1516,7 @@ export default function PlaylistScreen({ onTrackPress, onTrackMorePress, onPlayA
       </Modal>
 
       {importLoading && (
-        <View style={styles.loadingMask} pointerEvents="auto">
+        <View style={[styles.loadingMask, { backgroundColor: colors.overlay }]} pointerEvents="auto">
           <View style={[styles.loadingCard, { backgroundColor: colors.surfaceElevated, borderColor: colors.separator }]}>
             <ActivityIndicator size="small" color={colors.accent} />
             <Text style={[styles.loadingText, { color: colors.textSecondary }]}>歌单导入中...</Text>
@@ -1531,13 +1564,11 @@ const styles = StyleSheet.create({
     flex: 1,
   },
   heroTitle: {
-    color: '#FFFFFF',
     fontSize: fontSize.title2,
     fontWeight: '800',
   },
   heroSubtitle: {
     marginTop: spacing.xs,
-    color: '#F8E9D8',
     fontSize: fontSize.caption1,
     fontWeight: '600',
   },
@@ -1548,10 +1579,8 @@ const styles = StyleSheet.create({
     borderRadius: borderRadius.full,
     paddingHorizontal: spacing.sm,
     paddingVertical: 6,
-    backgroundColor: 'rgba(255,255,255,0.18)',
   },
   heroBadgeText: {
-    color: '#FDF4E7',
     fontSize: fontSize.caption2,
     fontWeight: '700',
   },
@@ -1562,31 +1591,28 @@ const styles = StyleSheet.create({
   },
   heroPrimaryAction: {
     flex: 1,
-    minHeight: 42,
+    minHeight: 44,
     borderRadius: borderRadius.full,
-    backgroundColor: '#FFE5C2',
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
     gap: 6,
   },
   heroPrimaryActionText: {
-    color: '#5A3A1A',
     fontSize: fontSize.subhead,
     fontWeight: '700',
   },
   heroSecondaryAction: {
     flex: 1,
-    minHeight: 42,
+    minHeight: 44,
     borderRadius: borderRadius.full,
-    backgroundColor: 'rgba(255,255,255,0.16)',
+    borderWidth: StyleSheet.hairlineWidth,
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
     gap: 6,
   },
   heroSecondaryActionText: {
-    color: '#FFFFFF',
     fontSize: fontSize.subhead,
     fontWeight: '700',
   },
@@ -1663,12 +1689,12 @@ const styles = StyleSheet.create({
     fontWeight: '700',
   },
   deleteButton: {
-    width: 30,
-    height: 30,
-    borderRadius: 15,
+    width: 44,
+    height: 44,
+    borderRadius: borderRadius.full,
     alignItems: 'center',
     justifyContent: 'center',
-    marginTop: -8,
+    marginTop: -4,
   },
   playlistActions: {
     flexDirection: 'row',
@@ -1677,7 +1703,7 @@ const styles = StyleSheet.create({
   },
   actionBtn: {
     flex: 1,
-    minHeight: 40,
+    minHeight: 44,
     borderRadius: borderRadius.sm,
     flexDirection: 'row',
     alignItems: 'center',
@@ -1706,8 +1732,9 @@ const styles = StyleSheet.create({
     overflow: 'hidden',
   },
   backButton: {
-    width: 34,
-    height: 34,
+    width: 44,
+    height: 44,
+    borderWidth: StyleSheet.hairlineWidth,
     borderRadius: borderRadius.full,
     alignItems: 'center',
     justifyContent: 'center',
@@ -1723,7 +1750,6 @@ const styles = StyleSheet.create({
     width: 114,
     height: 114,
     borderRadius: borderRadius.lg + 2,
-    backgroundColor: 'rgba(255,255,255,0.16)',
     alignItems: 'center',
     justifyContent: 'center',
   },
@@ -1731,6 +1757,7 @@ const styles = StyleSheet.create({
     width: 106,
     height: 106,
     borderRadius: borderRadius.lg,
+    borderWidth: StyleSheet.hairlineWidth,
   },
   detailHeroText: {
     flex: 1,
@@ -1741,19 +1768,16 @@ const styles = StyleSheet.create({
     marginTop: spacing.xs,
   },
   detailHeroTitle: {
-    color: '#FFFFFF',
     fontSize: fontSize.title2,
     fontWeight: '700',
   },
   detailHeroMeta: {
     marginTop: 4,
-    color: '#F9ECDD',
     fontSize: fontSize.footnote,
     fontWeight: '600',
   },
   detailHeroHint: {
     marginTop: 2,
-    color: '#F4E7D8',
     fontSize: fontSize.caption2,
     fontWeight: '600',
   },
@@ -1765,19 +1789,15 @@ const styles = StyleSheet.create({
   },
   detailActionCapsule: {
     flex: 1,
-    minHeight: 38,
+    minHeight: 44,
     borderRadius: borderRadius.full,
-    backgroundColor: 'rgba(255,255,255,0.16)',
+    borderWidth: StyleSheet.hairlineWidth,
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
     gap: 6,
   },
-  detailActionCapsuleDisabled: {
-    backgroundColor: 'rgba(255,255,255,0.08)',
-  },
   detailActionCapsuleText: {
-    color: '#FFFFFF',
     fontSize: fontSize.subhead,
     fontWeight: '700',
   },
@@ -1800,9 +1820,9 @@ const styles = StyleSheet.create({
     gap: spacing.sm,
   },
   detailPlayRoundBtn: {
-    width: 42,
-    height: 42,
-    borderRadius: 21,
+    width: 44,
+    height: 44,
+    borderRadius: borderRadius.full,
     alignItems: 'center',
     justifyContent: 'center',
   },
@@ -1823,9 +1843,9 @@ const styles = StyleSheet.create({
     gap: spacing.xs,
   },
   detailToolBtn: {
-    width: 34,
-    height: 34,
-    borderRadius: 17,
+    width: 44,
+    height: 44,
+    borderRadius: borderRadius.full,
     alignItems: 'center',
     justifyContent: 'center',
   },
@@ -1834,7 +1854,7 @@ const styles = StyleSheet.create({
     marginTop: spacing.xs,
     borderRadius: borderRadius.md,
     borderWidth: StyleSheet.hairlineWidth,
-    minHeight: 40,
+    minHeight: 44,
     paddingHorizontal: spacing.sm,
     flexDirection: 'row',
     alignItems: 'center',
@@ -1847,9 +1867,9 @@ const styles = StyleSheet.create({
     paddingVertical: 0,
   },
   detailSearchClearBtn: {
-    width: 24,
-    height: 24,
-    borderRadius: 12,
+    width: 44,
+    height: 44,
+    borderRadius: borderRadius.full,
     alignItems: 'center',
     justifyContent: 'center',
   },
@@ -1956,15 +1976,15 @@ const styles = StyleSheet.create({
     fontSize: fontSize.caption1,
   },
   detailTrackMore: {
-    width: 34,
-    height: 34,
-    borderRadius: 17,
+    width: 44,
+    height: 44,
+    borderRadius: borderRadius.full,
     alignItems: 'center',
     justifyContent: 'center',
   },
   modalMask: {
     flex: 1,
-    backgroundColor: 'rgba(0,0,0,0.36)',
+    backgroundColor: 'transparent',
     alignItems: 'center',
     justifyContent: 'center',
     paddingHorizontal: spacing.md,
@@ -1993,7 +2013,7 @@ const styles = StyleSheet.create({
   },
   modalBtn: {
     flex: 1,
-    minHeight: 40,
+    minHeight: 44,
     borderRadius: borderRadius.sm,
     alignItems: 'center',
     justifyContent: 'center',
@@ -2023,7 +2043,7 @@ const styles = StyleSheet.create({
   },
   singleBtn: {
     marginTop: spacing.md,
-    minHeight: 40,
+    minHeight: 44,
     borderRadius: borderRadius.sm,
     alignItems: 'center',
     justifyContent: 'center',
@@ -2035,7 +2055,7 @@ const styles = StyleSheet.create({
     marginBottom: spacing.sm,
   },
   sourceChip: {
-    minHeight: 30,
+    minHeight: 44,
     borderRadius: borderRadius.full,
     paddingHorizontal: spacing.sm,
     alignItems: 'center',
@@ -2051,7 +2071,7 @@ const styles = StyleSheet.create({
   },
   importGuardMask: {
     ...StyleSheet.absoluteFillObject,
-    backgroundColor: 'rgba(0, 0, 0, 0.28)',
+    backgroundColor: 'transparent',
     alignItems: 'center',
     justifyContent: 'center',
     paddingHorizontal: spacing.lg,
@@ -2071,7 +2091,7 @@ const styles = StyleSheet.create({
   },
   loadingMask: {
     ...StyleSheet.absoluteFillObject,
-    backgroundColor: 'rgba(0, 0, 0, 0.14)',
+    backgroundColor: 'transparent',
     alignItems: 'center',
     justifyContent: 'center',
     paddingHorizontal: spacing.lg,
