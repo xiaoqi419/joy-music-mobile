@@ -1,23 +1,17 @@
 /**
- * iconv-lite 兼容解码器（React Native 版）。
- * 仅复用 iconv-lite 的编码表与解码器，不加载其 stream API，
- * 避免 Metro 在移动端解析 `iconv-lite/lib/index.js` 时触发 ./streams 报错。
+ * iconv-lite 兼容解码（React Native 版）
+ * 仅加载 DBCS 子模块，避开 encodings/index -> internal.js 对 string_decoder 的依赖。
  */
 
 type AnyObject = Record<string, any>
 
-const DEFAULT_CHAR_UNICODE = '�'
+const DEFAULT_CHAR_UNICODE = '\uFFFD'
 const DEFAULT_CHAR_SINGLE_BYTE = '?'
-let allEncodings: AnyObject | null = null
-const codecCache: AnyObject = Object.create(null)
+const DBCS_TYPE = '_dbcs'
 
-function mergeOwnProps(target: AnyObject, source: AnyObject): void {
-  for (const key in source) {
-    if (Object.prototype.hasOwnProperty.call(source, key)) {
-      target[key] = source[key]
-    }
-  }
-}
+let dbcsData: AnyObject | null = null
+let DBCSCodecCtor: any = null
+const codecCache: AnyObject = Object.create(null)
 
 function canonicalizeEncoding(encoding: string): string {
   return String(encoding || '')
@@ -25,70 +19,67 @@ function canonicalizeEncoding(encoding: string): string {
     .replace(/:\d{4}$|[^0-9a-z]/g, '')
 }
 
-function ensureEncodings(): AnyObject {
-  if (allEncodings) return allEncodings
-  // 只加载编码表定义，不走 iconv-lite 主入口（主入口会尝试 stream API）。
-  // eslint-disable-next-line @typescript-eslint/no-var-requires
-  const raw = require('iconv-lite/encodings')
-  const merged: AnyObject = Object.create(null)
-  mergeOwnProps(merged, raw)
-  allEncodings = merged
-  return merged
+function ensureDbcsModules(): { data: AnyObject; ctor: any } {
+  if (!dbcsData || !DBCSCodecCtor) {
+    // eslint-disable-next-line @typescript-eslint/no-var-requires
+    const dbcsCodecModule = require('iconv-lite/encodings/dbcs-codec')
+    // eslint-disable-next-line @typescript-eslint/no-var-requires
+    const data = require('iconv-lite/encodings/dbcs-data')
+
+    DBCSCodecCtor = dbcsCodecModule?._dbcs
+    dbcsData = data
+  }
+
+  if (!dbcsData || typeof DBCSCodecCtor !== 'function') {
+    throw new Error('Failed to initialize iconv dbcs codec modules')
+  }
+
+  return {
+    data: dbcsData,
+    ctor: DBCSCodecCtor,
+  }
+}
+
+function resolveDbcsOptions(encoding: string): AnyObject {
+  const { data } = ensureDbcsModules()
+  let name = canonicalizeEncoding(encoding)
+  let entry: any = data[name]
+
+  while (typeof entry === 'string') {
+    name = canonicalizeEncoding(entry)
+    entry = data[name]
+  }
+
+  if (!entry || typeof entry !== 'object' || entry.type !== DBCS_TYPE) {
+    throw new Error(`Encoding not recognized or unsupported in RN dbcs mode: ${encoding}`)
+  }
+
+  return {
+    ...entry,
+    encodingName: name,
+  }
 }
 
 function getCodec(encoding: string): any {
-  const encodings = ensureEncodings()
-  let enc = canonicalizeEncoding(encoding)
-  const codecOptions: AnyObject = {}
+  const cacheKey = canonicalizeEncoding(encoding)
+  const cached = codecCache[cacheKey]
+  if (cached) return cached
 
-  while (true) {
-    const cached = codecCache[enc]
-    if (cached) return cached
-
-    const codecDef = encodings[enc]
-    switch (typeof codecDef) {
-      case 'string':
-        enc = codecDef
-        break
-      case 'object':
-        mergeOwnProps(codecOptions, codecDef)
-        if (!codecOptions.encodingName) codecOptions.encodingName = enc
-        enc = codecDef.type
-        break
-      case 'function': {
-        if (!codecOptions.encodingName) codecOptions.encodingName = enc
-        const iconvLike = {
-          defaultCharUnicode: DEFAULT_CHAR_UNICODE,
-          defaultCharSingleByte: DEFAULT_CHAR_SINGLE_BYTE,
-        }
-        const codec = new codecDef(codecOptions, iconvLike)
-        codecCache[codecOptions.encodingName] = codec
-        return codec
-      }
-      default:
-        throw new Error(`Encoding not recognized: ${encoding}`)
-    }
+  const { ctor } = ensureDbcsModules()
+  const options = resolveDbcsOptions(encoding)
+  const iconvLike = {
+    defaultCharUnicode: DEFAULT_CHAR_UNICODE,
+    defaultCharSingleByte: DEFAULT_CHAR_SINGLE_BYTE,
   }
+  const codec = new ctor(options, iconvLike)
+  codecCache[cacheKey] = codec
+  return codec
 }
 
-function getDecoder(encoding: string, options?: AnyObject): any {
+export function decodeByIconvCompat(bytes: Uint8Array, encoding: string): string {
   const codec = getCodec(encoding)
-  const decoder = new codec.decoder(options, codec)
-  if (codec.bomAware && !(options && options.stripBOM === false)) {
-    // eslint-disable-next-line @typescript-eslint/no-var-requires
-    const bomHandling = require('iconv-lite/lib/bom-handling')
-    return new bomHandling.StripBOM(decoder, options)
-  }
-  return decoder
-}
-
-export function decodeByIconvCompat(
-  bytes: Uint8Array,
-  encoding: string
-): string {
-  const decoder = getDecoder(encoding)
+  const decoder = new codec.decoder(undefined, codec)
   const result = decoder.write(bytes)
   const trail = decoder.end()
   return trail ? `${result}${trail}` : result
 }
-
