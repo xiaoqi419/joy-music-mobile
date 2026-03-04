@@ -1,164 +1,165 @@
-# 悦音（YueYin）
+<p align="center">
+  <img src="assets/icon.png" width="100" height="100" alt="悦音" style="border-radius: 22px;" />
+</p>
 
-基于 React Native + Expo 的多源音乐播放器项目，当前以 iOS 体验为主进行持续迭代。
+<h1 align="center">悦音 YueYin</h1>
 
-## 项目状态
+<p align="center">
+  <strong>一款精致的多源音乐播放器，为 iOS 而生</strong>
+</p>
 
-- 当前版本：`1.0.0`
-- 代码仓库名：`joy-music-mobile`
-- 维护重点：播放稳定性、音源能力、UI 体验重构、自动化发布链路
+<p align="center">
+  <img src="https://img.shields.io/badge/version-1.2.7-blue?style=flat-square" alt="version" />
+  <img src="https://img.shields.io/badge/React_Native-0.81-61dafb?style=flat-square&logo=react" alt="React Native" />
+  <img src="https://img.shields.io/badge/Expo_SDK-54-000020?style=flat-square&logo=expo" alt="Expo" />
+  <img src="https://img.shields.io/badge/TypeScript-5.8-3178c6?style=flat-square&logo=typescript" alt="TypeScript" />
+  <img src="https://img.shields.io/badge/platform-iOS-lightgrey?style=flat-square&logo=apple" alt="iOS" />
+</p>
 
-## 已完成功能清单（按代码实现盘点）
+---
 
-### 1. 播放与控制
+## 特性
 
-- 全局播放器内核初始化与状态同步（Redux 联动）
-- MiniPlayer：封面、歌曲信息、实时歌词、进度拖动、播放暂停
-- 全屏 Now Playing：
-  - 封面/歌词双视图切换
-  - 旋转封面动效
-  - 进度拖动、上一首/下一首、播放暂停
-  - 播放模式切换（顺序一次/列表循环/单曲循环/随机）
-- 播放队列管理：
-  - 下一首播放
-  - 队列列表查看与点击切播
-  - 队列单曲移除
-  - 一键清空队列
+- **多源聚合** — 酷我、网易云、QQ、酷狗四大平台，一处畅听
+- **高品质播放** — 从 128k 到 Master 无损，自动选择最佳音质并智能降级
+- **沉浸式体验** — 旋转封面、实时歌词、Liquid Glass 风格 TabBar
+- **智能缓存** — AsyncStorage + SQLite 双层缓存，离线也能听
+- **自定义音源** — 支持手动添加、URL 导入、本地 JS 导入
+- **亮暗双主题** — 遵循 iOS 设计语言，OLED 纯黑暗色模式
 
-### 2. 歌词与评论
+## 功能概览
 
-- 多平台歌词拉取与解析（KW/WY/TX/KG/MG）
-- LRC 解析、翻译歌词合并、歌词缓存
-- 歌曲评论：
-  - 网易云评论获取
-  - 下拉刷新
-  - 分页加载更多
-  - 失败回退与缓存
+| 模块 | 能力 |
+|------|------|
+| **播放器** | 播放/暂停、上下曲切换、进度拖动、四种播放模式（顺序/列表循环/单曲循环/随机） |
+| **发现** | 多平台推荐歌单、排序筛选、标签分类 |
+| **搜索** | 跨平台搜索、热搜词推荐、分页加载、竞态保护 |
+| **排行榜** | 各平台热门榜单、实时更新 |
+| **歌单** | 新建/删除/编辑、JSON/网络导入、导出分享 |
+| **歌词** | 多平台歌词获取、LRC 解析、翻译歌词合并 |
+| **评论** | 网易云热门评论、下拉刷新、分页加载 |
+| **更新** | GitHub Release 自动检查、版本比较、更新日志 |
 
-### 3. 发现 / 搜索 / 榜单 / 详情
+## 技术架构
 
-- 发现页：
-  - 推荐歌单加载
-  - 平台切换
-  - 更多筛选（排序/标签/平台）
-  - 筛选状态持久化
-- 排行榜页：
-  - 多平台榜单
-  - 手动刷新
-  - 更新时间显示
-- 搜索页：
-  - 多平台搜索（KW/WY/TX/KG）
-  - 热搜词
-  - 分页加载
-  - 竞态保护与去重
-- 详情页（歌单/榜单）：
-  - 歌曲列表
-  - 播放全部
-  - 收藏导入到自定义歌单
+```
+┌──────────────────────────────────────────────┐
+│  Screens (发现 · 搜索 · 排行榜 · 歌单 · 播放)    │
+├──────────────────────────────────────────────┤
+│  Player Controller · Music Manager           │
+├────────────────┬─────────────────────────────┤
+│  Expo Audio    │  Redux Store (v5)           │
+├────────────────┼─────────────────────────────┤
+│  Music Sources │  AsyncStorage + SQLite      │
+│  (KW/WY/TX/KG) │                             │
+└────────────────┴─────────────────────────────┘
+```
 
-### 4. 歌单与本地管理
+**核心依赖**
 
-- 自定义歌单新建/删除/更新
-- 从播放队列导入歌单
-- 本地 JSON 导入（单歌单/多歌单/曲目数组）
-- 网络导入（支持 `wy/tx/kw/kg/mg`）
-- 歌单详情内搜索、排序、分批加载
-- 歌单导出并系统分享
-
-### 5. 音源、音质、缓存、更新
-
-- 自定义音源管理：
-  - 手动添加
-  - URL 导入
-  - 本地 JS 导入
-  - 启用/禁用/编辑/删除
-- 音质偏好与播放降级重试
-- 本地音频缓存与缓存统计
-- GitHub Release 更新检查：
-  - 版本比较
-  - release notes 提示
-  - 更新页跳转
-
-### 6. 工程与发布
-
-- TypeScript + Redux + Expo 架构
-- iOS unsigned IPA 构建工作流
-- 自动版本发布链路：
-  - 同步版本文件
-  - 自动打 tag
-  - 自动触发 IPA 构建
-  - 自动上传 Release 资产
-- 已提供版本号规范文档与发版教程文档
-
-## 待办列表（新增功能）
-
-> 当前优先级：**UI 全量重构**
-
-### P0（当前主线）
-
-- 全局 UI 重构（信息层级、视觉一致性、组件统一）
-- 发现/搜索/播放页的交互细节重构（动效、手势反馈、状态反馈）
-- 列表卡片与详情页视觉系统统一（间距、字体、配色、层级）
-
-### P1（功能补齐）
-
-- 评论能力扩展到非 WY 平台
-- 歌单/榜单详情页增加分页加载（而非仅首屏）
-- 发现页更多筛选结果支持分页/无限滚动
-- 搜索建议词 UI 接入（`getSuggestions`）
-
-### P2（体验与工程）
-
-- 缓存治理完善：容量上限、淘汰策略、更多缓存类型可视化管理
-- 更新检查策略完善：自动检查/静默检查
-- 测试覆盖扩展（歌单导入、缓存链路、更新检查）
-- 发布工作流接入质量门禁（lint/test）
+| 类别 | 技术 |
+|------|------|
+| 框架 | React 19 · React Native 0.81 · Expo SDK 54 |
+| 动画 | Reanimated 4.1 · Gesture Handler |
+| 存储 | AsyncStorage · expo-sqlite · expo-file-system |
+| 状态 | Redux 5 · React Redux 9 |
+| UI | Expo Blur · Linear Gradient · Vector Icons |
 
 ## 快速开始
 
+**环境要求**：Node ≥ 18，npm ≥ 8.5.2
+
 ```bash
+# 安装依赖
 npm install
-npm run start
+
+# 启动开发服务器
+npm start
+
+# 启动 iOS 模拟器
+npm run ios
 ```
 
-常用命令：
+## 常用命令
 
 ```bash
-npm run ios
-npm run android
-npm run web
-npm run lint
-npm run test
+npm run ios              # iOS 开发
+npm run android          # Android 开发
+npm run web              # Web 开发
+npm run lint             # 代码检查
+npm run lint:fix         # 自动修复
+npm run test             # 运行测试
+npm run release:version -- <version>  # 同步版本号
 ```
 
-## 发布与版本
+## 发布流程
 
 ### 自动发布（推荐）
 
-1. 在 GitHub Actions 触发 `Release Tag`
-2. 输入版本号（例如 `1.0.1` 或 `1.0.1-beta.1`）
-3. 自动创建 `v<version>` tag
-4. 自动触发 `iOS Unsigned IPA` 构建并上传 Release 资产
+1. 在 GitHub Actions 触发 **Release Tag** 工作流
+2. 输入版本号（如 `1.2.8` 或 `1.3.0-beta.1`）
+3. 自动完成：版本同步 → 创建 Tag → 构建 IPA → 上传 Release
 
-### 版本同步命令
+### 版本同步范围
 
-```bash
-npm run release:version -- 1.0.1
+运行 `npm run release:version` 会自动同步以下文件：
+
+- `package.json` → `version`
+- `app.json` → `expo.version` / `expo.ios.buildNumber`
+- `src/config/index.ts` → `appConfig.version`
+
+## 项目结构
+
 ```
-
-会同步：
-
-- `package.json -> version`
-- `app.json -> expo.version`
-- `app.json -> expo.ios.buildNumber`
-- `src/config/index.ts -> appConfig.version`
+src/
+├── components/common/    # 通用 UI 组件
+├── config/               # 应用配置
+├── core/                 # 核心业务模块
+│   ├── comment/          #   评论
+│   ├── config/           #   配置管理
+│   ├── discover/         #   发现页
+│   ├── lyric/            #   歌词解析
+│   ├── music/            #   音乐数据
+│   ├── player/           #   播放引擎
+│   ├── search/           #   搜索
+│   └── update/           #   版本更新
+├── data/                 # 数据源与缓存
+├── hooks/                # React Hooks
+├── screens/              # 页面视图
+│   ├── Discover/         #   发现
+│   ├── Search/           #   搜索
+│   ├── Leaderboard/      #   排行榜
+│   ├── Library/          #   音乐库
+│   ├── Playlist/         #   歌单
+│   ├── NowPlaying/       #   正在播放
+│   └── Detail/           #   详情
+├── store/                # Redux Store
+├── theme/                # 主题系统
+├── types/                # 类型定义
+└── utils/                # 工具函数
+```
 
 ## 文档
 
-- [iOS 自签发包发布教程](./docs/ios-self-sign.md)
+- [iOS 自签发包教程](./docs/ios-self-sign.md)
 - [版本号标识规范](./docs/versioning.md)
 
 ## 说明
 
-- 当前分发链路为 **unsigned IPA 自签分发**，不是 App Store/TestFlight 正式发布链路。
-- 如需正式上架，请接入 Apple Developer Program 的签名与发版流程。
+当前分发方式为 **unsigned IPA 自签分发**，非 App Store / TestFlight 正式发布渠道。如需正式上架，请接入 Apple Developer Program 签名流程。
+
+## 免责声明
+
+> [!IMPORTANT]
+> 请在使用前仔细阅读以下条款。下载、安装或使用本应用即表示您已阅读并同意以下全部内容。
+
+1. **本应用不存储任何音乐文件**。所有音频内容均来自第三方公开接口，本应用仅作为播放工具进行流式传输，不提供任何音乐的上传、下载或持久化存储服务。
+2. **本应用不提供任何音乐资源**。应用内展示的所有歌曲信息、歌词、封面、评论等内容均来源于第三方平台的公开数据，版权归原始权利人所有。
+3. **仅供个人学习与技术研究使用**。本项目旨在学习 React Native 跨平台开发技术，严禁将本应用用于任何商业用途或非法用途。
+4. **用户行为自负**。用户使用本应用产生的一切行为及后果，包括但不限于侵犯第三方知识产权、违反当地法律法规等，均由用户自行承担，与本项目开发者无关。
+5. **不保证服务可用性**。第三方接口可能随时变更或失效，本应用不对内容的可用性、准确性或完整性作任何保证。
+6. **如有侵权请联系删除**。若本项目的任何内容侵犯了您的合法权益，请通过 [Issues](https://github.com/xiaoqi419/joy-music-mobile/issues) 联系我们，我们将在确认后第一时间处理。
+
+## 许可
+
+本项目仅供学习交流使用，不得用于商业目的。
