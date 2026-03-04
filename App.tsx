@@ -9,6 +9,7 @@ import {
   Animated,
   Alert,
   Easing,
+  Linking,
   Platform,
   Pressable,
   StatusBar,
@@ -53,6 +54,8 @@ import {
 import { applyJoyRuntimeConfig, hasConfiguredJoySource } from './src/core/music/sources/joy'
 import { emitScrollToTop, subscribeScrollTopState } from './src/core/ui/scrollToTopBus'
 import { installRuntimeLogger } from './src/core/logging/runtimeLogger'
+import appConfig from './src/config'
+import { checkGithubReleaseUpdate } from './src/core/update/githubRelease'
 
 type RNSScreensCompat = {
   Tabs?: {
@@ -163,6 +166,7 @@ function AppContent() {
   const [themeHydrated, setThemeHydrated] = useState(false)
   const [musicSourceHydrated, setMusicSourceHydrated] = useState(false)
   const [playlistHydrated, setPlaylistHydrated] = useState(false)
+  const autoUpdateCheckedRef = useRef(false)
   const [isResolvingTrack, setIsResolvingTrack] = useState(() => playerController.isResolvingTrack())
   const [resolvingHint, setResolvingHint] = useState(() => playerController.getResolvingHint())
   const [isScrollAtTop, setIsScrollAtTop] = useState(true)
@@ -385,6 +389,60 @@ function AppContent() {
       currentPlaylistId: playlistState.currentPlaylistId,
     })
   }, [playlistHydrated, playlistState.currentPlaylistId, playlistState.playlists])
+
+  useEffect(() => {
+    // 启动后自动检查更新：仅在有新版本时提示，避免打扰。
+    if (!themeHydrated || !musicSourceHydrated || !playlistHydrated) return
+    if (autoUpdateCheckedRef.current) return
+    autoUpdateCheckedRef.current = true
+
+    let cancelled = false
+
+    const owner = appConfig.update.githubOwner
+    const repo = appConfig.update.githubRepo
+    if (!owner || !repo) return
+
+    const fallbackReleaseUrl = `https://github.com/${owner}/${repo}/releases`
+    const checkUpdateOnLaunch = async() => {
+      try {
+        const result = await checkGithubReleaseUpdate({
+          owner,
+          repo,
+          currentVersion: appConfig.version,
+          requestTimeoutMs: appConfig.update.requestTimeoutMs,
+        })
+
+        if (cancelled || result.status !== 'has_update') return
+
+        const summaryLines = [
+          `当前版本：v${result.currentVersion}`,
+          `最新版本：v${result.latestVersion || '-'}`,
+        ]
+        const notes = result.notes?.trim()
+        if (notes) summaryLines.push('', notes.slice(0, 800))
+
+        const updateUrl = result.releaseUrl || fallbackReleaseUrl
+        Alert.alert('发现新版本', summaryLines.join('\n'), [
+          { text: '稍后', style: 'cancel' },
+          {
+            text: '前往更新',
+            onPress: () => {
+              void Linking.openURL(updateUrl).catch(() => {
+                Alert.alert('打开失败', '请手动打开更新页面')
+              })
+            },
+          },
+        ])
+      } catch (error) {
+        console.warn('[UpdateCheck] Auto check failed:', error)
+      }
+    }
+
+    void checkUpdateOnLaunch()
+    return () => {
+      cancelled = true
+    }
+  }, [musicSourceHydrated, playlistHydrated, themeHydrated])
 
   useEffect(() => {
     return subscribeScrollTopState((isAtTop) => {
