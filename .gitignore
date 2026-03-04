@@ -52,3 +52,5 @@ CeruMusic/
 # Root markdown files (keep README only)
 /*.md
 !/README.md
+
+.shared/

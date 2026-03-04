@@ -3,12 +3,13 @@
  * iOS music player application powered by React Native + Expo
  */
 
-import React, { useCallback, useEffect, useRef, useState } from 'react'
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
   ActivityIndicator,
   Animated,
   Alert,
   Easing,
+  Platform,
   Pressable,
   StatusBar,
   StyleSheet,
@@ -19,12 +20,14 @@ import {
 import { SafeAreaProvider, useSafeAreaInsets } from 'react-native-safe-area-context'
 import { GestureHandlerRootView } from 'react-native-gesture-handler'
 import { Provider as ReduxProvider, useDispatch, useSelector } from 'react-redux'
+import { DefaultTheme, NavigationContainer } from '@react-navigation/native'
+import * as RNSScreens from 'react-native-screens'
 import * as SplashScreen from 'expo-splash-screen'
+import { BlurView } from 'expo-blur'
 import { Ionicons } from '@expo/vector-icons'
 import { LinearGradient } from 'expo-linear-gradient'
 import store from './src/store'
-import { useTheme, borderRadius, CAPSULE_BOTTOM_MARGIN, CAPSULE_TAB_HEIGHT } from './src/theme'
-import TabBar, { TabName } from './src/components/common/TabBar'
+import { useTheme, borderRadius } from './src/theme'
 import MiniPlayer from './src/components/common/MiniPlayer'
 import DiscoverScreen from './src/screens/Discover'
 import LeaderboardScreen from './src/screens/Leaderboard'
@@ -51,6 +54,37 @@ import { applyJoyRuntimeConfig, hasConfiguredJoySource } from './src/core/music/
 import { emitScrollToTop, subscribeScrollTopState } from './src/core/ui/scrollToTopBus'
 import { installRuntimeLogger } from './src/core/logging/runtimeLogger'
 
+type RNSScreensCompat = {
+  Tabs?: {
+    Host: unknown
+    Screen: unknown
+  }
+  BottomTabs?: unknown
+  BottomTabsScreen?: unknown
+}
+
+const screensCompat = RNSScreens as unknown as RNSScreensCompat
+if (
+  !screensCompat.Tabs &&
+  screensCompat.BottomTabs &&
+  screensCompat.BottomTabsScreen
+) {
+  try {
+    // 兼容 Expo SDK 54 的 react-native-screens 导出差异：
+    // @react-navigation/bottom-tabs/unstable 读取 Tabs.Host / Tabs.Screen。
+    screensCompat.Tabs = {
+      Host: screensCompat.BottomTabs,
+      Screen: screensCompat.BottomTabsScreen,
+    }
+  } catch (error) {
+    console.warn('[TabsCompat] Failed to patch react-native-screens Tabs export', error)
+  }
+}
+
+// eslint-disable-next-line @typescript-eslint/no-var-requires
+const nativeBottomTabsUnstable = require('@react-navigation/bottom-tabs/unstable') as typeof import('@react-navigation/bottom-tabs/unstable')
+const createNativeBottomTabNavigator = nativeBottomTabsUnstable.createNativeBottomTabNavigator
+
 // Keep the splash screen visible while we fetch resources
 installRuntimeLogger()
 void SplashScreen.preventAutoHideAsync().catch(() => {
@@ -70,7 +104,33 @@ interface DetailView {
   }
 }
 
+type TabName = 'discover' | 'leaderboard' | 'search' | 'playlist' | 'library'
+
+type TabParamList = {
+  discover: undefined
+  leaderboard: undefined
+  search: undefined
+  playlist: undefined
+  library: undefined
+}
+
+const NativeBottomTabs = createNativeBottomTabNavigator<TabParamList>()
 const SCROLL_FAB_SIZE = 52
+const NATIVE_TAB_BAR_BASE_HEIGHT = Platform.OS === 'ios' ? 49 : 56
+const TAB_LABELS: Record<TabName, string> = {
+  discover: '发现',
+  leaderboard: '排行',
+  search: '搜索',
+  playlist: '歌单',
+  library: '我的',
+}
+const TAB_CUSTOM_SF_SYMBOLS: Record<TabName, string> = {
+  discover: 'safari',
+  leaderboard: 'chart.bar',
+  search: 'magnifyingglass',
+  playlist: 'music.note.list',
+  library: 'person.crop.circle',
+}
 
 function createPlaylistId() {
   return `pl_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`
@@ -106,10 +166,33 @@ function AppContent() {
   const [isResolvingTrack, setIsResolvingTrack] = useState(() => playerController.isResolvingTrack())
   const [resolvingHint, setResolvingHint] = useState(() => playerController.getResolvingHint())
   const [isScrollAtTop, setIsScrollAtTop] = useState(true)
-  const shouldHideTabBar = activeTab === 'discover' && isDiscoverMoreVisible
-  const miniPlayerBottom = Math.max(insets.bottom, 16) + (
-    shouldHideTabBar ? 10 : CAPSULE_BOTTOM_MARGIN + CAPSULE_TAB_HEIGHT + 10
-  )
+  const tabBarBaseBackgroundColor = '#E5E5EA'
+  const navigationTheme = useMemo(() => ({
+    ...DefaultTheme,
+    dark: false,
+    colors: {
+      ...DefaultTheme.colors,
+      primary: colors.accent,
+      background: colors.background,
+      // 锁定 tab bar 基底色，避免深色模式下随页面出现黑白跳变。
+      card: tabBarBaseBackgroundColor,
+      text: colors.text,
+      border: colors.separator,
+      notification: colors.accent,
+    },
+  }), [colors.accent, colors.background, colors.separator, colors.text, tabBarBaseBackgroundColor])
+  
+  const [isPlaylistDetailVisible, setIsPlaylistDetailVisible] = useState(false)
+  const [isLibraryDetailVisible, setIsLibraryDetailVisible] = useState(false)
+  
+  // TabBar 显隐控制：发现页更多弹窗可视时、或展示了具体歌单/分类详情时均隐藏底栏
+  const shouldHideTabBar = (activeTab === 'discover' && isDiscoverMoreVisible) 
+    || !!detailView 
+    || showNowPlaying
+    || isPlaylistDetailVisible
+    || isLibraryDetailVisible
+
+  const miniPlayerBottom = Math.max(insets.bottom, 16) + NATIVE_TAB_BAR_BASE_HEIGHT + 10
   const scrollTopFabBottom = miniPlayerBottom + 74
   const showScrollFab = !showNowPlaying && !detailLoading && !isScrollAtTop
   const [fabMounted, setFabMounted] = useState(showScrollFab)
@@ -889,30 +972,104 @@ function AppContent() {
 
       {/* Main content area */}
       <View style={styles.content}>
-        <View style={[styles.tabPane, activeTab !== 'discover' && styles.tabPaneHidden]}>
-          <DiscoverScreen
-            onPlaylistPress={handlePlaylistPress}
-            onMorePageVisibilityChange={setIsDiscoverMoreVisible}
-          />
-        </View>
-        <View style={[styles.tabPane, activeTab !== 'leaderboard' && styles.tabPaneHidden]}>
-          <LeaderboardScreen
-            onLeaderboardPress={handleLeaderboardPress}
-          />
-        </View>
-        <View style={[styles.tabPane, activeTab !== 'search' && styles.tabPaneHidden]}>
-          <SearchScreen onTrackPress={handleTrackPress} onTrackMorePress={handleTrackMorePress} />
-        </View>
-        <View style={[styles.tabPane, activeTab !== 'playlist' && styles.tabPaneHidden]}>
-          <PlaylistScreen
-            onTrackPress={handleTrackPress}
-            onTrackMorePress={handleTrackMorePress}
-            onPlayAll={handlePlaylistPlayAll}
-          />
-        </View>
-        <View style={[styles.tabPane, activeTab !== 'library' && styles.tabPaneHidden]}>
-          <LibraryScreen onTrackPress={handleTrackPress} onTrackMorePress={handleTrackMorePress} />
-        </View>
+        <NavigationContainer theme={navigationTheme}>
+          <NativeBottomTabs.Navigator
+            id="main-tabs"
+            initialRouteName="discover"
+            screenOptions={({ route }) => {
+              const tabName = route.name as TabName
+              return {
+                headerShown: false,
+                title: TAB_LABELS[tabName],
+                tabBarLabel: TAB_LABELS[tabName],
+                tabBarIcon: Platform.OS === 'ios'
+                  ? ({
+                    // 当前 SDK 组合下，需直接传底层可识别字段。
+                    sfSymbolName: TAB_CUSTOM_SF_SYMBOLS[tabName],
+                  } as any)
+                  : undefined,
+                tabBarActiveTintColor: colors.accent,
+                tabBarInactiveTintColor: '#7A7A82',
+                tabBarLabelStyle: {
+                  fontSize: 12,
+                  fontWeight: '500',
+                },
+                tabBarBlurEffect: Platform.OS === 'ios' ? 'systemMaterialLight' : undefined,
+                tabBarControllerMode: Platform.OS === 'ios' ? 'tabBar' : undefined,
+                tabBarMinimizeBehavior: Platform.OS === 'ios' ? 'never' : undefined,
+                overrideScrollViewContentInsetAdjustmentBehavior: Platform.OS === 'ios' ? false : undefined,
+                tabBarStyle: {
+                  display: 'flex',
+                  backgroundColor: tabBarBaseBackgroundColor,
+                  shadowColor: 'rgba(0, 0, 0, 0.12)',
+                },
+                lazy: false,
+              }
+            }}
+          >
+            <NativeBottomTabs.Screen
+              name="discover"
+              listeners={{ focus: () => setActiveTab('discover') }}
+            >
+              {() => (
+                <DiscoverScreen
+                  onPlaylistPress={handlePlaylistPress}
+                  onMorePageVisibilityChange={setIsDiscoverMoreVisible}
+                />
+              )}
+            </NativeBottomTabs.Screen>
+            <NativeBottomTabs.Screen
+              name="leaderboard"
+              listeners={{ focus: () => setActiveTab('leaderboard') }}
+            >
+              {() => (
+                <LeaderboardScreen onLeaderboardPress={handleLeaderboardPress} />
+              )}
+            </NativeBottomTabs.Screen>
+            <NativeBottomTabs.Screen
+              name="search"
+              listeners={{ focus: () => setActiveTab('search') }}
+            >
+              {() => (
+                <SearchScreen
+                  onTrackPress={handleTrackPress}
+                  onTrackMorePress={handleTrackMorePress}
+                />
+              )}
+            </NativeBottomTabs.Screen>
+            <NativeBottomTabs.Screen
+              name="playlist"
+              listeners={{
+                focus: () => setActiveTab('playlist'),
+                blur: () => setIsPlaylistDetailVisible(false),
+              }}
+            >
+              {() => (
+                <PlaylistScreen
+                  onTrackPress={handleTrackPress}
+                  onTrackMorePress={handleTrackMorePress}
+                  onPlayAll={handlePlaylistPlayAll}
+                  onDetailVisibilityChange={setIsPlaylistDetailVisible}
+                />
+              )}
+            </NativeBottomTabs.Screen>
+            <NativeBottomTabs.Screen
+              name="library"
+              listeners={{
+                focus: () => setActiveTab('library'),
+                blur: () => setIsLibraryDetailVisible(false),
+              }}
+            >
+              {() => (
+                <LibraryScreen
+                  onTrackPress={handleTrackPress}
+                  onTrackMorePress={handleTrackMorePress}
+                  onDetailVisibilityChange={setIsLibraryDetailVisible}
+                />
+              )}
+            </NativeBottomTabs.Screen>
+          </NativeBottomTabs.Navigator>
+        </NavigationContainer>
       </View>
 
       {/* Detail overlay */}
@@ -945,7 +1102,7 @@ function AppContent() {
             styles.resolveHintOverlay,
             {
               bottom: Math.max(insets.bottom, 16) + (
-                shouldHideTabBar ? 64 : CAPSULE_BOTTOM_MARGIN + CAPSULE_TAB_HEIGHT + 64
+                shouldHideTabBar ? 64 : NATIVE_TAB_BAR_BASE_HEIGHT + 64
               ),
             },
           ]}
@@ -1001,7 +1158,7 @@ function AppContent() {
               {
                 width: SCROLL_FAB_SIZE,
                 height: SCROLL_FAB_SIZE,
-                borderColor: colors.separator,
+                borderColor: isDark ? 'rgba(255,255,255,0.1)' : 'rgba(255,255,255,0.6)',
               },
             ]}
             onPress={handleScrollToTopPress}
@@ -1010,29 +1167,43 @@ function AppContent() {
             accessibilityRole="button"
             accessibilityLabel="回到顶部"
           >
+            {/* 毛玻璃底层 */}
+            <BlurView
+              intensity={isDark ? 80 : 100}
+              tint={isDark ? 'dark' : 'light'}
+              style={StyleSheet.absoluteFillObject}
+            />
+            {/* 色彩渗透层：轻微透出主色 */}
+            <View
+              style={[
+                StyleSheet.absoluteFillObject,
+                { backgroundColor: isDark ? 'rgba(38, 120, 230, 0.4)' : 'rgba(255, 255, 255, 0.4)' },
+              ]}
+            />
+            {/* 顶部高光层 */}
             <LinearGradient
               colors={
                 isDark
-                  ? ['rgba(92, 173, 255, 0.95)', 'rgba(38, 120, 230, 0.94)']
-                  : ['rgba(140, 218, 255, 0.98)', 'rgba(60, 151, 255, 0.95)']
+                  ? ['rgba(255,255,255,0.25)', 'rgba(255,255,255,0)']
+                  : ['rgba(255,255,255,0.9)', 'rgba(255,255,255,0.1)']
               }
-              start={{ x: 0, y: 0 }}
-              end={{ x: 1, y: 1 }}
-              style={styles.scrollTopFabInner}
-            >
-              <Ionicons name="chevron-up" size={20} color="#FFFFFF" />
-            </LinearGradient>
+              start={{ x: 0.1, y: 0.1 }}
+              end={{ x: 0.6, y: 1 }}
+              style={StyleSheet.absoluteFillObject}
+            />
+            <View style={styles.scrollTopFabInner}>
+              <Ionicons
+                name="chevron-up"
+                size={22}
+                color={isDark ? '#FFFFFF' : colors.accent}
+              />
+            </View>
           </Pressable>
         </Animated.View>
       )}
 
       {showNowPlaying && (
         <NowPlaying onClose={() => setShowNowPlaying(false)} />
-      )}
-
-      {/* TabBar - fixed at bottom */}
-      {!shouldHideTabBar && (
-        <TabBar activeTab={activeTab} onTabChange={setActiveTab} />
       )}
     </View>
   )
@@ -1047,12 +1218,6 @@ const styles = StyleSheet.create({
   },
   content: {
     flex: 1,
-  },
-  tabPane: {
-    flex: 1,
-  },
-  tabPaneHidden: {
-    display: 'none',
   },
   loadingOverlay: {
     ...StyleSheet.absoluteFillObject,
@@ -1097,10 +1262,10 @@ const styles = StyleSheet.create({
     borderRadius: borderRadius.full,
     overflow: 'hidden',
     borderWidth: StyleSheet.hairlineWidth,
-    shadowColor: '#071B36',
-    shadowOffset: { width: 0, height: 8 },
-    shadowOpacity: 0.24,
-    shadowRadius: 14,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 6 },
+    shadowOpacity: 0.25,
+    shadowRadius: 16,
     elevation: 10,
   },
   scrollTopFabInner: {

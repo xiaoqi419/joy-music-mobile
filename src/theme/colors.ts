@@ -44,6 +44,8 @@ export interface ThemeColors {
   tabBarGlossEnd: string
   tabBarInnerBorder: string
   tabBarActiveIndicator: string
+  tabBarActivePill: string // 新增：活跃滑块背景
+  tabBarActivePillBorder: string // 新增：活跃滑块边框
 }
 
 export const darkColors: ThemeColors = {
@@ -61,7 +63,7 @@ export const darkColors: ThemeColors = {
 
   separator: 'rgba(84, 84, 88, 0.36)',
   overlay: 'rgba(0, 0, 0, 0.6)',
-  tabBar: 'rgba(30, 30, 30, 0.85)',
+  tabBar: 'rgba(20, 20, 20, 0.65)', // 降低深色模式背景不透明度 (原 0.85)
   tabBarBorder: 'rgba(255, 255, 255, 0.08)',
   miniPlayer: 'rgba(44, 44, 46, 0.92)',
 
@@ -75,10 +77,12 @@ export const darkColors: ThemeColors = {
   searchBackground: '#1C1C1E',
   searchPlaceholder: '#8E8E93',
 
-  tabBarGloss: 'rgba(255, 255, 255, 0.12)',
+  tabBarGloss: 'rgba(255, 255, 255, 0.05)', // 深色模式大幅降低顶部高光泛白
   tabBarGlossEnd: 'rgba(255, 255, 255, 0.0)',
-  tabBarInnerBorder: 'rgba(255, 255, 255, 0.18)',
-  tabBarActiveIndicator: 'rgba(255, 255, 255, 0.15)',
+  tabBarInnerBorder: 'rgba(255, 255, 255, 0.08)', // 降低发光白边，甚至几乎不可见
+  tabBarActiveIndicator: 'rgba(255, 255, 255, 0.3)',
+  tabBarActivePill: 'rgba(0, 0, 0, 0.4)',
+  tabBarActivePillBorder: 'rgba(255, 255, 255, 0.1)',
 }
 
 export const lightColors: ThemeColors = {
@@ -96,7 +100,7 @@ export const lightColors: ThemeColors = {
 
   separator: 'rgba(60, 60, 67, 0.12)',
   overlay: 'rgba(0, 0, 0, 0.4)',
-  tabBar: 'rgba(249, 249, 249, 0.94)',
+  tabBar: 'rgba(255, 255, 255, 0.55)', // 降低浅色模式背景不透明度 (原 0.94)
   tabBarBorder: 'rgba(0, 0, 0, 0.08)',
   miniPlayer: 'rgba(255, 255, 255, 0.94)',
 
@@ -110,8 +114,10 @@ export const lightColors: ThemeColors = {
   searchBackground: '#E5E5EA',
   searchPlaceholder: '#8E8E93',
 
-  tabBarGloss: 'rgba(255, 255, 255, 0.7)',
+  tabBarGloss: 'rgba(255, 255, 255, 0.2)', // 大幅降低浅色纯白高光感
   tabBarGlossEnd: 'rgba(255, 255, 255, 0.0)',
-  tabBarInnerBorder: 'rgba(255, 255, 255, 0.6)',
+  tabBarInnerBorder: 'rgba(255, 255, 255, 0.3)', // 降低边框纯白感
   tabBarActiveIndicator: 'rgba(0, 0, 0, 0.08)',
+  tabBarActivePill: 'rgba(255, 255, 255, 0.6)',
+  tabBarActivePillBorder: 'rgba(255, 255, 255, 0.9)',
 }

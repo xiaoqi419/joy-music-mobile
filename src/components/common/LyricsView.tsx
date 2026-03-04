@@ -193,10 +193,12 @@ export default function LyricsView({
     if (currentIndex >= 0 && containerHeight > 0 && lyrics.length > 0) {
       const shouldAnimate = active && !firstPositionSyncRef.current
       try {
+        // 由于我们将 padding 设置为容器一半减去半行高，因此使用 viewPosition: 0 即可让锚定元素位于列表起始（即内容区视觉上的中央）
+        // 这样可以彻底避免 viewPosition: 0.5 某些情况下由于 flatlist 测量延迟导致的不居中。
         listRef.current?.scrollToIndex({
           index: currentIndex,
           animated: shouldAnimate,
-          viewPosition: 0.5,
+          viewPosition: 0,
         })
       } catch {
         // scrollToIndex may fail if layout hasn't completed
@@ -260,7 +262,8 @@ export default function LyricsView({
     )
   }
 
-  const verticalPad = containerHeight / 2
+  // 核心居中逻辑：容器的一半高度减去当前行高度的一半，这样顶部填充后，第一个元素就在正中央。
+  const verticalPad = Math.max(0, containerHeight / 2 - lineHeight / 2)
 
   return (
     <FlatList

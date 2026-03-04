@@ -4,14 +4,14 @@
  * 图标切换带缩放动画。
  */
 
-import React, { useCallback, useEffect, useRef } from 'react'
-import { View, Text, TouchableOpacity, StyleSheet, Platform, Animated } from 'react-native'
+import React, { useCallback, useEffect, useRef, useState } from 'react'
+import { View, Text, TouchableOpacity, StyleSheet, Platform, Animated, Dimensions } from 'react-native'
 import { BlurView } from 'expo-blur'
 import { LinearGradient } from 'expo-linear-gradient'
 import * as Haptics from 'expo-haptics'
 import { Ionicons } from '@expo/vector-icons'
 import { useSafeAreaInsets } from 'react-native-safe-area-context'
-import { useTheme, CAPSULE_TAB_HEIGHT, CAPSULE_BOTTOM_MARGIN, fontSize } from '../../theme'
+import { useTheme, CAPSULE_TAB_HEIGHT, fontSize } from '../../theme'
 
 export type TabName = 'discover' | 'leaderboard' | 'search' | 'playlist' | 'library'
 
@@ -20,10 +20,10 @@ interface TabBarProps {
   onTabChange: (tab: TabName) => void
 }
 
-/** 胶囊内每个 tab 项的宽度 */
-const TAB_ITEM_WIDTH = 60
-/** 胶囊水平内边距 */
-const CAPSULE_H_PADDING = 8
+const { width: SCREEN_WIDTH } = Dimensions.get('window')
+
+/** TabBar 总高度（内容区，不含 Safe Area 底部留白） */
+const TAB_BAR_CONTENT_HEIGHT = 60
 
 const tabs: {
   key: TabName
@@ -38,205 +38,279 @@ const tabs: {
   { key: 'library', label: '我的', icon: 'musical-notes-outline', iconActive: 'musical-notes' },
 ]
 
-/**
- * 渲染 iOS 26 风格的液态玻璃胶囊底部导航栏。
- * @param activeTab - 当前选中的 tab
- * @param onTabChange - tab 切换回调
- */
 export default function TabBar({ activeTab, onTabChange }: TabBarProps) {
   const { colors, isDark } = useTheme()
   const insets = useSafeAreaInsets()
 
+  // 动态计算尺寸：
+  // 底部满铺时，每个 Tab 的可用宽度应该是 屏幕宽度 除以 Tab 数量。
+  // 但是指示滑块(Pill)本身我们可能想让它比整个格子稍微小一点点，留点呼吸感。
+  const TAB_ITEM_WIDTH = SCREEN_WIDTH / tabs.length
+  const PILL_WIDTH = Math.min(68, TAB_ITEM_WIDTH * 0.85) // 滑块不过宽
+  const PILL_HEIGHT = TAB_BAR_CONTENT_HEIGHT - 12
+  
+  // 用于计算 Pill 在容器中的起始偏移量（居中对齐当前格）
+  const getPillTranslateX = (index: number) => {
+    return (index * TAB_ITEM_WIDTH) + (TAB_ITEM_WIDTH - PILL_WIDTH) / 2
+  }
+
   const activeIndex = tabs.findIndex((t) => t.key === activeTab)
 
-  /** 每个 tab 图标的缩放动画值 */
+  /** 滑动药丸的水平位移 */
+  const slideAnim = useRef(new Animated.Value(getPillTranslateX(activeIndex))).current
+
+  /** 每个 tab 内容的缩放动画值 */
   const scaleAnims = useRef(tabs.map((_, i) =>
-    new Animated.Value(i === activeIndex ? 1.04 : 0.88)
+    new Animated.Value(i === activeIndex ? 1.05 : 0.9)
   )).current
 
-  /** activeTab 变化时驱动缩放动画 */
+  /** 透明度变化 */
+  const opacityAnims = useRef(tabs.map((_, i) =>
+    new Animated.Value(i === activeIndex ? 1 : 0.6)
+  )).current
+
   useEffect(() => {
     const targetIndex = tabs.findIndex((t) => t.key === activeTab)
+    const targetX = getPillTranslateX(targetIndex)
 
-    // 图标缩放：选中放大，其余缩小
+    Animated.spring(slideAnim, {
+      toValue: targetX,
+      useNativeDriver: true,
+      tension: 250,
+      friction: 20,
+      restDisplacementThreshold: 0.05,
+      restSpeedThreshold: 0.1,
+    }).start()
+
     scaleAnims.forEach((anim, i) => {
       Animated.spring(anim, {
-        toValue: i === targetIndex ? 1.04 : 0.88,
+        toValue: i === targetIndex ? 1.05 : 0.9,
         useNativeDriver: true,
         tension: 300,
-        friction: 15,
+        friction: 18,
       }).start()
     })
-  }, [activeTab, scaleAnims])
 
-  /** 切换 tab 时触发轻触觉反馈 */
+    opacityAnims.forEach((anim, i) => {
+      Animated.timing(anim, {
+        toValue: i === targetIndex ? 1 : 0.5,
+        duration: 200,
+        useNativeDriver: true,
+      }).start()
+    })
+  }, [activeTab, slideAnim, scaleAnims, opacityAnims])
+
   const handleTabPress = useCallback((tab: TabName) => {
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light)
     onTabChange(tab)
   }, [onTabChange])
 
-  const activeLabelColor = isDark ? '#EAF4FF' : '#09345E'
-  const inactiveLabelColor = isDark ? 'rgba(255, 255, 255, 0.70)' : 'rgba(28, 28, 30, 0.68)'
+  const activeIconColor = isDark ? '#FFFFFF' : '#000000'
+  const inactiveIconColor = isDark ? '#EBEBF5' : '#3C3C43'
+  
+  const tabBarTotalHeight = TAB_BAR_CONTENT_HEIGHT + insets.bottom
 
   return (
     <View
       style={[
-        styles.positioner,
-        { bottom: Math.max(insets.bottom, 16) + CAPSULE_BOTTOM_MARGIN },
+        styles.container,
+        { height: tabBarTotalHeight },
       ]}
+      pointerEvents="box-none"
     >
-      <View style={styles.capsule}>
-        {/* 液态玻璃模糊底层 */}
-        <BlurView
-          intensity={isDark ? 78 : 92}
-          tint={isDark ? 'dark' : 'light'}
-          style={styles.glassLayer}
-        />
-        {/* 胶囊实体层：提升复杂背景下的对比度 */}
-        <View
-          style={[
-            styles.baseLayer,
-            {
-              backgroundColor: colors.tabBar,
-              borderColor: colors.tabBarBorder,
-            },
-          ]}
-        />
-
-        {/* 顶部高光渐变 - 模拟玻璃折射光泽 */}
+      {/* 液态玻璃底层 */}
+      <BlurView
+        intensity={isDark ? 55 : 85}
+        tint={isDark ? 'dark' : 'light'}
+        style={styles.absoluteFill}
+      />
+      
+      {/* 补充色彩的基底层 */}
+      <View
+        style={[
+          styles.absoluteFill,
+          {
+            backgroundColor: colors.tabBar,
+          },
+        ]}
+      />
+      
+      {/* 深色模式不叠顶部高光，避免形成“顶部一条不同模糊度”的视觉分层 */}
+      {!isDark && (
         <LinearGradient
           colors={[colors.tabBarGloss, colors.tabBarGlossEnd]}
           start={{ x: 0.5, y: 0 }}
-          end={{ x: 0.5, y: 1 }}
-          style={styles.glossLayer}
+          end={{ x: 0.5, y: 1.5 }}
+          style={styles.glossTop}
+          pointerEvents="none"
         />
+      )}
+      
+      {/* 顶部发光微边框 */}
+      <View
+        style={[
+          styles.topBorder,
+          { backgroundColor: colors.tabBarInnerBorder },
+        ]}
+        pointerEvents="none"
+      />
 
-        {/* 半透明内发光边框 */}
-        <View
-          style={[
-            styles.innerBorder,
-            { borderColor: colors.tabBarInnerBorder },
-          ]}
-        />
+      {/* —— 内容区域 (去除 safe area insets 影响的部分) —— */}
+      <View style={[styles.contentContainer, { height: TAB_BAR_CONTENT_HEIGHT }]}>
+        {/* —— 滑动指示块 (Liquid Pill) —— */}
+        <View style={styles.pillTrack}>
+          <Animated.View
+            style={[
+              styles.activePillContainer,
+              {
+                transform: [{ translateX: slideAnim }],
+                width: PILL_WIDTH,
+                height: PILL_HEIGHT,
+                backgroundColor: colors.tabBarActivePill,
+                borderColor: colors.tabBarActivePillBorder,
+              }
+            ]}
+          >
+            <BlurView
+                intensity={isDark ? 0 : 30} 
+                tint={isDark ? 'dark' : 'light'} 
+                style={styles.absoluteFill} 
+            />
+            <LinearGradient
+              colors={isDark ? ['rgba(255,255,255,0.08)', 'rgba(255,255,255,0)'] : ['rgba(255,255,255,0.5)', 'rgba(255,255,255,0.1)']}
+              style={styles.absoluteFill}
+              start={{ x: 0, y: 0 }}
+              end={{ x: 0, y: 1 }}
+            />
+          </Animated.View>
+        </View>
 
-        {/* Tab 按钮 */}
-        {tabs.map((tab, index) => {
-          const isActive = activeTab === tab.key
-          return (
-            <TouchableOpacity
-              key={tab.key}
-              style={styles.tabItem}
-              onPress={() => handleTabPress(tab.key)}
-              hitSlop={{ top: 6, bottom: 6, left: 4, right: 4 }}
-              activeOpacity={0.7}
-            >
-              <Animated.View
-                style={[
-                  styles.tabContent,
-                  { transform: [{ scale: scaleAnims[index] }] },
-                ]}
+        {/* —— Tab 交互区 —— */}
+        <View style={styles.tabItemsContainer}>
+          {tabs.map((tab, index) => {
+            const isActive = activeTab === tab.key
+            return (
+              <TouchableOpacity
+                key={tab.key}
+                style={[styles.tabItem, { width: TAB_ITEM_WIDTH }]}
+                onPress={() => handleTabPress(tab.key)}
+                hitSlop={{ top: 10, bottom: 10, left: 0, right: 0 }}
+                activeOpacity={1}
               >
-                <Ionicons
-                  name={isActive ? tab.iconActive : tab.icon}
-                  size={isActive ? 22 : 20}
-                  color={isActive ? activeLabelColor : inactiveLabelColor}
-                />
-                <Text
+                <Animated.View
                   style={[
-                    styles.tabLabel,
-                    isActive ? styles.tabLabelActive : styles.tabLabelInactive,
-                    { color: isActive ? activeLabelColor : inactiveLabelColor },
+                    styles.tabContent,
+                    {
+                      transform: [{ scale: scaleAnims[index] }],
+                      opacity: opacityAnims[index],
+                    },
                   ]}
                 >
-                  {tab.label}
-                </Text>
-              </Animated.View>
-            </TouchableOpacity>
-          )
-        })}
+                  <Ionicons
+                    name={isActive ? tab.iconActive : tab.icon}
+                    size={24}
+                    color={isActive ? activeIconColor : inactiveIconColor}
+                  />
+                  <Text
+                    style={[
+                      styles.tabLabel,
+                      {
+                        color: isActive ? activeIconColor : inactiveIconColor,
+                        fontWeight: isActive ? '700' : '500' // 中文的话，500 和 700 搭配比较好
+                      },
+                    ]}
+                    numberOfLines={1}
+                    adjustsFontSizeToFit
+                  >
+                    {tab.label}
+                  </Text>
+                </Animated.View>
+              </TouchableOpacity>
+            )
+          })}
+        </View>
       </View>
     </View>
   )
 }
 
 const styles = StyleSheet.create({
-  /** 外层定位容器，水平居中胶囊 */
-  positioner: {
+  container: {
     position: 'absolute',
     left: 0,
     right: 0,
-    alignItems: 'center',
-  },
-  /** 胶囊主体 */
-  capsule: {
-    height: CAPSULE_TAB_HEIGHT,
-    borderRadius: 9999,
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingHorizontal: CAPSULE_H_PADDING,
-    overflow: 'hidden',
+    bottom: 0,
+    zIndex: 999,
+    // 底部满铺由于占用了较大面积，可去掉大阴影，或者给一个非常轻微向上的阴影即可
     ...Platform.select({
       ios: {
         shadowColor: '#000',
-        shadowOffset: { width: 0, height: 10 },
-        shadowOpacity: 0.22,
-        shadowRadius: 20,
+        shadowOffset: { width: 0, height: -2 },
+        shadowOpacity: 0.05,
+        shadowRadius: 10,
       },
       android: {
-        elevation: 12,
+        elevation: 8,
       },
     }),
   },
-  /** 液态玻璃模糊层 */
-  glassLayer: {
+  absoluteFill: {
     ...StyleSheet.absoluteFillObject,
-    borderRadius: 9999,
-    overflow: 'hidden',
   },
-  /** 胶囊基底层（提高对比） */
-  baseLayer: {
-    ...StyleSheet.absoluteFillObject,
-    borderRadius: 9999,
-    borderWidth: StyleSheet.hairlineWidth,
-  },
-  /** 顶部高光渐变层 */
-  glossLayer: {
+  glossTop: {
     position: 'absolute',
     top: 0,
     left: 0,
     right: 0,
-    height: CAPSULE_TAB_HEIGHT / 2,
-    borderRadius: 9999,
-    overflow: 'hidden',
+    height: 30, // 满铺时高光层不用太深，只需顶部边缘反射
   },
-  /** 半透明内发光边框 */
-  innerBorder: {
+  topBorder: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    height: StyleSheet.hairlineWidth,
+  },
+  contentContainer: {
+    width: '100%',
+    flexDirection: 'row',
+  },
+  pillTrack: {
     ...StyleSheet.absoluteFillObject,
-    borderRadius: 9999,
-    borderWidth: 0.75,
+    justifyContent: 'center',
+    // 去除 padding，通过 getPillTranslateX 直接计算了全局偏移
   },
-  /** 单个 Tab 按钮 */
+  activePillContainer: {
+    borderRadius: 20, // 药丸更加圆润，不用完全 9999 因为它是圆角矩形质感更好
+    borderWidth: StyleSheet.hairlineWidth,
+    overflow: 'hidden',
+    ...Platform.select({
+      ios: {
+        shadowColor: '#000',
+        shadowOffset: { width: 0, height: 2 },
+        shadowOpacity: 0.1,
+        shadowRadius: 4,
+      },
+    }),
+  },
+  tabItemsContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    width: '100%',
+    height: '100%',
+  },
   tabItem: {
-    width: TAB_ITEM_WIDTH,
-    height: CAPSULE_TAB_HEIGHT,
+    height: '100%',
     alignItems: 'center',
     justifyContent: 'center',
   },
-  /** Tab 内容容器（用于缩放动画） */
   tabContent: {
     alignItems: 'center',
     justifyContent: 'center',
-    gap: 2,
+    gap: 3,
   },
-  /** 中文标签 */
   tabLabel: {
-    fontSize: fontSize.caption1 + 1,
-  },
-  tabLabelActive: {
-    fontWeight: '700',
+    fontSize: fontSize.caption1,
     letterSpacing: 0.2,
-  },
-  tabLabelInactive: {
-    fontWeight: '600',
   },
 })

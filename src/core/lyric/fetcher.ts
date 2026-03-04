@@ -23,11 +23,19 @@ export interface LyricData {
 const EMPTY_LYRIC: LyricData = { lines: [], rawLrc: '', rawTlrc: '' }
 const TX_OFFICIAL_LYRIC_URL =
   'https://c.y.qq.com/lyric/fcgi-bin/fcg_query_lyric_new.fcg'
+const TX_MUSICU_LYRIC_URL = 'https://u.y.qq.com/cgi-bin/musicu.fcg'
 const TX_OFFICIAL_LYRIC_HEADERS = {
   Referer: 'https://y.qq.com/',
   Origin: 'https://y.qq.com',
   'User-Agent':
     'Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Mobile/15E148',
+}
+const TX_MUSICU_LYRIC_HEADERS = {
+  Referer: 'https://y.qq.com/portal/player.html',
+  Origin: 'https://y.qq.com',
+  'Content-Type': 'application/json',
+  'User-Agent':
+    'Mozilla/5.0 (Linux; Android 12; EBG-AN10) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Mobile Safari/537.36',
 }
 const MG_RESOURCE_INFO_URL =
   'https://c.musicapp.migu.cn/MIGUM2.0/v1.0/content/resourceinfo.do?resourceType=2'
@@ -185,6 +193,9 @@ async function requestText(url: string, init?: RequestInit): Promise<string> {
   return resp.text()
 }
 
+function toErrorMessage(error: unknown): string {
+  return error instanceof Error ? error.message : String(error)
+}
 
 async function fetchTxOfficialLyric(songmid: string): Promise<LyricData> {
   const query = new URLSearchParams({
@@ -224,6 +235,63 @@ async function fetchTxOfficialLyric(songmid: string): Promise<LyricData> {
         payload?.lyric_translate ||
         payload?.data?.lyric_translate ||
         ''
+    )
+  )
+  return buildLyricData(rawLrc, rawTlrc)
+}
+
+async function fetchTxMusicuLyric(songmid: string): Promise<LyricData> {
+  const payload = {
+    comm: {
+      ct: 24,
+      cv: 0,
+      uin: '0',
+      format: 'json',
+      inCharset: 'utf-8',
+      outCharset: 'utf-8',
+      platform: 'yqq.json',
+      needNewCode: 0,
+    },
+    lyric: {
+      module: 'music.musichallSong.PlayLyricInfo',
+      method: 'GetPlayLyricInfo',
+      param: {
+        songMID: songmid,
+        songID: 0,
+        trans_t: 0,
+        roma_t: 0,
+        qrc_t: 0,
+        qrc: 0,
+      },
+    },
+  }
+
+  const resp = await requestJson<any>(TX_MUSICU_LYRIC_URL, {
+    method: 'POST',
+    headers: TX_MUSICU_LYRIC_HEADERS,
+    body: JSON.stringify(payload),
+  })
+
+  const node = resp?.lyric || resp?.req_1 || {}
+  const code = Number(node?.code ?? resp?.code ?? 0)
+  if (Number.isFinite(code) && code !== 0 && code !== 200) return EMPTY_LYRIC
+
+  const data = node?.data || {}
+  const rawLrc = decodeMaybeBase64Lyric(
+    String(
+      data?.lyric ||
+      data?.lyric_lrc ||
+      data?.lyricContent ||
+      ''
+    )
+  )
+  const rawTlrc = decodeMaybeBase64Lyric(
+    String(
+      data?.trans ||
+      data?.trans_lrc ||
+      data?.tlyric ||
+      data?.lyric_translate ||
+      ''
     )
   )
   return buildLyricData(rawLrc, rawTlrc)
@@ -608,10 +676,32 @@ async function fetchWyLyric(songmid: string): Promise<LyricData> {
 
 /**
  * 获取 TX（QQ 音乐）歌词。
- * 优先使用 QQ 官方歌词接口，失败时由外层走导入音源兜底。
+ * 优先使用 QQ 官方 c.y 接口，失败或空结果时回退 musicu 接口。
  */
 async function fetchTxLyric(songmid: string): Promise<LyricData> {
-  return fetchTxOfficialLyric(songmid)
+  let officialData = EMPTY_LYRIC
+  try {
+    officialData = await fetchTxOfficialLyric(songmid)
+    if (officialData.lines.length) {
+      console.log(`[LyricFetcher] TX lyric hit: official (${songmid})`)
+      return officialData
+    }
+  } catch (error) {
+    console.warn(`[LyricFetcher] TX official lyric request failed (${songmid}): ${toErrorMessage(error)}`)
+  }
+
+  try {
+    const musicuData = await fetchTxMusicuLyric(songmid)
+    if (musicuData.lines.length) {
+      console.log(`[LyricFetcher] TX lyric hit: musicu (${songmid})`)
+      return musicuData
+    }
+  } catch (error) {
+    console.warn(`[LyricFetcher] TX musicu lyric request failed (${songmid}): ${toErrorMessage(error)}`)
+  }
+
+  console.warn(`[LyricFetcher] TX lyric empty from official APIs (${songmid})`)
+  return EMPTY_LYRIC
 }
 
 /**
