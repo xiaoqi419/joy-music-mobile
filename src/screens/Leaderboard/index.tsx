@@ -30,7 +30,6 @@ import { emitScrollTopState, subscribeScrollToTop } from '../../core/ui/scrollTo
 
 interface LeaderboardScreenProps {
   onLeaderboardPress?: (board: LeaderboardBoardItem) => void
-  onBack?: () => void
 }
 
 /**
@@ -39,7 +38,6 @@ interface LeaderboardScreenProps {
  */
 export default function LeaderboardScreen({
   onLeaderboardPress,
-  onBack,
 }: LeaderboardScreenProps) {
   const { colors, isDark } = useTheme()
   const insets = useSafeAreaInsets()
@@ -128,13 +126,7 @@ export default function LeaderboardScreen({
   }, [topLoading, topError, boards.length])
 
   return (
-    <View
-      style={[
-        styles.container,
-        onBack ? styles.overlayContainer : null,
-        { backgroundColor: colors.background },
-      ]}
-    >
+    <View style={[styles.container, { backgroundColor: colors.background }]}>
       <ScrollView
         ref={scrollRef}
         onScroll={handleScroll}
@@ -154,22 +146,6 @@ export default function LeaderboardScreen({
             style={styles.heroCard}
           >
             <View style={styles.heroHeader}>
-              {onBack ? (
-                <TouchableOpacity
-                  activeOpacity={0.84}
-                  style={[
-                    styles.backBtn,
-                    {
-                      backgroundColor: isDark ? 'rgba(255,255,255,0.16)' : 'rgba(18,32,58,0.08)',
-                    },
-                  ]}
-                  onPress={onBack}
-                  accessibilityRole="button"
-                  accessibilityLabel="返回发现页"
-                >
-                  <Ionicons name="chevron-back" size={18} color={isDark ? '#FFFFFF' : '#12203A'} />
-                </TouchableOpacity>
-              ) : null}
               <View style={styles.heroTitleWrap}>
                 <Text style={[styles.largeTitle, { color: isDark ? '#FFFFFF' : '#12203A' }]}>排行榜</Text>
                 <Text style={[styles.heroSubtitle, { color: isDark ? 'rgba(255,255,255,0.78)' : '#3A4B69' }]}>
@@ -246,10 +222,6 @@ const styles = StyleSheet.create({
   container: {
     flex: 1,
   },
-  overlayContainer: {
-    ...StyleSheet.absoluteFillObject,
-    zIndex: 90,
-  },
   headerWrap: {
     paddingHorizontal: spacing.md,
     paddingBottom: spacing.md,
@@ -265,13 +237,6 @@ const styles = StyleSheet.create({
     alignItems: 'flex-start',
     justifyContent: 'space-between',
     gap: spacing.md,
-  },
-  backBtn: {
-    width: 34,
-    height: 34,
-    borderRadius: 17,
-    alignItems: 'center',
-    justifyContent: 'center',
   },
   heroTitleWrap: {
     flex: 1,

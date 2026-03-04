@@ -1,129 +1,117 @@
 /**
- * OLED-first color tokens for Joy Music Mobile
+ * iOS 26 style color system
+ * Dark mode uses true OLED black, light mode uses SF-style grays
  */
 
 export interface ThemeColors {
+  // Backgrounds
   background: string
   surface: string
   surfaceElevated: string
   surfaceSecondary: string
 
+  // Text
   text: string
   textSecondary: string
   textTertiary: string
 
+  // Accent
   accent: string
-  accentBlue: string
-  accentGreen: string
-  accentWarning: string
   accentLight: string
 
+  // UI Elements
   separator: string
   overlay: string
   tabBar: string
   tabBarBorder: string
   miniPlayer: string
 
+  // Semantic
   danger: string
   success: string
   warning: string
 
+  // Cards
   cardGradientStart: string
   cardGradientEnd: string
 
+  // Search
   searchBackground: string
   searchPlaceholder: string
 
+  // Liquid Glass TabBar
   tabBarGloss: string
   tabBarGlossEnd: string
   tabBarInnerBorder: string
   tabBarActiveIndicator: string
-
-  glassSurface: string
-  glassBorder: string
-  focusRing: string
 }
 
 export const darkColors: ThemeColors = {
-  background: '#06070B',
-  surface: '#0F1220',
-  surfaceElevated: '#151A2E',
-  surfaceSecondary: '#0B0E18',
+  background: '#000000',
+  surface: '#1C1C1E',
+  surfaceElevated: '#2C2C2E',
+  surfaceSecondary: '#121212',
 
-  text: '#F8FAFC',
-  textSecondary: '#A8B3CF',
-  textTertiary: '#6D7A98',
+  text: '#FFFFFF',
+  textSecondary: '#8E8E93',
+  textTertiary: '#48484A',
 
-  accent: '#4DA3FF',
-  accentBlue: '#4DA3FF',
-  accentGreen: '#2BD576',
-  accentWarning: '#F5B94C',
-  accentLight: 'rgba(77, 163, 255, 0.18)',
+  accent: '#0A84FF',
+  accentLight: 'rgba(10, 132, 255, 0.15)',
 
-  separator: 'rgba(255, 255, 255, 0.10)',
-  overlay: 'rgba(6, 7, 11, 0.66)',
-  tabBar: 'rgba(16, 20, 34, 0.72)',
-  tabBarBorder: 'rgba(255, 255, 255, 0.14)',
-  miniPlayer: 'rgba(17, 22, 38, 0.78)',
+  separator: 'rgba(84, 84, 88, 0.36)',
+  overlay: 'rgba(0, 0, 0, 0.6)',
+  tabBar: 'rgba(30, 30, 30, 0.85)',
+  tabBarBorder: 'rgba(255, 255, 255, 0.08)',
+  miniPlayer: 'rgba(44, 44, 46, 0.92)',
 
-  danger: '#FF5A74',
-  success: '#2BD576',
-  warning: '#F5B94C',
+  danger: '#FF453A',
+  success: '#30D158',
+  warning: '#FF9F0A',
 
-  cardGradientStart: '#111628',
-  cardGradientEnd: '#1A2240',
+  cardGradientStart: '#1C1C1E',
+  cardGradientEnd: '#2C2C2E',
 
-  searchBackground: 'rgba(255, 255, 255, 0.09)',
-  searchPlaceholder: 'rgba(248, 250, 252, 0.58)',
+  searchBackground: '#1C1C1E',
+  searchPlaceholder: '#8E8E93',
 
-  tabBarGloss: 'rgba(255, 255, 255, 0.22)',
-  tabBarGlossEnd: 'rgba(255, 255, 255, 0.02)',
-  tabBarInnerBorder: 'rgba(255, 255, 255, 0.24)',
-  tabBarActiveIndicator: 'rgba(77, 163, 255, 0.24)',
-
-  glassSurface: 'rgba(18, 24, 41, 0.72)',
-  glassBorder: 'rgba(255, 255, 255, 0.14)',
-  focusRing: 'rgba(77, 163, 255, 0.44)',
+  tabBarGloss: 'rgba(255, 255, 255, 0.12)',
+  tabBarGlossEnd: 'rgba(255, 255, 255, 0.0)',
+  tabBarInnerBorder: 'rgba(255, 255, 255, 0.18)',
+  tabBarActiveIndicator: 'rgba(255, 255, 255, 0.15)',
 }
 
 export const lightColors: ThemeColors = {
-  background: '#F3F7FF',
+  background: '#F2F2F7',
   surface: '#FFFFFF',
-  surfaceElevated: '#F9FBFF',
-  surfaceSecondary: '#E8EEF9',
+  surfaceElevated: '#FFFFFF',
+  surfaceSecondary: '#E5E5EA',
 
-  text: '#0C1428',
-  textSecondary: '#334468',
-  textTertiary: '#687A9F',
+  text: '#000000',
+  textSecondary: '#3C3C43',
+  textTertiary: '#8E8E93',
 
-  accent: '#1C7CFF',
-  accentBlue: '#1C7CFF',
-  accentGreen: '#20B56A',
-  accentWarning: '#DA9B2C',
-  accentLight: 'rgba(28, 124, 255, 0.12)',
+  accent: '#007AFF',
+  accentLight: 'rgba(0, 122, 255, 0.1)',
 
-  separator: 'rgba(12, 20, 40, 0.10)',
-  overlay: 'rgba(12, 20, 40, 0.32)',
-  tabBar: 'rgba(255, 255, 255, 0.88)',
-  tabBarBorder: 'rgba(12, 20, 40, 0.14)',
-  miniPlayer: 'rgba(255, 255, 255, 0.92)',
+  separator: 'rgba(60, 60, 67, 0.12)',
+  overlay: 'rgba(0, 0, 0, 0.4)',
+  tabBar: 'rgba(249, 249, 249, 0.94)',
+  tabBarBorder: 'rgba(0, 0, 0, 0.08)',
+  miniPlayer: 'rgba(255, 255, 255, 0.94)',
 
-  danger: '#E34D63',
-  success: '#20B56A',
-  warning: '#DA9B2C',
+  danger: '#FF3B30',
+  success: '#34C759',
+  warning: '#FF9500',
 
   cardGradientStart: '#FFFFFF',
-  cardGradientEnd: '#EAF1FF',
+  cardGradientEnd: '#F2F2F7',
 
-  searchBackground: '#EFF4FF',
-  searchPlaceholder: '#6D7A95',
+  searchBackground: '#E5E5EA',
+  searchPlaceholder: '#8E8E93',
 
-  tabBarGloss: 'rgba(255, 255, 255, 0.8)',
-  tabBarGlossEnd: 'rgba(255, 255, 255, 0.08)',
-  tabBarInnerBorder: 'rgba(255, 255, 255, 0.75)',
-  tabBarActiveIndicator: 'rgba(28, 124, 255, 0.16)',
-
-  glassSurface: 'rgba(255, 255, 255, 0.72)',
-  glassBorder: 'rgba(12, 20, 40, 0.14)',
-  focusRing: 'rgba(28, 124, 255, 0.34)',
+  tabBarGloss: 'rgba(255, 255, 255, 0.7)',
+  tabBarGlossEnd: 'rgba(255, 255, 255, 0.0)',
+  tabBarInnerBorder: 'rgba(255, 255, 255, 0.6)',
+  tabBarActiveIndicator: 'rgba(0, 0, 0, 0.08)',
 }

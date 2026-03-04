@@ -19,13 +19,9 @@ import { useTheme, spacing, fontSize, BOTTOM_INSET } from '../../theme'
 import SectionHeader from '../../components/common/SectionHeader'
 import SourceChips from '../../components/common/SourceChips'
 import PlaylistSection from './PlaylistSection'
-import LeaderboardSection from './LeaderboardSection'
 import SongListMorePage from './SongListMorePage'
-import { DiscoverSourceId, LeaderboardBoardItem, SongListItem } from '../../types/discover'
+import { DiscoverSourceId, SongListItem } from '../../types/discover'
 import {
-  getLeaderboardBoards,
-  getLeaderboardSetting,
-  saveLeaderboardSetting,
   getSongListSortList,
   getSongListPage,
   getSongListSetting,
@@ -35,8 +31,6 @@ import { emitScrollTopState, subscribeScrollToTop } from '../../core/ui/scrollTo
 
 interface DiscoverScreenProps {
   onPlaylistPress?: (playlist: SongListItem) => void
-  onLeaderboardPress?: (board: LeaderboardBoardItem) => void
-  onOpenLeaderboardMore?: () => void
   onMorePageVisibilityChange?: (visible: boolean) => void
 }
 
@@ -46,8 +40,6 @@ interface DiscoverScreenProps {
  */
 export default function DiscoverScreen({
   onPlaylistPress,
-  onLeaderboardPress,
-  onOpenLeaderboardMore,
   onMorePageVisibilityChange,
 }: DiscoverScreenProps) {
   const { colors } = useTheme()
@@ -57,11 +49,8 @@ export default function DiscoverScreen({
   const [songListSort, setSongListSort] = useState('new')
   const [songListTag, setSongListTag] = useState('')
   const [playlists, setPlaylists] = useState<SongListItem[]>([])
-  const [leaderboards, setLeaderboards] = useState<LeaderboardBoardItem[]>([])
   const [playlistLoading, setPlaylistLoading] = useState(false)
-  const [leaderboardLoading, setLeaderboardLoading] = useState(false)
   const [playlistError, setPlaylistError] = useState<string | null>(null)
-  const [leaderboardError, setLeaderboardError] = useState<string | null>(null)
   const [refreshing, setRefreshing] = useState(false)
   const [showSongListMore, setShowSongListMore] = useState(false)
   const mainScrollRef = useRef<ScrollView | null>(null)
@@ -112,39 +101,16 @@ export default function DiscoverScreen({
     []
   )
 
-  const loadLeaderboard = useCallback(async(source: DiscoverSourceId) => {
-    try {
-      setLeaderboardLoading(true)
-      setLeaderboardError(null)
-      const list = await getLeaderboardBoards(source)
-      setLeaderboards(list.slice(0, 6))
-      await saveLeaderboardSetting({
-        source,
-        boardId: list[0]?.id || '',
-      })
-    } catch (error: any) {
-      console.error('[Discover] Load leaderboard failed:', error?.message || error, error?.stack)
-      setLeaderboards([])
-      setLeaderboardError(`${source.toUpperCase()} 榜单加载失败，请稍后重试。`)
-    } finally {
-      setLeaderboardLoading(false)
-    }
-  }, [])
-
   /** 初始化时读取上次保存的歌单设置 */
   useEffect(() => {
     let active = true
     ;(async () => {
       try {
         const setting = await getSongListSetting()
-        const leaderboardSetting = await getLeaderboardSetting()
         if (!active) return
         setSongListSource(setting.source)
         setSongListSort(setting.sortId || 'new')
         setSongListTag(setting.tagId || '')
-        if (leaderboardSetting.source && leaderboardSetting.source !== setting.source) {
-          setSongListSource(leaderboardSetting.source)
-        }
       } catch (error) {
         console.error('[Discover] Load settings failed:', error)
       }
@@ -158,10 +124,6 @@ export default function DiscoverScreen({
   useEffect(() => {
     void loadSongList(songListSource, songListSort, songListTag)
   }, [songListSource, songListSort, songListTag, loadSongList])
-
-  useEffect(() => {
-    void loadLeaderboard(songListSource)
-  }, [songListSource, loadLeaderboard])
 
   const handleSongListSourceChange = useCallback((source: DiscoverSourceId) => {
     setSongListSource(source)
@@ -196,8 +158,7 @@ export default function DiscoverScreen({
   const handleRefresh = useCallback(() => {
     setRefreshing(true)
     void loadSongList(songListSource, songListSort, songListTag, true)
-    void loadLeaderboard(songListSource)
-  }, [songListSource, songListSort, songListTag, loadSongList, loadLeaderboard])
+  }, [songListSource, songListSort, songListTag, loadSongList])
 
   const handleMainScroll = useCallback((event: NativeSyntheticEvent<NativeScrollEvent>) => {
     emitScrollTopState(event.nativeEvent.contentOffset.y <= 4)
@@ -243,18 +204,6 @@ export default function DiscoverScreen({
 
           <SectionHeader title="推荐歌单" showMore onMorePress={() => setShowSongListMore(true)} />
           {sourceChips}
-
-          <SectionHeader
-            title="热门榜单"
-            showMore={Boolean(onOpenLeaderboardMore)}
-            onMorePress={onOpenLeaderboardMore}
-          />
-          <LeaderboardSection
-            boards={leaderboards}
-            loading={leaderboardLoading}
-            error={leaderboardError}
-            onLeaderboardPress={onLeaderboardPress}
-          />
 
           {/* 刷新提示横幅 */}
           {refreshing && (

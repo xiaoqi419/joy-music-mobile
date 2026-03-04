@@ -28,10 +28,9 @@ import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useDispatch, useSelector } from 'react-redux';
-import { useTheme, spacing, fontSize, borderRadius, motion } from '../../theme';
+import { useTheme, spacing, fontSize, borderRadius } from '../../theme';
 import { usePlayerStatus } from '../../hooks/usePlayerStatus';
 import { useSwipeDownClose } from '../../hooks/useSwipeDownClose';
-import useReduceMotion from '../../hooks/useReduceMotion';
 import { playerController, type PlayMode } from '../../core/player';
 import musicManager, { type Quality } from '../../core/music';
 import { ALL_QUALITIES } from '../../core/config/musicSource';
@@ -112,7 +111,6 @@ function normalizeKwSongmid(raw: unknown): string {
  */
 export default function NowPlaying({ onClose }: NowPlayingProps) {
   const { colors, isDark } = useTheme();
-  const reduceMotion = useReduceMotion();
   const insets = useSafeAreaInsets();
   const dispatch = useDispatch();
   const { currentTrack, isPlaying, position, duration } = usePlayerStatus();
@@ -278,12 +276,6 @@ export default function NowPlaying({ onClose }: NowPlayingProps) {
 
   /** 播放时启动匀速旋转，暂停时停在当前角度 */
   useEffect(() => {
-    if (reduceMotion) {
-      rotateLoop.current?.stop();
-      rotateLoop.current = null;
-      rotateAnim.setValue(0);
-      return;
-    }
     if (isPlaying) {
       const loop = Animated.loop(
         Animated.timing(rotateAnim, {
@@ -301,7 +293,7 @@ export default function NowPlaying({ onClose }: NowPlayingProps) {
       rotateLoop.current.stop();
       rotateLoop.current = null;
     }
-  }, [isPlaying, reduceMotion, rotateAnim]);
+  }, [isPlaying, rotateAnim]);
 
   const spin = rotateAnim.interpolate({
     inputRange: [0, 1],
@@ -310,15 +302,9 @@ export default function NowPlaying({ onClose }: NowPlayingProps) {
 
   /** 标签页切换动画 */
   useEffect(() => {
-    if (reduceMotion) {
-      viewSwitchAnim.setValue(activeTab === 'lyrics' ? 1 : 0);
-      coverBtnAnim.setValue(activeTab === 'cover' ? 1 : 0);
-      lyricsBtnAnim.setValue(activeTab === 'lyrics' ? 1 : 0);
-      return;
-    }
     Animated.timing(viewSwitchAnim, {
       toValue: activeTab === 'lyrics' ? 1 : 0,
-      duration: motion.duration.base,
+      duration: 260,
       easing: Easing.out(Easing.cubic),
       useNativeDriver: true,
     }).start();
@@ -328,12 +314,12 @@ export default function NowPlaying({ onClose }: NowPlayingProps) {
       Animated.parallel([
         Animated.timing(coverBtnAnim, {
           toValue: 1,
-          duration: motion.duration.quick,
+          duration: 200,
           useNativeDriver: true,
         }),
         Animated.timing(lyricsBtnAnim, {
           toValue: 0,
-          duration: motion.duration.quick,
+          duration: 200,
           useNativeDriver: true,
         }),
       ]).start();
@@ -341,17 +327,17 @@ export default function NowPlaying({ onClose }: NowPlayingProps) {
       Animated.parallel([
         Animated.timing(coverBtnAnim, {
           toValue: 0,
-          duration: motion.duration.quick,
+          duration: 200,
           useNativeDriver: true,
         }),
         Animated.timing(lyricsBtnAnim, {
           toValue: 1,
-          duration: motion.duration.quick,
+          duration: 200,
           useNativeDriver: true,
         }),
       ]).start();
     }
-  }, [activeTab, coverBtnAnim, lyricsBtnAnim, reduceMotion, viewSwitchAnim]);
+  }, [activeTab, viewSwitchAnim, coverBtnAnim, lyricsBtnAnim]);
 
   /* ── 歌曲切换时获取歌词 ── */
   useEffect(() => {
@@ -445,19 +431,14 @@ export default function NowPlaying({ onClose }: NowPlayingProps) {
       return;
     }
     setCommentSheetVisible(true);
-    if (reduceMotion) {
-      commentSheetAnim.setValue(1);
-      return;
-    }
     commentSheetAnim.setValue(0);
     Animated.spring(commentSheetAnim, {
       toValue: 1,
       useNativeDriver: true,
-      damping: motion.spring.gesture.damping,
-      stiffness: motion.spring.gesture.stiffness,
-      mass: motion.spring.gesture.mass,
+      tension: 230,
+      friction: 24,
     }).start();
-  }, [commentSheetAnim, reduceMotion, renderTrack]);
+  }, [commentSheetAnim, renderTrack]);
 
   const openQueueSheet = useCallback(() => {
     if (commentSheetVisible) {
@@ -469,19 +450,14 @@ export default function NowPlaying({ onClose }: NowPlayingProps) {
       return;
     }
     setQueueSheetVisible(true);
-    if (reduceMotion) {
-      queueSheetAnim.setValue(1);
-      return;
-    }
     queueSheetAnim.setValue(0);
     Animated.spring(queueSheetAnim, {
       toValue: 1,
       useNativeDriver: true,
-      damping: motion.spring.gesture.damping,
-      stiffness: motion.spring.gesture.stiffness,
-      mass: motion.spring.gesture.mass,
+      tension: 230,
+      friction: 24,
     }).start();
-  }, [commentSheetVisible, queue.length, queueSheetAnim, reduceMotion]);
+  }, [commentSheetVisible, queue.length, queueSheetAnim]);
 
   const handleCyclePlayMode = useCallback(() => {
     playerController.cyclePlayMode()

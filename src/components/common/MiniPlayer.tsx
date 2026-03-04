@@ -16,9 +16,8 @@ import {
   type GestureResponderEvent,
 } from 'react-native'
 import { Ionicons } from '@expo/vector-icons'
-import { useTheme, MINI_PLAYER_HEIGHT, fontSize, motion, triggerPlaybackHaptic } from '../../theme'
+import { useTheme, MINI_PLAYER_HEIGHT, fontSize } from '../../theme'
 import { usePlayerStatus } from '../../hooks/usePlayerStatus'
-import useReduceMotion from '../../hooks/useReduceMotion'
 import { playerController } from '../../core/player'
 import { getLyric, findCurrentLineIndex, type LyricLine } from '../../core/lyric'
 
@@ -27,7 +26,7 @@ interface MiniPlayerProps {
 }
 
 const COVER_SIZE = 44
-const CONTROL_SIZE = 44
+const CONTROL_SIZE = 36
 const SEEK_TRACK_HEIGHT = 5
 const SEEK_TOUCH_HEIGHT = 18
 
@@ -39,7 +38,6 @@ const clamp01 = (value: number): number => Math.min(Math.max(value, 0), 1)
  */
 export default function MiniPlayer({ onOpenPlayer }: MiniPlayerProps) {
   const { colors, isDark } = useTheme()
-  const reduceMotion = useReduceMotion()
   const { isPlaying, currentTrack, progress, position, duration } = usePlayerStatus()
 
   const entryAnim = useRef(new Animated.Value(currentTrack ? 1 : 0)).current
@@ -53,18 +51,13 @@ export default function MiniPlayer({ onOpenPlayer }: MiniPlayerProps) {
     : ''
 
   useEffect(() => {
-    if (reduceMotion) {
-      entryAnim.setValue(currentTrack ? 1 : 0)
-      return
-    }
     Animated.spring(entryAnim, {
       toValue: currentTrack ? 1 : 0,
       useNativeDriver: true,
-      damping: motion.spring.card.damping,
-      stiffness: motion.spring.card.stiffness,
-      mass: motion.spring.card.mass,
+      tension: 180,
+      friction: 18,
     }).start()
-  }, [currentTrack, entryAnim, reduceMotion])
+  }, [currentTrack, entryAnim])
 
   useEffect(() => {
     if (!currentTrack) {
@@ -113,7 +106,6 @@ export default function MiniPlayer({ onOpenPlayer }: MiniPlayerProps) {
 
   const handlePlayPause = useCallback(async () => {
     try {
-      void triggerPlaybackHaptic()
       if (isPlaying) {
         await playerController.pause()
       } else {
@@ -206,8 +198,6 @@ export default function MiniPlayer({ onOpenPlayer }: MiniPlayerProps) {
           style={styles.mainArea}
           activeOpacity={0.82}
           onPress={handleOpen}
-          accessibilityRole="button"
-          accessibilityLabel="打开全屏播放器"
         >
           <View
             style={[
@@ -251,8 +241,6 @@ export default function MiniPlayer({ onOpenPlayer }: MiniPlayerProps) {
           ]}
           onPress={handlePlayPause}
           activeOpacity={0.8}
-          accessibilityRole="button"
-          accessibilityLabel={isPlaying ? '暂停播放' : '继续播放'}
         >
           <Ionicons
             name={isPlaying ? 'pause' : 'play'}
@@ -314,7 +302,7 @@ export default function MiniPlayer({ onOpenPlayer }: MiniPlayerProps) {
 const styles = StyleSheet.create({
   container: {
     height: MINI_PLAYER_HEIGHT,
-    borderRadius: 22,
+    borderRadius: 18,
     borderWidth: StyleSheet.hairlineWidth,
     paddingHorizontal: 10,
     paddingTop: 8,

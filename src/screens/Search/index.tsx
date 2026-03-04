@@ -316,7 +316,7 @@ export default function SearchScreen({ onTrackPress, onTrackMorePress }: SearchS
     <View style={[styles.container, { backgroundColor: colors.background }]}>
       <View style={[styles.header, { paddingTop: insets.top + spacing.md }]}>
         <LinearGradient
-          colors={isDark ? ['#16253C', '#0A1321'] : ['#EEF5FF', '#DEEAFE']}
+          colors={isDark ? ['#20354E', '#0E1825'] : ['#EEF5FF', '#DEEAFE']}
           start={{ x: 0, y: 0 }}
           end={{ x: 1, y: 1 }}
           style={styles.heroCard}
@@ -389,7 +389,7 @@ export default function SearchScreen({ onTrackPress, onTrackMorePress }: SearchS
           onScroll={handleResultScroll}
           scrollEventThrottle={16}
           data={tracks}
-          keyExtractor={item => getTrackIdentity(item)}
+          keyExtractor={item => item.id}
           renderItem={renderTrackItem}
           contentContainerStyle={{ paddingBottom: BOTTOM_INSET + spacing.md }}
           onEndReachedThreshold={0.35}
@@ -438,7 +438,7 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     paddingHorizontal: spacing.md,
-    minHeight: 46,
+    minHeight: 42,
     borderRadius: borderRadius.full,
     gap: spacing.sm,
   },
@@ -482,7 +482,6 @@ const styles = StyleSheet.create({
     gap: 6,
     paddingHorizontal: spacing.md,
     paddingVertical: spacing.sm,
-    minHeight: 44,
     borderRadius: borderRadius.full,
   },
   tagText: {

@@ -24,8 +24,6 @@ export default function SectionHeader({ title, showMore = false, onMorePress }: 
           style={styles.moreButton}
           onPress={onMorePress}
           activeOpacity={0.6}
-          accessibilityRole="button"
-          accessibilityLabel={`${title} 更多`}
         >
           <Text style={[styles.moreText, { color: colors.textSecondary }]}>更多</Text>
           <Ionicons name="chevron-forward" size={16} color={colors.textSecondary} />
@@ -52,8 +50,6 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     gap: 2,
-    minHeight: 44,
-    paddingHorizontal: 4,
   },
   moreText: {
     fontSize: fontSize.subhead,
