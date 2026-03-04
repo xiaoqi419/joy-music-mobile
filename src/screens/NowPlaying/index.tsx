@@ -653,6 +653,7 @@ export default function NowPlaying({ onClose }: NowPlayingProps) {
                 backgroundColor: isDark ? 'rgba(28,28,30,0.35)' : 'rgba(255,255,255,0.5)',
                 borderColor: colors.separator,
               },
+              qualityMenuVisible ? styles.metaCardMenuOpen : null,
             ]}
           >
             {/* 歌曲信息背景使用局部毛玻璃，实现浮动晶体质感 */}
@@ -1166,6 +1167,11 @@ const styles = StyleSheet.create({
     paddingVertical: spacing.sm + 2,
     overflow: 'hidden',
   },
+  metaCardMenuOpen: {
+    overflow: 'visible',
+    zIndex: 60,
+    elevation: 60,
+  },
   metaCardRow: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -1183,6 +1189,8 @@ const styles = StyleSheet.create({
   qualitySelectorWrap: {
     position: 'relative',
     alignSelf: 'center',
+    zIndex: 70,
+    elevation: 70,
   },
   qualitySelectorBtn: {
     minWidth: 72,
@@ -1208,7 +1216,8 @@ const styles = StyleSheet.create({
     borderRadius: borderRadius.md,
     borderWidth: StyleSheet.hairlineWidth,
     overflow: 'hidden',
-    zIndex: 20,
+    zIndex: 80,
+    elevation: 80,
   },
   qualityMenuItem: {
     minHeight: 34,
@@ -1233,6 +1242,7 @@ const styles = StyleSheet.create({
     flex: 1,
     minHeight: 260,
     position: 'relative',
+    zIndex: 1,
   },
   stageLayer: {
     ...StyleSheet.absoluteFillObject,
