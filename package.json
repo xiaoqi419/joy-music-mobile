@@ -1,6 +1,6 @@
 {
   "name": "joy-music-mobile",
-  "version": "1.2.5",
+  "version": "1.2.6",
   "description": "A React Native music player for iOS using Expo",
   "private": true,
   "scripts": {
