@@ -16,6 +16,8 @@ import {
   NativeSyntheticEvent,
 } from 'react-native'
 import { LinearGradient } from 'expo-linear-gradient'
+import { BlurView } from 'expo-blur'
+import { PanGestureHandler } from 'react-native-gesture-handler'
 import { useSafeAreaInsets } from 'react-native-safe-area-context'
 import { Ionicons } from '@expo/vector-icons'
 import { useSelector } from 'react-redux'
@@ -28,7 +30,7 @@ import { normalizeImageUrl } from '../../utils/url'
 import { RootState } from '../../store'
 
 const SCREEN_WIDTH = Dimensions.get('window').width
-const HEADER_HEIGHT = 280
+const HEADER_HEIGHT = 290
 
 interface TrackListDetailProps {
   title: string
@@ -61,7 +63,7 @@ export default function TrackListDetail({
   const insets = useSafeAreaInsets()
   const currentTrackId = useSelector((state: RootState) => state.player.currentTrack?.id || '')
   const isPlaying = useSelector((state: RootState) => state.player.isPlaying)
-  const { panX, panHandlers } = useSwipeBack(onBack)
+  const { panX, panGesture } = useSwipeBack(onBack)
   const listRef = useRef<FlatList<Track> | null>(null)
 
   const normalizedCoverUrl = useMemo(() => normalizeImageUrl(coverUrl, 500), [coverUrl])
@@ -86,12 +88,30 @@ export default function TrackListDetail({
 
   const listHeader = useMemo(() => (
     <View>
-      <LinearGradient
-        colors={gradientColors}
-        start={{ x: 0, y: 0 }}
-        end={{ x: 0, y: 1 }}
-        style={[styles.headerGradient, { paddingTop: insets.top }]}
-      >
+      {/* 沉浸式大底图：如果存在，把它拉伸并极致模糊当作背景 */}
+      <View style={[styles.headerGradient, { paddingTop: insets.top, overflow: 'hidden' }]}>
+        {headerCoverSource && (
+          <Image
+            source={headerCoverSource}
+            style={StyleSheet.absoluteFillObject}
+            blurRadius={90}
+            fadeDuration={0}
+          />
+        )}
+        {/* 背景暗化遮罩，确保文字可读 */}
+        <LinearGradient
+          colors={['rgba(0,0,0,0.2)', 'rgba(0,0,0,0.8)']}
+          start={{ x: 0, y: 0 }}
+          end={{ x: 0, y: 1 }}
+          style={StyleSheet.absoluteFillObject}
+        />
+        {/* 第二重 BlurView 进一步将背景光融化为液态感 */}
+        <BlurView
+          intensity={50}
+          tint="dark"
+          style={StyleSheet.absoluteFillObject}
+        />
+
         {/* Back button */}
         <TouchableOpacity
           style={styles.backButton}
@@ -101,26 +121,19 @@ export default function TrackListDetail({
           <Ionicons name="chevron-back" size={28} color="#FFFFFF" />
         </TouchableOpacity>
 
-        {/* Cover and info */}
+        {/* Cover and info —— 现在封面变为居中内容的信息展示区 */}
         <View style={styles.headerContent}>
-          {headerCoverSource ? (
-            <Image source={headerCoverSource} style={styles.headerCover} fadeDuration={0} />
-          ) : (
-            <View style={[styles.headerCover, { backgroundColor: 'rgba(255,255,255,0.15)' }]}>
-              <Ionicons name="musical-notes" size={40} color="rgba(255,255,255,0.6)" />
-            </View>
-          )}
           <View style={styles.headerInfo}>
             <Text style={styles.headerTitle} numberOfLines={2}>{title}</Text>
             {description && (
-              <Text style={styles.headerDescription} numberOfLines={2}>
+              <Text style={styles.headerDescription} numberOfLines={3}>
                 {description}
               </Text>
             )}
             <Text style={styles.headerCount}>{tracks.length} 首歌曲</Text>
           </View>
         </View>
-      </LinearGradient>
+      </View>
 
       {/* Play all button */}
       <View style={styles.actionRow}>
@@ -193,27 +206,34 @@ export default function TrackListDetail({
     ), [currentTrackId, isPlaying, onTrackPress, onTrackMorePress])
 
   return (
-    <Animated.View
-      style={[
-        styles.container,
-        {
-          backgroundColor: colors.background,
-          transform: [{ translateX: panX }],
-        },
-      ]}
-      {...panHandlers}
+    <PanGestureHandler
+      hitSlop={panGesture.hitSlop}
+      activeOffsetX={panGesture.activeOffsetX}
+      failOffsetY={panGesture.failOffsetY}
+      onGestureEvent={panGesture.onGestureEvent}
+      onHandlerStateChange={panGesture.onHandlerStateChange}
     >
-      <FlatList
-        ref={listRef}
-        onScroll={handleScroll}
-        scrollEventThrottle={16}
-        data={tracks}
-        keyExtractor={(item) => item.id}
-        ListHeaderComponent={listHeader}
-        contentContainerStyle={{ paddingBottom: BOTTOM_INSET + spacing.md }}
-        renderItem={renderTrackItem}
-      />
-    </Animated.View>
+      <Animated.View
+        style={[
+          styles.container,
+          {
+            backgroundColor: colors.background,
+            transform: [{ translateX: panX }],
+          },
+        ]}
+      >
+        <FlatList
+          ref={listRef}
+          onScroll={handleScroll}
+          scrollEventThrottle={16}
+          data={tracks}
+          keyExtractor={(item) => item.id}
+          ListHeaderComponent={listHeader}
+          contentContainerStyle={{ paddingBottom: BOTTOM_INSET + spacing.md }}
+          renderItem={renderTrackItem}
+        />
+      </Animated.View>
+    </PanGestureHandler>
   )
 }
 
@@ -240,26 +260,17 @@ const styles = StyleSheet.create({
   },
   headerContent: {
     flex: 1,
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: spacing.md,
-  },
-  headerCover: {
-    width: 120,
-    height: 120,
-    borderRadius: borderRadius.md,
-    overflow: 'hidden',
-    alignItems: 'center',
-    justifyContent: 'center',
+    paddingHorizontal: spacing.sm,
+    justifyContent: 'flex-end',
+    paddingBottom: spacing.md,
   },
   headerInfo: {
-    flex: 1,
-    justifyContent: 'center',
-    gap: spacing.xs,
+    justifyContent: 'flex-end',
+    gap: spacing.sm,
   },
   headerTitle: {
-    fontSize: fontSize.title2,
-    fontWeight: '700',
+    fontSize: fontSize.largeTitle,
+    fontWeight: '800',
     color: '#FFFFFF',
   },
   headerDescription: {

@@ -23,8 +23,10 @@ import {
   Dimensions,
   Alert,
 } from 'react-native';
-import Slider from '@react-native-community/slider';
+import { PanGestureHandler } from 'react-native-gesture-handler';
+// 使用原生 Slider 作为交互层，视觉轨道与圆点仍保持当前样式
 import { Ionicons } from '@expo/vector-icons';
+import { BlurView } from 'expo-blur';
 import { LinearGradient } from 'expo-linear-gradient';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useDispatch, useSelector } from 'react-redux';
@@ -39,6 +41,7 @@ import { httpRequest } from '../../core/discover/http';
 import LyricsView from '../../components/common/LyricsView';
 import CommentSheet from './CommentSheet';
 import QueueSheet from './QueueSheet';
+import CircleSlider from './CircleSlider';
 import type { RootState } from '../../store';
 import type { Track } from '../../types/music';
 import { normalizeImageUrl } from '../../utils/url';
@@ -98,6 +101,11 @@ function formatMs(ms: number): string {
   return `${m}:${String(s).padStart(2, '0')}`;
 }
 
+function clamp01(value: number): number {
+  if (!Number.isFinite(value)) return 0;
+  return Math.max(0, Math.min(1, value));
+}
+
 function normalizeKwSongmid(raw: unknown): string {
   return String(raw ?? '')
     .trim()
@@ -129,9 +137,10 @@ export default function NowPlaying({ onClose }: NowPlayingProps) {
   /* ── 进度条拖动状态（用 ref 同步追踪，避免 setState 异步延迟导致闪回） ── */
   const isDraggingRef = useRef(false);
   const [sliderValue, setSliderValue] = useState(0);
+  const isPlayingRef = useRef(isPlaying);
 
   /* ── 顶部下滑关闭手势 ── */
-  const { panY, panHandlers } = useSwipeDownClose(onClose, insets.top + 120);
+  const { panY, panGesture } = useSwipeDownClose(onClose, insets.top + 120);
 
   /* ── 歌词状态 ── */
   const [lyricData, setLyricData] = useState<LyricData>({
@@ -215,6 +224,10 @@ export default function NowPlaying({ onClose }: NowPlayingProps) {
     return ordered.length ? ordered : raw;
   }, [selectedSourceConfig, currentTrackPlatform]);
   const qualityDisplay = QUALITY_LABELS[resolvedQuality || preferredQuality];
+
+  useEffect(() => {
+    isPlayingRef.current = isPlaying;
+  }, [isPlaying]);
 
   useEffect(() => {
     const unsubscribeResolving = playerController.onResolvingChange(setIsResolvingTrack);
@@ -372,6 +385,36 @@ export default function NowPlaying({ onClose }: NowPlayingProps) {
   }, [position, duration]);
 
   /** Slider 显示值：拖动时由 onValueChange 更新，非拖动时由 useEffect 同步 */
+  const handleSliderValueChange = useCallback((value: number) => {
+    setSliderValue(clamp01(value));
+  }, []);
+
+  const handleSliderComplete = useCallback((value: number) => {
+    const safeProgress = clamp01(value);
+    setSliderValue(safeProgress);
+
+    const safeDuration = Math.max(0, Math.floor(duration || 0));
+    if (safeDuration <= 0) {
+      isDraggingRef.current = false;
+      return;
+    }
+
+    const nextMs = Math.floor(safeDuration * safeProgress);
+    const wasPlaying = isPlayingRef.current;
+    void (async() => {
+      try {
+        await playerController.seek(nextMs);
+        // seek 后保持原播放态，避免暂停状态下拖动被意外拉起播放。
+        if (!wasPlaying) {
+          await playerController.pause();
+        }
+      } catch (error) {
+        console.error('[NowPlaying] Seek failed:', error);
+      } finally {
+        isDraggingRef.current = false;
+      }
+    })();
+  }, [duration]);
 
   /** 点击歌词行跳转 */
   const handleLyricSeek = useCallback((timeMs: number) => {
@@ -512,38 +555,53 @@ export default function NowPlaying({ onClose }: NowPlayingProps) {
   if (!renderTrack) return null;
 
   return (
-    <Animated.View
-      style={[
-        styles.overlay,
-        {
-          opacity: dismissOpacity,
-          transform: [{ translateY: panY }, { scale: dismissScale }],
-        },
-      ]}
-      {...panHandlers}
+    <PanGestureHandler
+      hitSlop={panGesture.hitSlop}
+      activeOffsetY={panGesture.activeOffsetY}
+      failOffsetX={panGesture.failOffsetX}
+      onGestureEvent={panGesture.onGestureEvent}
+      onHandlerStateChange={panGesture.onHandlerStateChange}
     >
+      <Animated.View
+        style={[
+          styles.overlay,
+          {
+            opacity: dismissOpacity,
+            transform: [{ translateY: panY }, { scale: dismissScale }],
+          },
+        ]}
+      >
+      {/* 底层深邃/明亮底色 */}
       <LinearGradient
         colors={
           isDark
-            ? ['#05070D', '#0D182C', '#05070D']
-            : ['#EAF3FF', '#F8FBFF', '#EEF3F8']
+            ? ['#05070D', '#0A1222', '#05070D']
+            : ['#F2F6FB', '#FFFFFF', '#EEF3F8']
         }
         start={{ x: 0.1, y: 0 }}
         end={{ x: 0.9, y: 1 }}
         style={StyleSheet.absoluteFill}
       />
-      {renderCoverUrl && (
+      {/* 模糊图 */}
+      {renderCoverUrl ? (
         <Image
           source={{ uri: renderCoverUrl }}
           style={styles.backdropImage}
-          blurRadius={48}
+          blurRadius={isDark ? 55 : 30}
         />
-      )}
+      ) : null}
+      {/* 强烈的高斯模糊层，提升玻璃冰透感，并且减少背景图过于抢眼 */}
+      <BlurView
+        intensity={isDark ? 90 : 80}
+        tint={isDark ? 'dark' : 'light'}
+        style={StyleSheet.absoluteFill}
+      />
+      {/* 叠色：防止毛玻璃因为原本图太亮太暗而失去对比度 */}
       <LinearGradient
         colors={
           isDark
-            ? ['rgba(0,0,0,0.35)', 'rgba(0,0,0,0.82)']
-            : ['rgba(255,255,255,0.35)', 'rgba(242,242,247,0.86)']
+            ? ['rgba(0,0,0,0.15)', 'rgba(0,0,0,0.45)']
+            : ['rgba(255,255,255,0.4)', 'rgba(255,255,255,0.85)']
         }
         start={{ x: 0.5, y: 0 }}
         end={{ x: 0.5, y: 1 }}
@@ -592,11 +650,19 @@ export default function NowPlaying({ onClose }: NowPlayingProps) {
             style={[
               styles.metaCard,
               {
-                backgroundColor: isDark ? 'rgba(28,28,30,0.48)' : 'rgba(255,255,255,0.72)',
+                backgroundColor: isDark ? 'rgba(28,28,30,0.35)' : 'rgba(255,255,255,0.5)',
                 borderColor: colors.separator,
               },
             ]}
           >
+            {/* 歌曲信息背景使用局部毛玻璃，实现浮动晶体质感 */}
+            <BlurView
+              intensity={isDark ? 40 : 60}
+              tint={isDark ? 'dark' : 'light'}
+              style={StyleSheet.absoluteFill}
+            />
+            {/* 内层发光与内容 */}
+            <View style={[StyleSheet.absoluteFill, styles.metaCardInnerBorder]} pointerEvents="none" />
             <View style={styles.metaCardRow}>
               <View style={styles.metaMain}>
                 <Text style={[styles.trackTitle, { color: colors.text }]} numberOfLines={2}>
@@ -699,26 +765,27 @@ export default function NowPlaying({ onClose }: NowPlayingProps) {
               <View
                 style={[
                   styles.haloOuter,
-                  { borderColor: isDark ? 'rgba(255,255,255,0.08)' : 'rgba(0,0,0,0.08)' },
+                  { borderColor: isDark ? 'rgba(255,255,255,0.06)' : 'rgba(0,0,0,0.03)' },
                 ]}
               />
               <View
                 style={[
                   styles.haloInner,
-                  { borderColor: isDark ? 'rgba(255,255,255,0.16)' : 'rgba(0,0,0,0.12)' },
+                  { borderColor: isDark ? 'rgba(255,255,255,0.12)' : 'rgba(0,0,0,0.08)' },
                 ]}
               />
+              {/* 大面积的有色散景阴影使封面变得梦幻 */}
               <View
                 style={[
                   styles.coverShadow,
                   Platform.select({
                     ios: {
                       shadowColor: colors.accent,
-                      shadowOffset: { width: 0, height: 8 },
-                      shadowOpacity: 0.3,
-                      shadowRadius: 24,
+                      shadowOffset: { width: 0, height: 16 },
+                      shadowOpacity: isDark ? 0.35 : 0.45,
+                      shadowRadius: 36,
                     },
-                    android: { elevation: 20 },
+                    android: { elevation: 20, shadowColor: colors.accent },
                   }),
                 ]}
               >
@@ -762,11 +829,16 @@ export default function NowPlaying({ onClose }: NowPlayingProps) {
               style={[
                 styles.lyricsPanel,
                 {
-                  backgroundColor: isDark ? 'rgba(28,28,30,0.46)' : 'rgba(255,255,255,0.72)',
-                  borderColor: colors.separator,
+                  backgroundColor: isDark ? 'rgba(28,28,30,0.25)' : 'rgba(255,255,255,0.3)',
+                  borderColor: isDark ? 'rgba(255,255,255,0.08)' : 'rgba(255,255,255,0.8)',
                 },
               ]}
             >
+              <BlurView
+                intensity={isDark ? 30 : 50}
+                tint={isDark ? 'dark' : 'light'}
+                style={StyleSheet.absoluteFill}
+              />
               <LyricsView
                 lyrics={lyricData.lines}
                 position={position}
@@ -784,11 +856,16 @@ export default function NowPlaying({ onClose }: NowPlayingProps) {
             style={[
               styles.capsule,
               {
-                backgroundColor: isDark ? 'rgba(28,28,30,0.62)' : 'rgba(255,255,255,0.8)',
-                borderColor: colors.separator,
+                backgroundColor: isDark ? 'rgba(255,255,255,0.15)' : 'rgba(255,255,255,0.6)',
+                borderColor: isDark ? 'rgba(255,255,255,0.05)' : 'rgba(255,255,255,0.8)',
               },
             ]}
           >
+            <BlurView
+              intensity={isDark ? 20 : 40}
+              tint={isDark ? 'dark' : 'light'}
+              style={StyleSheet.absoluteFill}
+            />
             <Animated.View
               style={{
                 transform: [
@@ -884,26 +961,15 @@ export default function NowPlaying({ onClose }: NowPlayingProps) {
         >
           {/* ── 进度条 ── */}
           <View style={styles.seekWrap}>
-            <Slider
-              value={sliderValue}
-              minimumValue={0}
-              maximumValue={1}
-              minimumTrackTintColor={colors.accent}
-              maximumTrackTintColor={colors.separator}
-              thumbTintColor={colors.accent}
+            <CircleSlider
+              progress={sliderValue}
+              accentColor={colors.accent}
+              trackColor={isDark ? 'rgba(255, 255, 255, 0.2)' : 'rgba(0, 0, 0, 0.15)'}
               onSlidingStart={() => {
                 isDraggingRef.current = true;
               }}
-              onValueChange={value => {
-                setSliderValue(value);
-              }}
-              onSlidingComplete={value => {
-                const nextMs = Math.floor((duration || 0) * value);
-                void playerController.seek(nextMs);
-                setTimeout(() => {
-                  isDraggingRef.current = false;
-                }, 250);
-              }}
+              onValueChange={handleSliderValueChange}
+              onSlidingComplete={handleSliderComplete}
             />
             <View style={styles.timeRow}>
               <Text style={[styles.timeText, { color: colors.textSecondary }]}>
@@ -1022,15 +1088,16 @@ export default function NowPlaying({ onClose }: NowPlayingProps) {
         animValue={commentSheetAnim}
         onClose={() => setCommentSheetVisible(false)}
       />
-      <QueueSheet
-        visible={queueSheetVisible}
-        renderTrack={renderTrack}
-        animValue={queueSheetAnim}
-        isPlaying={isPlaying}
-        onClose={() => setQueueSheetVisible(false)}
-        onSyncStore={syncPlayerSnapshotToStore}
-      />
-    </Animated.View>
+        <QueueSheet
+          visible={queueSheetVisible}
+          renderTrack={renderTrack}
+          animValue={queueSheetAnim}
+          isPlaying={isPlaying}
+          onClose={() => setQueueSheetVisible(false)}
+          onSyncStore={syncPlayerSnapshotToStore}
+        />
+      </Animated.View>
+    </PanGestureHandler>
   );
 }
 
@@ -1093,15 +1160,21 @@ const styles = StyleSheet.create({
     gap: spacing.sm,
   },
   metaCard: {
-    borderRadius: borderRadius.lg,
+    borderRadius: 20, // 固定和内发光层相同的圆角大小
     borderWidth: StyleSheet.hairlineWidth,
     paddingHorizontal: spacing.md,
     paddingVertical: spacing.sm + 2,
+    overflow: 'hidden',
   },
   metaCardRow: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: spacing.md,
+  },
+  metaCardInnerBorder: {
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.15)',
+    borderRadius: 20,
   },
   metaMain: {
     flex: 1,
@@ -1232,6 +1305,7 @@ const styles = StyleSheet.create({
     borderRadius: borderRadius.full,
     padding: 3,
     borderWidth: StyleSheet.hairlineWidth,
+    overflow: 'hidden',
   },
   capsuleBtn: {
     flexDirection: 'row',

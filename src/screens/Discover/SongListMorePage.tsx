@@ -11,6 +11,7 @@ import {
   TouchableOpacity,
   View,
 } from 'react-native'
+import { PanGestureHandler } from 'react-native-gesture-handler'
 import { Ionicons } from '@expo/vector-icons'
 import { useSafeAreaInsets } from 'react-native-safe-area-context'
 import { borderRadius, BOTTOM_INSET, fontSize, spacing, useTheme } from '../../theme'
@@ -58,7 +59,7 @@ export default function SongListMorePage({
 }: SongListMorePageProps) {
   const { colors } = useTheme()
   const insets = useSafeAreaInsets()
-  const { panX, panHandlers } = useSwipeBack(onBack)
+  const { panX, panGesture } = useSwipeBack(onBack)
 
   const [localSortId, setLocalSortId] = useState(sortId)
   const [localTagId, setLocalTagId] = useState(tagId)
@@ -264,203 +265,210 @@ export default function SongListMorePage({
   }, [localTagId, colors, handleTagSelect])
 
   return (
-    <Animated.View
-      style={[
-        styles.container,
-        {
-          backgroundColor: colors.background,
-          transform: [{ translateX: panX }],
-        },
-      ]}
-      {...panHandlers}
+    <PanGestureHandler
+      hitSlop={panGesture.hitSlop}
+      activeOffsetX={panGesture.activeOffsetX}
+      failOffsetY={panGesture.failOffsetY}
+      onGestureEvent={panGesture.onGestureEvent}
+      onHandlerStateChange={panGesture.onHandlerStateChange}
     >
-      <View
+      <Animated.View
         style={[
-          styles.header,
-          showSourceDropdown && styles.headerOnTop,
+          styles.container,
           {
-            borderBottomColor: colors.separator,
-            paddingTop: insets.top + spacing.sm,
+            backgroundColor: colors.background,
+            transform: [{ translateX: panX }],
           },
         ]}
       >
-        <TouchableOpacity onPress={onBack} style={styles.iconBtn} activeOpacity={0.75}>
-          <Ionicons name="chevron-back" size={22} color={colors.text} />
-        </TouchableOpacity>
-        <View style={styles.headerCenter}>
-          <Text style={[styles.title, { color: colors.text }]}>歌单筛选</Text>
-          <View style={styles.sourceSelectArea}>
-            <TouchableOpacity
-              style={[
-                styles.sourceSelectTrigger,
-                {
-                  backgroundColor: colors.surface,
-                  borderColor: colors.separator,
-                },
-              ]}
-              onPress={() => {
-                setShowSourceDropdown(v => !v)
-                setShowTagDropdown(false)
-              }}
-              activeOpacity={0.85}
-            >
-              <Text style={[styles.subtitle, { color: colors.textSecondary }]}>
-                当前平台：{source.toUpperCase()}
-              </Text>
-              <Ionicons
-                name={showSourceDropdown ? 'chevron-up' : 'chevron-down'}
-                size={14}
-                color={colors.textSecondary}
-              />
-            </TouchableOpacity>
-
-            {showSourceDropdown && (
-              <View
+        <View
+          style={[
+            styles.header,
+            showSourceDropdown && styles.headerOnTop,
+            {
+              borderBottomColor: colors.separator,
+              paddingTop: insets.top + spacing.sm,
+            },
+          ]}
+        >
+          <TouchableOpacity onPress={onBack} style={styles.iconBtn} activeOpacity={0.75}>
+            <Ionicons name="chevron-back" size={22} color={colors.text} />
+          </TouchableOpacity>
+          <View style={styles.headerCenter}>
+            <Text style={[styles.title, { color: colors.text }]}>歌单筛选</Text>
+            <View style={styles.sourceSelectArea}>
+              <TouchableOpacity
                 style={[
-                  styles.sourceDropdown,
+                  styles.sourceSelectTrigger,
                   {
-                    backgroundColor: colors.surfaceElevated,
+                    backgroundColor: colors.surface,
                     borderColor: colors.separator,
                   },
                 ]}
+                onPress={() => {
+                  setShowSourceDropdown(v => !v)
+                  setShowTagDropdown(false)
+                }}
+                activeOpacity={0.85}
               >
-                {discoverSourceList.map(item => {
-                  const active = item.id === source
-                  return (
-                    <TouchableOpacity
-                      key={`source-${item.id}`}
-                      style={styles.sourceDropdownItem}
-                      onPress={() => handleSourceSelect(item.id)}
-                      activeOpacity={0.82}
-                    >
-                      <Text
-                        style={[
-                          styles.sourceDropdownText,
-                          { color: active ? colors.accent : colors.text },
-                        ]}
-                      >
-                        {item.name}
-                      </Text>
-                    </TouchableOpacity>
-                  )
-                })}
-              </View>
-            )}
-          </View>
-        </View>
-        <View style={styles.iconBtn} />
-      </View>
-
-      <ScrollView
-        ref={contentScrollRef}
-        onScroll={handleContentScroll}
-        scrollEventThrottle={16}
-        style={styles.content}
-        contentContainerStyle={{
-          paddingBottom: BOTTOM_INSET + spacing.xxl,
-        }}
-        showsVerticalScrollIndicator={false}
-        refreshControl={
-          <RefreshControl
-            refreshing={refreshing}
-            onRefresh={handleRefresh}
-            tintColor={colors.accent}
-            colors={[colors.accent]}
-          />
-        }
-      >
-        <View style={styles.section}>
-          <Text style={[styles.sectionTitle, { color: colors.text }]}>排序</Text>
-          <View style={styles.chipWrap}>
-            {sortList.map(item =>
-              renderChip(
-                `sort-${item.id}`,
-                normalizeSortLabel(item.name),
-                localSortId === item.id,
-                () => handleSortSelect(item.id)
-              )
-            )}
-          </View>
-        </View>
-
-        <View style={[styles.section, showTagDropdown && styles.tagSectionOnTop]}>
-          <Text style={[styles.sectionTitle, { color: colors.text }]}>标签</Text>
-          <View style={styles.tagSelectArea}>
-            <TouchableOpacity
-              style={[
-                styles.tagSelectButton,
-                {
-                  backgroundColor: colors.surface,
-                  borderColor: colors.separator,
-                },
-              ]}
-              onPress={() => {
-                setShowTagDropdown(v => !v)
-                setShowSourceDropdown(false)
-              }}
-              activeOpacity={0.85}
-            >
-              <Text style={[styles.tagSelectText, { color: colors.text }]}>
-                {selectedTagName}
-              </Text>
-              <Ionicons
-                name={showTagDropdown ? 'chevron-up' : 'chevron-down'}
-                size={18}
-                color={colors.textSecondary}
-              />
-            </TouchableOpacity>
-
-            {showTagDropdown && (
-              <View
-                style={[
-                  styles.dropdown,
-                  {
-                    backgroundColor: colors.surfaceElevated,
-                    borderColor: colors.separator,
-                  },
-                ]}
-              >
-                <ScrollView
-                  nestedScrollEnabled
-                  style={styles.dropdownScroll}
-                  contentContainerStyle={styles.dropdownTagWrap}
-                  showsVerticalScrollIndicator={false}
-                >
-                  {renderTagChip('', '全部标签')}
-                  {allTags.map(item => renderTagChip(item.id, item.name))}
-                </ScrollView>
-              </View>
-            )}
-          </View>
-
-          {tagsLoading ? (
-            <View style={styles.loadingRow}>
-              <ActivityIndicator size="small" color={colors.accent} />
-            </View>
-          ) : null}
-
-          {!!tagsError && (
-            <View style={styles.errorRow}>
-              <Text style={[styles.errorText, { color: colors.textSecondary }]}>{tagsError}</Text>
-              <TouchableOpacity onPress={() => setReloadSeed(v => v + 1)} activeOpacity={0.8}>
-                <Text style={[styles.retryText, { color: colors.accent }]}>重试</Text>
+                <Text style={[styles.subtitle, { color: colors.textSecondary }]}>
+                  当前平台：{source.toUpperCase()}
+                </Text>
+                <Ionicons
+                  name={showSourceDropdown ? 'chevron-up' : 'chevron-down'}
+                  size={14}
+                  color={colors.textSecondary}
+                />
               </TouchableOpacity>
+
+              {showSourceDropdown && (
+                <View
+                  style={[
+                    styles.sourceDropdown,
+                    {
+                      backgroundColor: colors.surfaceElevated,
+                      borderColor: colors.separator,
+                    },
+                  ]}
+                >
+                  {discoverSourceList.map(item => {
+                    const active = item.id === source
+                    return (
+                      <TouchableOpacity
+                        key={`source-${item.id}`}
+                        style={styles.sourceDropdownItem}
+                        onPress={() => handleSourceSelect(item.id)}
+                        activeOpacity={0.82}
+                      >
+                        <Text
+                          style={[
+                            styles.sourceDropdownText,
+                            { color: active ? colors.accent : colors.text },
+                          ]}
+                        >
+                          {item.name}
+                        </Text>
+                      </TouchableOpacity>
+                    )
+                  })}
+                </View>
+              )}
             </View>
-          )}
+          </View>
+          <View style={styles.iconBtn} />
         </View>
 
-        <View style={styles.section}>
-          <Text style={[styles.sectionTitle, { color: colors.text }]}>歌单结果</Text>
-          <PlaylistSection
-            playlists={playlists}
-            loading={playlistLoading}
-            error={playlistError}
-            onPlaylistPress={onPlaylistPress}
-            horizontalPadding={0}
-          />
-        </View>
-      </ScrollView>
-    </Animated.View>
+        <ScrollView
+          ref={contentScrollRef}
+          onScroll={handleContentScroll}
+          scrollEventThrottle={16}
+          style={styles.content}
+          contentContainerStyle={{
+            paddingBottom: BOTTOM_INSET + spacing.xxl,
+          }}
+          showsVerticalScrollIndicator={false}
+          refreshControl={
+            <RefreshControl
+              refreshing={refreshing}
+              onRefresh={handleRefresh}
+              tintColor={colors.accent}
+              colors={[colors.accent]}
+            />
+          }
+        >
+          <View style={styles.section}>
+            <Text style={[styles.sectionTitle, { color: colors.text }]}>排序</Text>
+            <View style={styles.chipWrap}>
+              {sortList.map(item =>
+                renderChip(
+                  `sort-${item.id}`,
+                  normalizeSortLabel(item.name),
+                  localSortId === item.id,
+                  () => handleSortSelect(item.id)
+                )
+              )}
+            </View>
+          </View>
+
+          <View style={[styles.section, showTagDropdown && styles.tagSectionOnTop]}>
+            <Text style={[styles.sectionTitle, { color: colors.text }]}>标签</Text>
+            <View style={styles.tagSelectArea}>
+              <TouchableOpacity
+                style={[
+                  styles.tagSelectButton,
+                  {
+                    backgroundColor: colors.surface,
+                    borderColor: colors.separator,
+                  },
+                ]}
+                onPress={() => {
+                  setShowTagDropdown(v => !v)
+                  setShowSourceDropdown(false)
+                }}
+                activeOpacity={0.85}
+              >
+                <Text style={[styles.tagSelectText, { color: colors.text }]}>
+                  {selectedTagName}
+                </Text>
+                <Ionicons
+                  name={showTagDropdown ? 'chevron-up' : 'chevron-down'}
+                  size={18}
+                  color={colors.textSecondary}
+                />
+              </TouchableOpacity>
+
+              {showTagDropdown && (
+                <View
+                  style={[
+                    styles.dropdown,
+                    {
+                      backgroundColor: colors.surfaceElevated,
+                      borderColor: colors.separator,
+                    },
+                  ]}
+                >
+                  <ScrollView
+                    nestedScrollEnabled
+                    style={styles.dropdownScroll}
+                    contentContainerStyle={styles.dropdownTagWrap}
+                    showsVerticalScrollIndicator={false}
+                  >
+                    {renderTagChip('', '全部标签')}
+                    {allTags.map(item => renderTagChip(item.id, item.name))}
+                  </ScrollView>
+                </View>
+              )}
+            </View>
+
+            {tagsLoading ? (
+              <View style={styles.loadingRow}>
+                <ActivityIndicator size="small" color={colors.accent} />
+              </View>
+            ) : null}
+
+            {!!tagsError && (
+              <View style={styles.errorRow}>
+                <Text style={[styles.errorText, { color: colors.textSecondary }]}>{tagsError}</Text>
+                <TouchableOpacity onPress={() => setReloadSeed(v => v + 1)} activeOpacity={0.8}>
+                  <Text style={[styles.retryText, { color: colors.accent }]}>重试</Text>
+                </TouchableOpacity>
+              </View>
+            )}
+          </View>
+
+          <View style={styles.section}>
+            <Text style={[styles.sectionTitle, { color: colors.text }]}>歌单结果</Text>
+            <PlaylistSection
+              playlists={playlists}
+              loading={playlistLoading}
+              error={playlistError}
+              onPlaylistPress={onPlaylistPress}
+              horizontalPadding={0}
+            />
+          </View>
+        </ScrollView>
+      </Animated.View>
+    </PanGestureHandler>
   )
 }
 

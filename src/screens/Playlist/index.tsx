@@ -20,6 +20,7 @@ import {
   TextInput,
   View,
 } from 'react-native'
+import { PanGestureHandler } from 'react-native-gesture-handler'
 import { useSafeAreaInsets } from 'react-native-safe-area-context'
 import { useDispatch, useSelector } from 'react-redux'
 import { Ionicons } from '@expo/vector-icons'
@@ -40,6 +41,7 @@ interface PlaylistScreenProps {
   onTrackPress?: (track: Track) => void
   onTrackMorePress?: TrackMoreActionHandler
   onPlayAll?: (tracks: Track[]) => void
+  onDetailVisibilityChange?: (visible: boolean) => void
 }
 
 interface ImportCandidate {
@@ -409,7 +411,7 @@ async function parseSongListIdWithShareUrl(source: DiscoverSourceId, input: stri
   return null
 }
 
-export default function PlaylistScreen({ onTrackPress, onTrackMorePress, onPlayAll }: PlaylistScreenProps) {
+export default function PlaylistScreen({ onTrackPress, onTrackMorePress, onPlayAll, onDetailVisibilityChange }: PlaylistScreenProps) {
   const { colors, isDark } = useTheme()
   const insets = useSafeAreaInsets()
   const dispatch = useDispatch()
@@ -480,13 +482,26 @@ export default function PlaylistScreen({ onTrackPress, onTrackMorePress, onPlayA
 
   const mainListRef = useRef<FlatList<Playlist> | null>(null)
   const detailListRef = useRef<FlatList<Track> | null>(null)
-  const { panX, panHandlers } = useSwipeBack(() => setSelectedPlaylistId(null))
+  const setDetailVisibility = useCallback((visible: boolean) => {
+    onDetailVisibilityChange?.(visible)
+  }, [onDetailVisibilityChange])
+  const { panX, panGesture } = useSwipeBack(() => {
+    setDetailVisibility(false)
+    setSelectedPlaylistId(null)
+  })
 
   useEffect(() => {
     if (!selectedPlaylistId) {
       panX.setValue(0)
     }
-  }, [panX, selectedPlaylistId])
+    setDetailVisibility(!!selectedPlaylistId)
+  }, [panX, selectedPlaylistId, setDetailVisibility])
+
+  useEffect(() => {
+    return () => {
+      setDetailVisibility(false)
+    }
+  }, [setDetailVisibility])
 
   useEffect(() => {
     return subscribeScrollToTop(() => {
@@ -523,14 +538,15 @@ export default function PlaylistScreen({ onTrackPress, onTrackMorePress, onPlayA
   }, [selectedPlaylistId])
 
   const openPlaylistDetail = useCallback((playlistId: string) => {
+    setDetailVisibility(true)
     panX.setValue(0)
     setSelectedPlaylistId(playlistId)
-  }, [panX])
+  }, [panX, setDetailVisibility])
 
   const closePlaylistDetail = useCallback(() => {
-    panX.setValue(0)
+    setDetailVisibility(false)
     setSelectedPlaylistId(null)
-  }, [panX])
+  }, [setDetailVisibility])
 
   const handleLoadMoreDetailTracks = useCallback(() => {
     setDetailVisibleTrackCount((prev) => {
@@ -1093,48 +1109,54 @@ export default function PlaylistScreen({ onTrackPress, onTrackMorePress, onPlayA
     const detailHint = /网络歌单导入/i.test(normalizedDescription) ? '' : normalizedDescription
 
     return (
-      <Animated.View
-        style={[
-          styles.detailContainer,
-          {
-            backgroundColor: colors.background,
-            transform: [{ translateX: panX }],
-          },
-        ]}
-        {...panHandlers}
+      <PanGestureHandler
+        hitSlop={panGesture.hitSlop}
+        activeOffsetX={panGesture.activeOffsetX}
+        failOffsetY={panGesture.failOffsetY}
+        onGestureEvent={panGesture.onGestureEvent}
+        onHandlerStateChange={panGesture.onHandlerStateChange}
       >
-        <FlatList
-          ref={detailListRef}
-          onScroll={handleDetailListScroll}
-          scrollEventThrottle={16}
-          data={detailVisibleTracks}
-          keyExtractor={(item, index) => `${item.id}_${index}`}
-          onEndReachedThreshold={0.35}
-          onEndReached={handleLoadMoreDetailTracks}
-          initialNumToRender={18}
-          maxToRenderPerBatch={24}
-          windowSize={9}
-          removeClippedSubviews={Platform.OS === 'android'}
-          updateCellsBatchingPeriod={40}
-          ListHeaderComponent={(
-            <>
-              <LinearGradient
-                colors={detailHeroColors}
-                start={{ x: 0, y: 0 }}
-                end={{ x: 1, y: 1 }}
-                style={styles.detailHero}
-              >
-                <View style={[styles.detailHeader, { paddingTop: insets.top + spacing.sm }]}>
-                  <Pressable
-                    style={({ pressed }) => [
-                      styles.backButton,
-                      { backgroundColor: 'rgba(255,255,255,0.18)', opacity: pressed ? 0.82 : 1 },
-                    ]}
-                    onPress={closePlaylistDetail}
-                  >
-                    <Ionicons name="chevron-back" size={18} color="#FFFFFF" />
-                  </Pressable>
-                </View>
+        <Animated.View
+          style={[
+            styles.detailContainer,
+            {
+              backgroundColor: colors.background,
+              transform: [{ translateX: panX }],
+            },
+          ]}
+        >
+          <FlatList
+            ref={detailListRef}
+            onScroll={handleDetailListScroll}
+            scrollEventThrottle={16}
+            data={detailVisibleTracks}
+            keyExtractor={(item, index) => `${item.id}_${index}`}
+            onEndReachedThreshold={0.35}
+            onEndReached={handleLoadMoreDetailTracks}
+            initialNumToRender={18}
+            maxToRenderPerBatch={24}
+            windowSize={9}
+            removeClippedSubviews={Platform.OS === 'android'}
+            updateCellsBatchingPeriod={40}
+            ListHeaderComponent={(
+              <>
+                <LinearGradient
+                  colors={detailHeroColors}
+                  start={{ x: 0, y: 0 }}
+                  end={{ x: 1, y: 1 }}
+                  style={styles.detailHero}
+                >
+                  <View style={[styles.detailHeader, { paddingTop: insets.top + spacing.sm }]}>
+                    <Pressable
+                      style={({ pressed }) => [
+                        styles.backButton,
+                        { backgroundColor: 'rgba(255,255,255,0.18)', opacity: pressed ? 0.82 : 1 },
+                      ]}
+                      onPress={closePlaylistDetail}
+                    >
+                      <Ionicons name="chevron-back" size={18} color="#FFFFFF" />
+                    </Pressable>
+                  </View>
 
                 <View style={styles.detailHeroMain}>
                   <View style={styles.detailCoverOuter}>
@@ -1269,25 +1291,26 @@ export default function PlaylistScreen({ onTrackPress, onTrackMorePress, onPlayA
               </View>
             </>
           )}
-          ListEmptyComponent={(
-            <View style={styles.detailListEmptyWrap}>
-              <Text style={[styles.detailListEmptyText, { color: colors.textSecondary }]}>
-                {normalizedDetailSearchKeyword ? '没有找到匹配的歌曲' : '当前歌单暂无歌曲'}
-              </Text>
-            </View>
-          )}
-          ListFooterComponent={hasMoreDetailTracks ? (
-            <View style={styles.detailListFooter}>
-              <ActivityIndicator size="small" color={colors.accent} />
-              <Text style={[styles.detailListFooterText, { color: colors.textSecondary }]}>
-                正在加载更多歌曲…
-              </Text>
-            </View>
-          ) : null}
-          contentContainerStyle={{ paddingBottom: BOTTOM_INSET + spacing.lg }}
-          renderItem={renderDetailTrackItem}
-        />
-      </Animated.View>
+            ListEmptyComponent={(
+              <View style={styles.detailListEmptyWrap}>
+                <Text style={[styles.detailListEmptyText, { color: colors.textSecondary }]}>
+                  {normalizedDetailSearchKeyword ? '没有找到匹配的歌曲' : '当前歌单暂无歌曲'}
+                </Text>
+              </View>
+            )}
+            ListFooterComponent={hasMoreDetailTracks ? (
+              <View style={styles.detailListFooter}>
+                <ActivityIndicator size="small" color={colors.accent} />
+                <Text style={[styles.detailListFooterText, { color: colors.textSecondary }]}>
+                  正在加载更多歌曲…
+                </Text>
+              </View>
+            ) : null}
+            contentContainerStyle={{ paddingBottom: BOTTOM_INSET + spacing.lg }}
+            renderItem={renderDetailTrackItem}
+          />
+        </Animated.View>
+      </PanGestureHandler>
     )
   }
 

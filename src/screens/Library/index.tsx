@@ -14,7 +14,6 @@ import {
   Modal,
   NativeScrollEvent,
   NativeSyntheticEvent,
-  PanResponder,
   Linking,
   Platform,
   Share,
@@ -28,6 +27,7 @@ import {
   View,
   ViewStyle,
 } from 'react-native'
+import { PanGestureHandler, State } from 'react-native-gesture-handler'
 import { useSafeAreaInsets } from 'react-native-safe-area-context'
 import { Ionicons } from '@expo/vector-icons'
 import * as DocumentPicker from 'expo-document-picker'
@@ -59,6 +59,7 @@ import {
 interface LibraryScreenProps {
   onTrackPress?: (track: Track) => void
   onTrackMorePress?: TrackMoreActionHandler
+  onDetailVisibilityChange?: (visible: boolean) => void
 }
 
 type LibrarySubPage = 'main' | 'appearance' | 'sources' | 'cache' | 'logs' | 'about'
@@ -211,7 +212,7 @@ function EntryCard({ icon, title, subtitle, onPress, reducedMotion }: EntryCardP
   )
 }
 
-export default function LibraryScreen(_props: LibraryScreenProps) {
+export default function LibraryScreen({ onTrackPress, onTrackMorePress, onDetailVisibilityChange }: LibraryScreenProps) {
   const { colors } = useTheme()
   const dispatch = useDispatch()
   const insets = useSafeAreaInsets()
@@ -228,6 +229,13 @@ export default function LibraryScreen(_props: LibraryScreenProps) {
   ])
 
   const [subPage, setSubPage] = useState<LibrarySubPage>('main')
+  const reportDetailVisibility = useCallback((visible: boolean) => {
+    onDetailVisibilityChange?.(visible)
+  }, [onDetailVisibilityChange])
+  const navigateToSubPage = useCallback((nextPage: LibrarySubPage) => {
+    reportDetailVisibility(nextPage !== 'main')
+    setSubPage(nextPage)
+  }, [reportDetailVisibility])
   const [reduceMotionEnabled, setReduceMotionEnabled] = useState(false)
   const pageAnim = useRef(new Animated.Value(1)).current
   const mainListRef = useRef<FlatList<Track> | null>(null)
@@ -704,31 +712,29 @@ export default function LibraryScreen(_props: LibraryScreenProps) {
       easing: Easing.out(Easing.cubic),
       useNativeDriver: true,
     }).start()
-  }, [pageAnim, reduceMotionEnabled, subPage])
+    
+    reportDetailVisibility(subPage !== 'main')
+  }, [pageAnim, reduceMotionEnabled, reportDetailVisibility, subPage])
 
-  const panResponder = useMemo(() => PanResponder.create({
-    onStartShouldSetPanResponder: () => false,
-    onMoveShouldSetPanResponder: (_, gestureState) => {
-      if (subPage === 'main') return false
-      const fromLeftEdge = gestureState.x0 <= 24
-      const rightSwipeIntent = gestureState.dx > 16
-      const mostlyHorizontal = Math.abs(gestureState.dx) > Math.abs(gestureState.dy) * 1.2
-      return fromLeftEdge && rightSwipeIntent && mostlyHorizontal
-    },
-    onMoveShouldSetPanResponderCapture: (_, gestureState) => {
-      if (subPage === 'main') return false
-      const fromLeftEdge = gestureState.x0 <= 24
-      const rightSwipeIntent = gestureState.dx > 16
-      const mostlyHorizontal = Math.abs(gestureState.dx) > Math.abs(gestureState.dy) * 1.2
-      return fromLeftEdge && rightSwipeIntent && mostlyHorizontal
-    },
-    onPanResponderTerminationRequest: () => false,
-    onPanResponderRelease: (_, gestureState) => {
-      if (subPage !== 'main' && gestureState.x0 <= 24 && gestureState.dx > 68) {
-        setSubPage('main')
-      }
-    },
-  }), [subPage])
+  useEffect(() => {
+    return () => {
+      reportDetailVisibility(false)
+    }
+  }, [reportDetailVisibility])
+
+  const handleSubPageSwipeStateChange = useCallback((event: any) => {
+    if (subPage === 'main') return
+    const state = Number(event?.nativeEvent?.state)
+    if (state !== State.END && state !== State.CANCELLED && state !== State.FAILED) {
+      return
+    }
+
+    const deltaX = Number(event?.nativeEvent?.translationX ?? 0)
+    const velocityX = Number(event?.nativeEvent?.velocityX ?? 0)
+    if (deltaX > 68 || velocityX > 700) {
+      navigateToSubPage('main')
+    }
+  }, [navigateToSubPage, subPage])
 
   const renderHeader = useCallback(() => (
     <View style={[styles.header, { paddingTop: normalizedTopInset + spacing.sm }]}>
@@ -736,7 +742,7 @@ export default function LibraryScreen(_props: LibraryScreenProps) {
         <View style={styles.headerSidePlaceholder} />
       ) : (
         <MotionPressable
-          onPress={() => setSubPage('main')}
+          onPress={() => navigateToSubPage('main')}
           reducedMotion={reduceMotionEnabled}
           style={[styles.backButtonShell, { backgroundColor: colors.surface }]}
           activeScale={0.97}
@@ -750,7 +756,7 @@ export default function LibraryScreen(_props: LibraryScreenProps) {
       <Text style={[styles.largeTitle, { color: colors.text }]}>{pageTitle}</Text>
       <View style={styles.headerSidePlaceholder} />
     </View>
-  ), [colors.surface, colors.text, colors.textSecondary, normalizedTopInset, pageTitle, reduceMotionEnabled, subPage])
+  ), [colors.surface, colors.text, colors.textSecondary, navigateToSubPage, normalizedTopInset, pageTitle, reduceMotionEnabled, subPage])
 
   const mainListHeader = useMemo(() => (
     <>
@@ -801,28 +807,28 @@ export default function LibraryScreen(_props: LibraryScreenProps) {
             icon="color-palette-outline"
             title="外观设置"
             subtitle={THEME_LABELS[themeMode]}
-            onPress={() => setSubPage('appearance')}
+            onPress={() => navigateToSubPage('appearance')}
             reducedMotion={reduceMotionEnabled}
           />
           <EntryCard
             icon="server-outline"
             title="自定义源管理"
             subtitle={selectedSource ? `当前：${selectedSource.name}` : '未配置音源'}
-            onPress={() => setSubPage('sources')}
+            onPress={() => navigateToSubPage('sources')}
             reducedMotion={reduceMotionEnabled}
           />
           <EntryCard
             icon="cloud-download-outline"
             title="歌曲缓存"
             subtitle={cacheSummaryText}
-            onPress={() => setSubPage('cache')}
+            onPress={() => navigateToSubPage('cache')}
             reducedMotion={reduceMotionEnabled}
           />
           <EntryCard
             icon="document-text-outline"
             title="运行日志"
             subtitle={runtimeLogSummaryText}
-            onPress={() => setSubPage('logs')}
+            onPress={() => navigateToSubPage('logs')}
             reducedMotion={reduceMotionEnabled}
           />
         </View>
@@ -838,7 +844,7 @@ export default function LibraryScreen(_props: LibraryScreenProps) {
             icon="information-circle-outline"
             title="关于"
             subtitle={`v${currentVersion}`}
-            onPress={() => setSubPage('about')}
+            onPress={() => navigateToSubPage('about')}
             reducedMotion={reduceMotionEnabled}
           />
           <EntryCard
@@ -1348,61 +1354,68 @@ export default function LibraryScreen(_props: LibraryScreenProps) {
   }
 
   return (
-    <View style={[styles.container, { backgroundColor: colors.background }]} {...panResponder.panHandlers}>
-      <Animated.View style={[styles.pageContainer, pageAnimatedStyle]}>
-        {subPage === 'main' ? (
-          <FlatList
-            ref={mainListRef}
-            onScroll={handleMainListScroll}
-            scrollEventThrottle={16}
-            data={[] as Track[]}
-            renderItem={renderNoopItem}
-            ListHeaderComponent={mainListHeader}
-            showsVerticalScrollIndicator={false}
-            contentContainerStyle={[styles.mainListContent, { paddingBottom: BOTTOM_INSET + spacing.md }]}
-          />
-        ) : (
-          <ScrollView
-            ref={subPageScrollRef}
-            onScroll={handleSubPageScroll}
-            scrollEventThrottle={16}
-            showsVerticalScrollIndicator={false}
-            contentContainerStyle={{ paddingBottom: BOTTOM_INSET + spacing.md }}
-          >
-            {renderHeader()}
-            {subPage === 'appearance' && renderAppearancePage()}
-            {subPage === 'sources' && renderSourcesPage()}
-            {subPage === 'cache' && renderCachePage()}
-            {subPage === 'logs' && renderLogsPage()}
-            {subPage === 'about' && renderAboutPage()}
-          </ScrollView>
-        )}
-      </Animated.View>
-
-      <Modal transparent visible={sponsorModalVisible} animationType="fade" onRequestClose={() => setSponsorModalVisible(false)}>
-        <View style={styles.modalMask}>
-          <View style={[styles.modalCard, styles.sponsorModalCard, { backgroundColor: colors.surface }]}>
-            <Text style={[styles.modalTitle, { color: colors.text }]}>赞助作者</Text>
-            <Text style={[styles.sponsorHint, { color: colors.textSecondary }]}>微信扫一扫支持一下</Text>
-            <Image
-              source={{ uri: 'https://ojason.oss-cn-chengdu.aliyuncs.com/hexo-blog/dfc8ad9d3f5cf38d65f3d7516360d8e9.jpg' }}
-              style={[styles.sponsorQrImage, { borderColor: colors.separator }]}
-              resizeMode="cover"
+    <PanGestureHandler
+      enabled={subPage !== 'main'}
+      hitSlop={{ left: 0, width: 24 }}
+      activeOffsetX={16}
+      failOffsetY={[-16, 16]}
+      onHandlerStateChange={handleSubPageSwipeStateChange}
+    >
+      <View style={[styles.container, { backgroundColor: colors.background }]}>
+        <Animated.View style={[styles.pageContainer, pageAnimatedStyle]}>
+          {subPage === 'main' ? (
+            <FlatList
+              ref={mainListRef}
+              onScroll={handleMainListScroll}
+              scrollEventThrottle={16}
+              data={[] as Track[]}
+              renderItem={renderNoopItem}
+              ListHeaderComponent={mainListHeader}
+              showsVerticalScrollIndicator={false}
+              contentContainerStyle={[styles.mainListContent, { paddingBottom: BOTTOM_INSET + spacing.md }]}
             />
-            <TouchableOpacity
-              style={[styles.modalBtn, styles.sponsorCloseBtn, { backgroundColor: colors.accent }]}
-              onPress={() => setSponsorModalVisible(false)}
+          ) : (
+            <ScrollView
+              ref={subPageScrollRef}
+              onScroll={handleSubPageScroll}
+              scrollEventThrottle={16}
+              showsVerticalScrollIndicator={false}
+              contentContainerStyle={{ paddingBottom: BOTTOM_INSET + spacing.md }}
             >
-              <Text style={[styles.cardBtnText, { color: '#FFFFFF' }]}>关闭</Text>
-            </TouchableOpacity>
-          </View>
-        </View>
-      </Modal>
+              {renderHeader()}
+              {subPage === 'appearance' && renderAppearancePage()}
+              {subPage === 'sources' && renderSourcesPage()}
+              {subPage === 'cache' && renderCachePage()}
+              {subPage === 'logs' && renderLogsPage()}
+              {subPage === 'about' && renderAboutPage()}
+            </ScrollView>
+          )}
+        </Animated.View>
 
-      <Modal transparent visible={sourceModalVisible} animationType="fade" onRequestClose={() => setSourceModalVisible(false)}>
-        <View style={styles.modalMask}>
-          <View style={[styles.modalCard, { backgroundColor: colors.surface }]}>
-            <Text style={[styles.modalTitle, { color: colors.text }]}>{editingSourceId ? '编辑音源' : '添加 / URL 导入音源'}</Text>
+        <Modal transparent visible={sponsorModalVisible} animationType="fade" onRequestClose={() => setSponsorModalVisible(false)}>
+          <View style={styles.modalMask}>
+            <View style={[styles.modalCard, styles.sponsorModalCard, { backgroundColor: colors.surface }]}>
+              <Text style={[styles.modalTitle, { color: colors.text }]}>赞助作者</Text>
+              <Text style={[styles.sponsorHint, { color: colors.textSecondary }]}>微信扫一扫支持一下</Text>
+              <Image
+                source={{ uri: 'https://ojason.oss-cn-chengdu.aliyuncs.com/hexo-blog/dfc8ad9d3f5cf38d65f3d7516360d8e9.jpg' }}
+                style={[styles.sponsorQrImage, { borderColor: colors.separator }]}
+                resizeMode="cover"
+              />
+              <TouchableOpacity
+                style={[styles.modalBtn, styles.sponsorCloseBtn, { backgroundColor: colors.accent }]}
+                onPress={() => setSponsorModalVisible(false)}
+              >
+                <Text style={[styles.cardBtnText, { color: '#FFFFFF' }]}>关闭</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        </Modal>
+
+        <Modal transparent visible={sourceModalVisible} animationType="fade" onRequestClose={() => setSourceModalVisible(false)}>
+          <View style={styles.modalMask}>
+            <View style={[styles.modalCard, { backgroundColor: colors.surface }]}>
+              <Text style={[styles.modalTitle, { color: colors.text }]}>{editingSourceId ? '编辑音源' : '添加 / URL 导入音源'}</Text>
 
             {!editingSourceId && (
               <View style={[styles.segmentWrap, { backgroundColor: colors.surfaceSecondary }]}>
@@ -1472,8 +1485,9 @@ export default function LibraryScreen(_props: LibraryScreenProps) {
             </View>
           </View>
         </View>
-      </Modal>
-    </View>
+        </Modal>
+      </View>
+    </PanGestureHandler>
   )
 }
 

@@ -663,14 +663,29 @@ class MusicPlayerController {
    * Internal: Handle player status updates
    */
   private handlePlayerStatusUpdate(status: PlaybackStatus): void {
+    const prevIsPlaying = this.isPlaying
+    const prevPositionMillis = this.currentTimeMillis
+    const prevDurationMillis = this.durationMillis
+
     this.isPlaying = status.isPlaying
     this.currentTimeMillis = status.positionMillis
     this.durationMillis = status.durationMillis
 
-    // 某些失败/替换流场景会出现 didJustFinish 抖动，必须满足“已加载且接近结尾”再自动下一首。
-    const isNearEnd = status.durationMillis > 0
-      && status.positionMillis >= Math.max(0, status.durationMillis - 800)
-    if (status.didJustFinish && status.isLoaded && isNearEnd && !this.isResolvingTrack()) {
+    // 兼容 iOS/Expo Audio 在自然结束时可能把位置重置到 0 的情况：
+    // 只要“上一帧接近尾部”或“当前帧接近尾部”即可判定自然结束。
+    const isNearEndNow = status.durationMillis > 0
+      && status.positionMillis >= Math.max(0, status.durationMillis - 900)
+    const wasNearEndBeforeUpdate = prevDurationMillis > 0
+      && prevPositionMillis >= Math.max(0, prevDurationMillis - 900)
+    const didFinishSignal = status.didJustFinish
+      && (isNearEndNow || wasNearEndBeforeUpdate || status.positionMillis <= 400)
+    const didFinishFallback = !status.didJustFinish
+      && prevIsPlaying
+      && !status.isPlaying
+      && wasNearEndBeforeUpdate
+      && status.positionMillis <= 400
+
+    if ((didFinishSignal || didFinishFallback) && status.isLoaded && !this.isResolvingTrack()) {
       void this.handleTrackDidFinish()
     }
 
