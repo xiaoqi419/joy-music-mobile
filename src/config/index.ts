@@ -5,7 +5,7 @@
 export const appConfig = {
   // App info
   name: '悦音',
-  version: '1.2.4',
+  version: '1.2.5',
   description: 'A modern music player for iOS',
 
   // Display
