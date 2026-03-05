@@ -49,6 +49,15 @@ interface JoyRuntimeConfig {
   importedSources: ImportedMusicSource[]
 }
 
+type RequestMethod = 'GET' | 'POST'
+
+interface RequestPlan {
+  method: RequestMethod
+  pathTemplate: string
+  bodyTemplate?: Record<string, string>
+  apiKeyHeader?: string
+}
+
 export const NO_AVAILABLE_SOURCE_MESSAGE = '未配置可用音源，请先在“我的 > 自定义源管理”中导入并启用音源'
 
 export class JoySourceUnavailableError extends Error {
@@ -63,6 +72,7 @@ const runtimeConfig: JoyRuntimeConfig = {
   autoSwitch: false,
   importedSources: [],
 }
+const sourcePlanCache = new Map<string, RequestPlan[]>()
 
 /**
  * 同步运行时音源配置（来源：Redux + 持久化）
@@ -75,6 +85,7 @@ export function applyJoyRuntimeConfig(
   runtimeConfig.importedSources = Array.isArray(snapshot.importedSources)
     ? snapshot.importedSources
     : []
+  sourcePlanCache.clear()
 }
 
 /**
@@ -140,9 +151,14 @@ function normalizeApiBaseUrl(apiUrl: string): string {
 function resolveResponseUrl(response: MusicUrlResponse): string {
   const candidates: unknown[] = [
     response.url,
+    response.data,
     response.data?.url,
+    response.data?.surl,
+    response.data?.playUrl,
     response.data?.musicUrl,
+    response.data?.data,
     response.data?.data?.url,
+    response.data?.data?.playUrl,
     response.data?.data?.musicUrl,
   ]
 
@@ -193,6 +209,274 @@ function buildQualityAttempts(requestedQuality: Quality, supportedQualities: Qua
   return degradeAttempts.length ? degradeAttempts : orderedSupported
 }
 
+function normalizeTemplatePlaceholders(raw: string): string {
+  return raw
+    .replace(/\$\{\s*source\s*\}/gi, '{source}')
+    .replace(/\$\{\s*quality\s*\}/gi, '{quality}')
+    .replace(/\$\{\s*(?:songId|musicId|id|hash|songmid)\s*\}/gi, '{songId}')
+}
+
+function normalizePlanPathTemplate(pathTemplate: string): string {
+  const normalized = String(pathTemplate || '').trim()
+  if (!normalized) return ''
+  if (/^https?:\/\//i.test(normalized)) {
+    try {
+      const parsed = new URL(normalized)
+      return `${parsed.pathname || '/'}${parsed.search || ''}`
+    } catch {
+      return normalized
+    }
+  }
+  return normalized.startsWith('/') ? normalized : `/${normalized}`
+}
+
+function inferMethodByContext(scriptText: string, index: number): RequestMethod {
+  const start = Math.max(0, index - 240)
+  const end = Math.min(scriptText.length, index + 420)
+  const nearby = scriptText.slice(start, end)
+  if (/method\s*:\s*['"]POST['"]/i.test(nearby)) return 'POST'
+  if (/method\s*:\s*['"]GET['"]/i.test(nearby)) return 'GET'
+  return /\/music\/url/i.test(nearby) ? 'POST' : 'GET'
+}
+
+function inferBodyTemplateByContext(scriptText: string, index: number): Record<string, string> | undefined {
+  const nearby = scriptText.slice(index, Math.min(scriptText.length, index + 620))
+  const block = nearby.match(/body\s*:\s*\{([\s\S]{0,280})\}/i)?.[1]
+  if (!block) return undefined
+
+  const bodyTemplate: Record<string, string> = {}
+  if (/source\s*:/i.test(block)) bodyTemplate.source = '{source}'
+  if (/musicId\s*:/i.test(block)) bodyTemplate.musicId = '{songId}'
+  if (/songId\s*:/i.test(block)) bodyTemplate.songId = '{songId}'
+  if (/\bid\s*:/i.test(block)) bodyTemplate.id = '{songId}'
+  if (/quality\s*:/i.test(block)) bodyTemplate.quality = '{quality}'
+  return Object.keys(bodyTemplate).length ? bodyTemplate : undefined
+}
+
+function parseApiKeyHeaderName(scriptText: string): string | undefined {
+  const match = scriptText.match(/['"]((?:X-Api-Key|X-API-Key|X-Request-Key))['"]\s*:/i)
+  if (!match?.[1]) return undefined
+  return match[1]
+}
+
+function dedupeRequestPlans(plans: RequestPlan[]): RequestPlan[] {
+  const seen = new Set<string>()
+  const deduped: RequestPlan[] = []
+  for (const plan of plans) {
+    const normalizedPath = normalizePlanPathTemplate(plan.pathTemplate)
+    if (!normalizedPath) continue
+    const bodySignature = plan.bodyTemplate
+      ? Object.entries(plan.bodyTemplate)
+        .sort(([a], [b]) => a.localeCompare(b))
+        .map(([key, value]) => `${key}=${value}`)
+        .join('&')
+      : ''
+    const signature = `${plan.method}|${normalizedPath}|${bodySignature}`
+    if (seen.has(signature)) continue
+    seen.add(signature)
+    deduped.push({
+      ...plan,
+      pathTemplate: normalizedPath,
+    })
+  }
+  return deduped
+}
+
+/**
+ * 从脚本文本中提取请求模板，兼容公益音源常见写法。
+ */
+function parseScriptRequestPlans(sourceConfig: ImportedMusicSource): RequestPlan[] {
+  const scriptText = String(sourceConfig.rawScript || '')
+  if (!scriptText) return []
+
+  const baseUrl = normalizeApiBaseUrl(sourceConfig.apiUrl)
+  const apiKeyHeader = parseApiKeyHeaderName(scriptText)
+  const plans: RequestPlan[] = []
+
+  const templateRegex = /`([^`\r\n]*\$\{[^`\r\n]+\}[^`\r\n]*)`/g
+  let match: RegExpExecArray | null
+  while ((match = templateRegex.exec(scriptText)) !== null) {
+    const rawTemplate = String(match[1] || '')
+    if (!/(\/music\/url|\/api\/musics\/url|\/url(?:\/|\?)|\/kwurl(?:\?|$))/i.test(rawTemplate)) {
+      continue
+    }
+
+    const withBase = rawTemplate.replace(/\$\{\s*API_URL\s*\}/gi, baseUrl)
+    let normalized = normalizeTemplatePlaceholders(withBase).trim()
+    if (baseUrl && normalized.toLowerCase().startsWith(baseUrl.toLowerCase())) {
+      normalized = normalized.slice(baseUrl.length)
+      if (!normalized.startsWith('/')) {
+        normalized = `/${normalized}`
+      }
+    }
+    const method = inferMethodByContext(scriptText, match.index)
+    const bodyTemplate = method === 'POST'
+      ? inferBodyTemplateByContext(scriptText, match.index)
+      : undefined
+
+    plans.push({
+      method,
+      pathTemplate: normalized,
+      bodyTemplate,
+      apiKeyHeader,
+    })
+  }
+
+  return plans
+}
+
+/**
+ * 兜底请求策略：覆盖 Joy API 与主流公益音源接口风格。
+ */
+function buildDefaultRequestPlans(): RequestPlan[] {
+  return [
+    {
+      method: 'POST',
+      pathTemplate: '/music/url',
+      bodyTemplate: {
+        source: '{source}',
+        musicId: '{songId}',
+        quality: '{quality}',
+      },
+    },
+    {
+      method: 'POST',
+      pathTemplate: '/music/url',
+      bodyTemplate: {
+        source: '{source}',
+        songId: '{songId}',
+        quality: '{quality}',
+      },
+    },
+    {
+      method: 'GET',
+      pathTemplate: '/url?source={source}&songId={songId}&quality={quality}',
+    },
+    {
+      method: 'GET',
+      pathTemplate: '/url?source={source}&musicId={songId}&quality={quality}',
+    },
+    {
+      method: 'GET',
+      pathTemplate: '/url/{source}/{songId}/{quality}',
+    },
+    {
+      method: 'GET',
+      pathTemplate: '/api/musics/url/{source}/{songId}/{quality}',
+    },
+    {
+      method: 'GET',
+      pathTemplate: '/kwurl?id={songId}&q={quality}',
+    },
+    {
+      method: 'GET',
+      pathTemplate: '/api.php?types=url&source={source}&id={songId}&br={quality}',
+    },
+  ]
+}
+
+function getSourceRequestPlans(sourceConfig: ImportedMusicSource): RequestPlan[] {
+  const cacheKey = `${sourceConfig.id}|${sourceConfig.updatedAt}|${sourceConfig.apiUrl}`
+  const cached = sourcePlanCache.get(cacheKey)
+  if (cached) return cached
+
+  const scriptPlans = dedupeRequestPlans(parseScriptRequestPlans(sourceConfig)).slice(0, 12)
+  const plans = dedupeRequestPlans([
+    ...scriptPlans,
+    ...buildDefaultRequestPlans(),
+  ])
+
+  sourcePlanCache.set(cacheKey, plans)
+  return plans
+}
+
+function fillTemplate(
+  template: string,
+  params: { source: string; songId: string; quality: Quality },
+  encode = true,
+): string {
+  const sourceValue = encode ? encodeURIComponent(params.source) : params.source
+  const songIdValue = encode ? encodeURIComponent(params.songId) : params.songId
+  const qualityValue = encode ? encodeURIComponent(params.quality) : params.quality
+  return String(template || '')
+    .replace(/\{source\}/g, sourceValue)
+    .replace(/\{songId\}/g, songIdValue)
+    .replace(/\{quality\}/g, qualityValue)
+}
+
+function buildRequestUrl(
+  sourceConfig: ImportedMusicSource,
+  plan: RequestPlan,
+  params: { source: string; songId: string; quality: Quality },
+): string {
+  const filledPath = fillTemplate(plan.pathTemplate, params, true).trim()
+  if (/^https?:\/\//i.test(filledPath)) return filledPath
+  const baseUrl = normalizeApiBaseUrl(sourceConfig.apiUrl)
+  const normalizedPath = normalizePlanPathTemplate(filledPath)
+  return `${baseUrl}${normalizedPath}`
+}
+
+function buildRequestBody(
+  plan: RequestPlan,
+  params: { source: string; songId: string; quality: Quality },
+): Record<string, string> | undefined {
+  if (plan.method !== 'POST') return undefined
+  const bodyTemplate = plan.bodyTemplate || {
+    source: '{source}',
+    musicId: '{songId}',
+    quality: '{quality}',
+  }
+
+  const body: Record<string, string> = {}
+  for (const [field, value] of Object.entries(bodyTemplate)) {
+    body[field] = fillTemplate(value, params, false)
+  }
+  return body
+}
+
+function buildApiHeaders(sourceConfig: ImportedMusicSource, apiKeyHeader?: string): Record<string, string> {
+  const headers: Record<string, string> = {}
+  const apiKey = String(sourceConfig.apiKey || '').trim()
+  if (!apiKey) return headers
+
+  headers['X-Api-Key'] = apiKey
+  headers['X-API-Key'] = apiKey
+  headers['X-Request-Key'] = apiKey
+  if (apiKeyHeader) headers[apiKeyHeader] = apiKey
+  return headers
+}
+
+function resolveResponseCode(response: MusicUrlResponse, resolvedUrl: string): number {
+  const candidates: unknown[] = [
+    response.code,
+    response.status,
+    response.errno,
+    response.data?.code,
+    response.data?.status,
+  ]
+  for (const candidate of candidates) {
+    const numeric = Number(candidate)
+    if (Number.isFinite(numeric)) return numeric
+  }
+  return resolvedUrl ? 200 : NaN
+}
+
+function resolveResponseMessage(response: MusicUrlResponse): string {
+  const candidates: unknown[] = [
+    response.message,
+    response.msg,
+    response.error,
+    response.data?.message,
+    response.data?.msg,
+    response.data?.error,
+  ]
+  for (const candidate of candidates) {
+    const message = String(candidate || '').trim()
+    if (message) return message
+  }
+  return ''
+}
+
 function getCandidateSourceConfigs(platform: string): ImportedMusicSource[] {
   const enabledSources = runtimeConfig.importedSources.filter((item) => item.enabled && item.apiUrl)
   if (!enabledSources.length) return []
@@ -236,46 +520,60 @@ const requestMusicUrl = async(
     throw new Error('Missing song ID')
   }
 
-  const requestUrl = `${normalizeApiBaseUrl(sourceConfig.apiUrl)}/music/url`
-  const headers: Record<string, string> = {}
-  if (sourceConfig.apiKey) {
-    headers['X-Api-Key'] = sourceConfig.apiKey
+  const params = {
+    source: platform,
+    songId,
+    quality,
   }
+  const requestPlans = getSourceRequestPlans(sourceConfig)
+  let lastError: Error | null = null
 
-  const response = await httpFetch(requestUrl, {
-    method: 'POST',
-    headers,
-    body: {
-      source: platform,
-      musicId: songId,
-      quality,
-    },
-  })
+  for (const plan of requestPlans) {
+    const requestUrl = buildRequestUrl(sourceConfig, plan, params)
+    const body = buildRequestBody(plan, params)
+    const headers = buildApiHeaders(sourceConfig, plan.apiKeyHeader)
 
-  const resolvedUrl = resolveResponseUrl(response)
-  const responseCode = typeof response?.code === 'number'
-    ? response.code
-    : (resolvedUrl ? 200 : NaN)
+    try {
+      const response = await httpFetch(requestUrl, {
+        method: plan.method,
+        headers,
+        body,
+      })
 
-  if (!response || !Number.isFinite(responseCode)) {
-    throw new Error('Unknown API error')
-  }
+      const resolvedUrl = resolveResponseUrl(response)
+      const responseCode = resolveResponseCode(response, resolvedUrl)
+      const responseMessage = resolveResponseMessage(response)
 
-  switch (responseCode) {
-    case 200:
-      if (!resolvedUrl) {
-        throw new Error('No URL returned')
+      if (!response || !Number.isFinite(responseCode)) {
+        throw new Error('Unknown API error')
       }
-      return resolvedUrl
-    case 403:
-      throw new Error('API key invalid or expired')
-    case 429:
-      throw new Error('Too many requests - please wait before retrying')
-    case 500:
-      throw new Error(`Server error: ${response.message ?? 'Unknown error'}`)
-    default:
-      throw new Error(response.message ?? 'Failed to get music URL')
+
+      // 兼容两类常见服务约定：code=200 与 code=0 都表示成功。
+      if (responseCode === 200 || responseCode === 0) {
+        if (!resolvedUrl) {
+          throw new Error('No URL returned')
+        }
+        return resolvedUrl
+      }
+
+      if (responseCode === 403) {
+        throw new Error('API key invalid or expired')
+      }
+      if (responseCode === 429) {
+        throw new Error('Too many requests - please wait before retrying')
+      }
+      if (responseCode >= 500) {
+        throw new Error(`Server error: ${responseMessage || 'Unknown error'}`)
+      }
+
+      throw new Error(responseMessage || `Failed to get music URL (code=${responseCode})`)
+    } catch (error) {
+      lastError = error instanceof Error ? error : new Error(String(error))
+      continue
+    }
   }
+
+  throw lastError || new Error('Failed to get music URL')
 }
 
 async function requestWithQualityFallback(

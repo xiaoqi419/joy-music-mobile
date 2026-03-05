@@ -122,25 +122,52 @@ function parseScriptHeader(script: string): ScriptHeaderMeta {
   }
 }
 
+function extractApiBaseFromRequestUrl(rawUrl: string): string | null {
+  try {
+    const parsed = new URL(rawUrl)
+    const pathname = parsed.pathname || ''
+    const lowerPath = pathname.toLowerCase()
+    const markers = ['/music/url', '/api/musics/url', '/url/', '/url', '/kwurl', '/api.php']
+    let basePath = ''
+
+    for (const marker of markers) {
+      const index = lowerPath.indexOf(marker)
+      if (index >= 0) {
+        basePath = pathname.slice(0, index)
+        break
+      }
+    }
+
+    return `${parsed.origin}${basePath}`
+  } catch {
+    return null
+  }
+}
+
 function extractApiUrl(script: string): string | null {
   const direct = script.match(/const\s+API_URL\s*=\s*['"]([^'"]+)['"]/i)
   if (direct?.[1]) return direct[1].trim()
 
-  const fallback = script.match(/https?:\/\/[^\s'"]+\/music\/url/gi)?.[0]
-  if (!fallback) return null
-  try {
-    const parsed = new URL(fallback)
-    return `${parsed.protocol}//${parsed.host}`
-  } catch {
-    return null
+  const urlMatches = script.match(/https?:\/\/[^\s'"`]+/gi) || []
+  const endpointCandidates = urlMatches.filter((url) => (
+    /\/(music\/url|api\/musics\/url|url(?:\/|\?|$)|kwurl(?:\?|$)|api\.php(?:\?|$))/i.test(url)
+  ))
+
+  for (const candidate of endpointCandidates) {
+    const base = extractApiBaseFromRequestUrl(candidate)
+    if (base) return base
   }
+
+  return null
 }
 
 function extractApiKey(script: string): string | undefined {
   const direct = script.match(/const\s+API_KEY\s*=\s*['"]([^'"]+)['"]/i)
   if (direct?.[1]) return direct[1].trim()
 
-  const header = script.match(/['"]X-Api-Key['"]\s*:\s*['"]([^'"]+)['"]/i)
+  const header = script.match(
+    /['"]X-(?:Api-Key|API-Key|Request-Key)['"]\s*:\s*['"]([^'"]+)['"]/i,
+  )
   if (header?.[1]) return header[1].trim()
   return undefined
 }
