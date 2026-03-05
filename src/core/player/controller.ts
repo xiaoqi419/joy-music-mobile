@@ -7,6 +7,7 @@
 import { Track, PlayerState } from '../../types/music'
 import musicManager, { Quality } from '../music'
 import { expoAVPlayer, PlaybackStatus } from './expoav'
+import { getPlayableAudioUrlCandidates } from '../../utils/url'
 
 export interface PlaybackConfig {
   quality?: Quality
@@ -37,6 +38,12 @@ class StalePlayRequestError extends Error {
   }
 }
 
+function isAbortLikeError(error: unknown): boolean {
+  if (!(error instanceof Error)) return false
+  if (error.name === 'AbortError') return true
+  return /aborted|abort/i.test(error.message)
+}
+
 /**
  * Main music player controller
  */
@@ -59,6 +66,8 @@ class MusicPlayerController {
   private resolvedQualityCallbacks: Set<(quality: Quality | null) => void> = new Set()
   private playRequestId = 0
   private resolvingRequestId: number | null = null
+  private resolvingAbortController: AbortController | null = null
+  private resolvingAbortRequestId: number | null = null
 
   constructor() {
     // Set up player status updates
@@ -83,7 +92,7 @@ class MusicPlayerController {
    */
   async playTrack(track: Track, config?: PlaybackConfig): Promise<void> {
     const playRequestId = ++this.playRequestId
-    this.beginResolveTrackUrl(playRequestId)
+    const playRequestSignal = this.beginResolveTrackUrl(playRequestId)
     this.setResolvingHintForRequest(playRequestId, '正在获取可播放链接...')
     try {
       console.log(`[PlayerController] Playing track: ${track.title}`)
@@ -125,24 +134,58 @@ class MusicPlayerController {
             (progress) => {
               const qualityProgress = `音质 ${index + 1}/${qualityAttempts.length}`
               this.setResolvingHintForRequest(playRequestId, `${qualityProgress} · ${progress.message}`)
-            }
+            },
+            playRequestSignal,
           )
           this.assertPlayRequestActive(playRequestId)
           resolvedAttemptQuality = playUrlResponse.quality
           cacheHitAttempt = Boolean(playUrlResponse.cacheHit)
 
-          // Play through player engine
-          await expoAVPlayer.play(track, playUrlResponse.url, {
-            shouldPlay: shouldAutoPlay,
-            volume: 1.0,
-          })
-          this.assertPlayRequestActive(playRequestId)
+          const playbackUrlCandidates = this.buildPlaybackUrlCandidates(playUrlResponse.url)
+          let playbackError: Error | null = null
+          let hasStartedPlayback = false
+          for (let candidateIndex = 0; candidateIndex < playbackUrlCandidates.length; candidateIndex += 1) {
+            const playbackUrl = playbackUrlCandidates[candidateIndex]
+            try {
+              this.assertPlayRequestActive(playRequestId)
+              await expoAVPlayer.play(track, playbackUrl, {
+                shouldPlay: shouldAutoPlay,
+                volume: 1.0,
+              })
+              this.assertPlayRequestActive(playRequestId)
 
-          const started = await this.waitForPlaybackReady(shouldAutoPlay, playRequestId)
-          if (!started) {
-            throw new Error('音频加载超时，未进入可播放状态')
+              const started = await this.waitForPlaybackReady(shouldAutoPlay, playRequestId)
+              if (!started) {
+                throw new Error('音频加载超时，未进入可播放状态')
+              }
+              this.assertPlayRequestActive(playRequestId)
+
+              if (candidateIndex > 0) {
+                console.log(
+                  `[PlayerController] Playback URL fallback hit ${candidateIndex + 1}/${playbackUrlCandidates.length}`
+                )
+              }
+              hasStartedPlayback = true
+              break
+            } catch (candidateError) {
+              if (candidateError instanceof StalePlayRequestError) {
+                throw candidateError
+              }
+              playbackError = candidateError instanceof Error
+                ? candidateError
+                : new Error(String(candidateError))
+              if (candidateIndex < playbackUrlCandidates.length - 1) {
+                console.warn(
+                  `[PlayerController] Playback URL candidate failed ${candidateIndex + 1}/${playbackUrlCandidates.length}:`,
+                  playbackError.message,
+                )
+                await expoAVPlayer.pause().catch(() => {})
+              }
+            }
           }
-          this.assertPlayRequestActive(playRequestId)
+          if (!hasStartedPlayback) {
+            throw playbackError || new Error('音频加载超时，未进入可播放状态')
+          }
 
           this.setCurrentResolvedQuality(playUrlResponse.quality)
           this.currentTrack = track
@@ -151,6 +194,9 @@ class MusicPlayerController {
           break
         } catch (error) {
           if (error instanceof StalePlayRequestError) {
+            return
+          }
+          if (isAbortLikeError(error) && playRequestId !== this.playRequestId) {
             return
           }
           lastError = error instanceof Error ? error : new Error(String(error))
@@ -203,6 +249,9 @@ class MusicPlayerController {
       }
     } catch (error) {
       if (error instanceof StalePlayRequestError) {
+        return
+      }
+      if (isAbortLikeError(error) && playRequestId !== this.playRequestId) {
         return
       }
       console.error('[PlayerController] Error playing track:', error)
@@ -841,18 +890,29 @@ class MusicPlayerController {
     return this.currentResolvedQuality
   }
 
-  private beginResolveTrackUrl(requestId: number): void {
+  private beginResolveTrackUrl(requestId: number): AbortSignal | undefined {
+    this.abortActiveResolveRequest()
+    if (typeof AbortController !== 'undefined') {
+      this.resolvingAbortController = new AbortController()
+      this.resolvingAbortRequestId = requestId
+    } else {
+      this.resolvingAbortController = null
+      this.resolvingAbortRequestId = null
+    }
     this.resolvingRequestId = requestId
     this.emitResolvingState()
+    return this.resolvingAbortController?.signal
   }
 
   private endResolveTrackUrl(requestId: number): void {
     if (this.resolvingRequestId !== requestId) return
+    this.clearActiveResolveRequestIfMatch(requestId)
     this.resolvingRequestId = null
     this.emitResolvingState()
   }
 
   private clearResolveTrackState(): void {
+    this.abortActiveResolveRequest()
     if (this.resolvingRequestId === null) return
     this.resolvingRequestId = null
     this.emitResolvingState()
@@ -910,6 +970,12 @@ class MusicPlayerController {
     return QUALITY_RETRY_ORDER.slice(startIndex)
   }
 
+  private buildPlaybackUrlCandidates(url: string): string[] {
+    const candidates = getPlayableAudioUrlCandidates(url)
+    if (!candidates.length) return [url]
+    return candidates
+  }
+
   /**
    * Wait until player actually enters playable state.
    */
@@ -933,6 +999,20 @@ class MusicPlayerController {
     if (requestId !== this.playRequestId) {
       throw new StalePlayRequestError()
     }
+  }
+
+  private abortActiveResolveRequest(): void {
+    if (this.resolvingAbortController) {
+      this.resolvingAbortController.abort()
+    }
+    this.resolvingAbortController = null
+    this.resolvingAbortRequestId = null
+  }
+
+  private clearActiveResolveRequestIfMatch(requestId: number): void {
+    if (this.resolvingAbortRequestId !== requestId) return
+    this.resolvingAbortController = null
+    this.resolvingAbortRequestId = null
   }
 }
 

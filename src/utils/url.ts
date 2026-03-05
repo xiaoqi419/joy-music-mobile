@@ -12,7 +12,10 @@ interface NormalizeNetworkUrlOptions {
 
 const INVALID_TEXT = new Set(['', 'undefined', 'null', 'none', 'nan'])
 const HTTP_PREFERRED_IMAGE_HOSTS = [/^img(\d*)\.kwcdn\.kuwo\.cn$/i]
-const HTTP_PREFERRED_AUDIO_HOSTS = [/^([a-z0-9-]+\.)*sycdn\.kuwo\.cn$/i]
+const HTTP_PREFERRED_AUDIO_HOSTS = [
+  /^([a-z0-9-]+\.)*sycdn\.kuwo\.cn$/i,
+  /^([a-z0-9-]+\.)*ikunshare\.com$/i,
+]
 
 function normalizeText(raw: unknown): string {
   return String(raw ?? '').trim()

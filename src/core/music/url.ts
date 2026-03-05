@@ -20,6 +20,7 @@ export interface MusicUrlRequest {
   onProgress?: (progress: MusicUrlProgress) => void
   attempt?: number
   totalAttempts?: number
+  signal?: AbortSignal
 }
 
 export interface MusicUrlResponse {
@@ -49,6 +50,63 @@ const QUALITY_FALLBACK: Quality[] = [
   '320k',
   '128k',
 ]
+const TRACK_SOURCE_PREFIX_REGEX = /^(wy|kw|tx|kg|mg)[_:]/i
+
+function isAbortLikeError(error: unknown): boolean {
+  if (!(error instanceof Error)) return false
+  if (error.name === 'AbortError') return true
+  return /aborted|abort/i.test(error.message)
+}
+
+function createAbortError(): Error {
+  const error = new Error('request aborted')
+  error.name = 'AbortError'
+  return error
+}
+
+function throwIfAborted(signal?: AbortSignal): void {
+  if (!signal?.aborted) return
+  throw createAbortError()
+}
+
+async function waitWithAbort(timeoutMs: number, signal?: AbortSignal): Promise<void> {
+  throwIfAborted(signal)
+  await new Promise<void>((resolve, reject) => {
+    const timer = setTimeout(() => {
+      signal?.removeEventListener('abort', handleAbort)
+      resolve()
+    }, timeoutMs)
+
+    const handleAbort = () => {
+      clearTimeout(timer)
+      signal?.removeEventListener('abort', handleAbort)
+      reject(createAbortError())
+    }
+
+    signal?.addEventListener('abort', handleAbort)
+  })
+}
+
+function inferTrackSource(musicId: string, musicInfo: any): string {
+  const normalizedSource = String(musicInfo?.source || '').trim().toLowerCase()
+  if (normalizedSource) return normalizedSource
+
+  const sourceCandidates = [
+    musicInfo?.songmid,
+    musicInfo?.id,
+    musicInfo?.hash,
+    musicId,
+  ]
+  for (const candidate of sourceCandidates) {
+    const text = String(candidate || '').trim()
+    if (!text) continue
+    const prefix = text.match(TRACK_SOURCE_PREFIX_REGEX)?.[1]
+    if (prefix) {
+      return prefix.toLowerCase()
+    }
+  }
+  return ''
+}
 
 /**
  * Read per-track quality capabilities from track metadata (e.g. _types).
@@ -139,11 +197,13 @@ export const getMusicUrl = async(request: MusicUrlRequest): Promise<MusicUrlResp
     onProgress,
     attempt = 1,
     totalAttempts = 1,
+    signal,
   } = request
 
   try {
+    throwIfAborted(signal)
     const requestedQuality = quality || 'master'
-    const trackSource = String(musicInfo?.source || '').toLowerCase()
+    const trackSource = inferTrackSource(musicId, musicInfo)
     // TX URL is usually short-lived, stale cache can easily fail playback.
     const shouldSkipCache = trackSource === 'tx'
 
@@ -156,7 +216,8 @@ export const getMusicUrl = async(request: MusicUrlRequest): Promise<MusicUrlResp
     // If joy source is selected but runtime source config is missing, fail fast.
     if (
       musicSourceManager.getCurrentSourceId() === 'joy' &&
-      !hasConfiguredJoySource(trackSource || 'kw')
+      trackSource &&
+      !hasConfiguredJoySource(trackSource)
     ) {
       throw new JoySourceUnavailableError()
     }
@@ -179,7 +240,9 @@ export const getMusicUrl = async(request: MusicUrlRequest): Promise<MusicUrlResp
     }
 
     // User changed quality for the same track: clear stale cached quality first.
+    throwIfAborted(signal)
     const cachedAudioEntry = await audioFileCache.getCachedEntry(musicId)
+    throwIfAborted(signal)
     if (cachedAudioEntry && cachedAudioEntry.quality !== targetQuality) {
       console.log(
         `[MusicUrl] Quality changed for ${musicId}: ${cachedAudioEntry.quality} -> ${targetQuality}, clearing stale cache`
@@ -188,10 +251,13 @@ export const getMusicUrl = async(request: MusicUrlRequest): Promise<MusicUrlResp
         musicUrlCache.clearMusicUrl(musicId),
         audioFileCache.clearCachedAudioByMusicId(musicId),
       ])
+      throwIfAborted(signal)
     }
 
     // Step 3: local file cache first (same quality only)
+    throwIfAborted(signal)
     const cachedAudio = await audioFileCache.resolveCachedPlayableUrl(musicId, targetQuality)
+    throwIfAborted(signal)
     if (cachedAudio) {
       console.log(`[AudioCache] Hit local file for ${musicId} (${targetQuality})`)
       onProgress?.({
@@ -210,7 +276,9 @@ export const getMusicUrl = async(request: MusicUrlRequest): Promise<MusicUrlResp
 
     // Step 4: URL cache (skip for refresh/TX)
     if (!isRefresh && !shouldSkipCache) {
+      throwIfAborted(signal)
       const cachedUrl = await musicUrlCache.getMusicUrl(musicId, targetQuality)
+      throwIfAborted(signal)
       if (cachedUrl) {
         const normalizedCachedUrl = normalizeResolvedAudioUrl(cachedUrl)
         if (normalizedCachedUrl !== cachedUrl) {
@@ -225,7 +293,7 @@ export const getMusicUrl = async(request: MusicUrlRequest): Promise<MusicUrlResp
           musicId,
           url: normalizedCachedUrl,
           quality: targetQuality,
-          source: String(musicInfo?.source || musicSourceManager.getCurrentSourceId() || ''),
+          source: trackSource || String(musicInfo?.source || musicSourceManager.getCurrentSourceId() || ''),
           title: String(musicInfo?.title || ''),
           artist: String(musicInfo?.artist || ''),
         })
@@ -252,9 +320,16 @@ export const getMusicUrl = async(request: MusicUrlRequest): Promise<MusicUrlResp
     let url: string
 
     try {
-      url = normalizeResolvedAudioUrl(await source.getMusicUrl(musicInfo, targetQuality))
+      throwIfAborted(signal)
+      url = normalizeResolvedAudioUrl(
+        await source.getMusicUrl(musicInfo, targetQuality, { signal })
+      )
+      throwIfAborted(signal)
     } catch (error) {
       if (error instanceof JoySourceUnavailableError) {
+        throw error
+      }
+      if (isAbortLikeError(error)) {
         throw error
       }
 
@@ -263,6 +338,7 @@ export const getMusicUrl = async(request: MusicUrlRequest): Promise<MusicUrlResp
       let fallbackUrl: string | null = null
 
       for (const fallbackQuality of qualityAttempts.slice(1)) {
+        throwIfAborted(signal)
         const fallbackRetrySuffix = totalAttempts > 1 ? `（网络重试 ${attempt}/${totalAttempts}）` : ''
         onProgress?.({
           message: `正在降级尝试 ${fallbackQuality} 音质${fallbackRetrySuffix}`,
@@ -274,8 +350,9 @@ export const getMusicUrl = async(request: MusicUrlRequest): Promise<MusicUrlResp
         try {
           console.log(`[MusicUrl] Trying fallback quality: ${fallbackQuality}`)
           fallbackUrl = normalizeResolvedAudioUrl(
-            await source.getMusicUrl(musicInfo, fallbackQuality)
+            await source.getMusicUrl(musicInfo, fallbackQuality, { signal })
           )
+          throwIfAborted(signal)
           console.log(`[MusicUrl] Success with fallback quality: ${fallbackQuality}`)
 
           if (!shouldSkipCache) {
@@ -291,7 +368,7 @@ export const getMusicUrl = async(request: MusicUrlRequest): Promise<MusicUrlResp
             musicId,
             url: fallbackUrl,
             quality: fallbackQuality,
-            source: String(musicInfo?.source || musicSourceManager.getCurrentSourceId() || ''),
+            source: trackSource || String(musicInfo?.source || musicSourceManager.getCurrentSourceId() || ''),
             title: String(musicInfo?.title || ''),
             artist: String(musicInfo?.artist || ''),
           })
@@ -304,6 +381,9 @@ export const getMusicUrl = async(request: MusicUrlRequest): Promise<MusicUrlResp
           }
         } catch (fallbackError) {
           if (fallbackError instanceof JoySourceUnavailableError) {
+            throw fallbackError
+          }
+          if (isAbortLikeError(fallbackError)) {
             throw fallbackError
           }
           console.warn(`[MusicUrl] Fallback quality ${fallbackQuality} failed`)
@@ -328,7 +408,7 @@ export const getMusicUrl = async(request: MusicUrlRequest): Promise<MusicUrlResp
       musicId,
       url,
       quality: targetQuality,
-      source: String(musicInfo?.source || musicSourceManager.getCurrentSourceId() || ''),
+      source: trackSource || String(musicInfo?.source || musicSourceManager.getCurrentSourceId() || ''),
       title: String(musicInfo?.title || ''),
       artist: String(musicInfo?.artist || ''),
     })
@@ -341,6 +421,10 @@ export const getMusicUrl = async(request: MusicUrlRequest): Promise<MusicUrlResp
       cacheHit: false,
     }
   } catch (error) {
+    if (isAbortLikeError(error)) {
+      console.log(`[MusicUrl] Request aborted for ${musicId}`)
+      throw error
+    }
     console.error(`[MusicUrl] Error fetching URL for ${musicId}:`, error)
     throw error
   }
@@ -358,6 +442,7 @@ export const getMusicUrlWithRetry = async(
 
   for (let attempt = 0; attempt <= maxRetries; attempt++) {
     try {
+      throwIfAborted(request.signal)
       // Add delay on retry
       if (attempt > 0) {
         const delay = Math.random() * 2000 + 1000 // 1-3 seconds
@@ -367,7 +452,7 @@ export const getMusicUrlWithRetry = async(
           totalAttempts,
         })
         console.log(`[MusicUrl] Retrying after ${delay}ms (attempt ${attempt + 1}/${maxRetries + 1})`)
-        await new Promise(resolve => setTimeout(resolve, delay))
+        await waitWithAbort(delay, request.signal)
       }
 
       const requestAttempt = attempt + 1
@@ -378,6 +463,9 @@ export const getMusicUrlWithRetry = async(
         totalAttempts: isRetryAttempt ? totalAttempts : 1,
       })
     } catch (error) {
+      if (isAbortLikeError(error)) {
+        throw error instanceof Error ? error : createAbortError()
+      }
       lastError = error instanceof Error ? error : new Error(String(error))
       if (lastError instanceof JoySourceUnavailableError) {
         request.onProgress?.({

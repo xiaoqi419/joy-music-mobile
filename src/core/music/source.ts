@@ -29,10 +29,14 @@ export type Quality =
   | 'atmos_plus'
   | 'master'
 
+export interface MusicUrlFetchOptions {
+  signal?: AbortSignal
+}
+
 export interface MusicSourceAPI {
   id: string
   name: string
-  getMusicUrl(musicInfo: any, quality: Quality): Promise<string>
+  getMusicUrl(musicInfo: any, quality: Quality, options?: MusicUrlFetchOptions): Promise<string>
   getPicUrl?(musicInfo: any): Promise<string>
   getLyricInfo?(musicInfo: any): Promise<any>
   search?(keyword: string, page: number, limit: number): Promise<any>

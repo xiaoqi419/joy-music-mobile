@@ -102,13 +102,15 @@ class MusicManager {
     musicInfo: any,
     quality?: Quality,
     isRefresh?: boolean,
-    onProgress?: (progress: MusicUrlProgress) => void
+    onProgress?: (progress: MusicUrlProgress) => void,
+    signal?: AbortSignal
   ): Promise<string> {
     return this.resolveMusicPlayUrl(
       musicInfo,
       quality,
       isRefresh,
       onProgress,
+      signal,
     ).then(response => response.url)
   }
 
@@ -119,7 +121,8 @@ class MusicManager {
     musicInfo: any,
     quality?: Quality,
     isRefresh?: boolean,
-    onProgress?: (progress: MusicUrlProgress) => void
+    onProgress?: (progress: MusicUrlProgress) => void,
+    signal?: AbortSignal
   ): Promise<MusicUrlResponse> {
     return getMusicUrlWithRetry({
       musicId: musicInfo.id || musicInfo.songmid || musicInfo.hash,
@@ -127,6 +130,7 @@ class MusicManager {
       quality: quality || 'master',
       isRefresh,
       onProgress,
+      signal,
     })
   }
 
