@@ -158,7 +158,50 @@ function extractApiUrl(script: string): string | null {
     if (base) return base
   }
 
+  const variableMatches = [...script.matchAll(
+    /(?:const|let|var)\s+([A-Za-z_$][\w$]*)\s*=\s*['"](https?:\/\/[^'"`\s]+)['"]/g
+  )]
+  for (const item of variableMatches) {
+    const variableName = String(item[1] || '').trim()
+    const variableUrl = String(item[2] || '').trim().replace(/\/+$/, '')
+    if (!variableName || !variableUrl) continue
+    const usedBySourcePath = new RegExp(`\\$\\{\\s*${variableName}\\s*\\}\\s*\\/\\s*\\$\\{\\s*source\\s*\\}`, 'i')
+    const usedByKnownEndpoint = new RegExp(
+      `\\$\\{\\s*${variableName}\\s*\\}\\s*\\/(?:music\\/url|api\\/musics\\/url|url|kwurl|api\\.php)`,
+      'i'
+    )
+    if (usedBySourcePath.test(script) || usedByKnownEndpoint.test(script)) {
+      return variableUrl
+    }
+  }
+
   return null
+}
+
+function inferApiUrlByScriptSignature(script: string, sourceUrl?: string): string | null {
+  const scriptLower = String(script || '').toLowerCase()
+  const sourceLower = String(sourceUrl || '').toLowerCase()
+  if (
+    scriptLower.includes('nianxinxz') ||
+    scriptLower.includes('emo-music') ||
+    scriptLower.includes('wubian.json') ||
+    sourceLower.includes('nianxinxz') ||
+    sourceLower.includes('wubian.json')
+  ) {
+    return 'https://music.nxinxz.com'
+  }
+  if (
+    scriptLower.includes('api.music.lerd.dpdns.org') ||
+    sourceLower.includes('api.music.lerd.dpdns.org') ||
+    scriptLower.includes('聚合api')
+  ) {
+    return 'https://api.music.lerd.dpdns.org'
+  }
+  return null
+}
+
+function inferApiUrlFromScript(script: string, sourceUrl?: string): string | null {
+  return extractApiUrl(script) || inferApiUrlByScriptSignature(script, sourceUrl)
 }
 
 function extractApiKey(script: string): string | undefined {
@@ -270,12 +313,61 @@ function getUrlOrigin(url?: string): string {
   }
 }
 
+function shouldUseSourceOriginAsApiFallback(sourceUrl?: string): boolean {
+  if (!sourceUrl) return false
+  try {
+    const parsed = new URL(sourceUrl)
+    const hostname = parsed.hostname.toLowerCase()
+    const pathname = parsed.pathname.toLowerCase()
+    const nonApiHosts = new Set([
+      'raw.githubusercontent.com',
+      'gist.githubusercontent.com',
+      'github.com',
+      'gitee.com',
+      'gitlab.com',
+      'cdn.jsdelivr.net',
+      'raw.gitmirror.com',
+      'raw.fastgit.org',
+    ])
+
+    if (nonApiHosts.has(hostname)) return false
+    if (pathname.includes('/raw/')) return false
+    if (/\.(js|mjs|cjs|json|txt)$/i.test(pathname)) return false
+    return true
+  } catch {
+    return false
+  }
+}
+
+function resolveSourceApiUrl(input: {
+  apiUrl?: string
+  rawScript?: string
+  sourceUrl?: string
+}): string {
+  const configuredApiUrl = String(input.apiUrl || '').trim()
+  if (configuredApiUrl) {
+    return configuredApiUrl
+  }
+
+  const scriptText = String(input.rawScript || '')
+  const inferredApiUrl = inferApiUrlFromScript(scriptText, input.sourceUrl)
+  if (inferredApiUrl) {
+    return inferredApiUrl
+  }
+
+  if (shouldUseSourceOriginAsApiFallback(input.sourceUrl)) {
+    return getUrlOrigin(input.sourceUrl)
+  }
+
+  return ''
+}
+
 function normalizeSource(item: ImportedMusicSource): ImportedMusicSource {
   return {
     ...item,
     id: item.id || createSourceId(),
     name: String(item.name || '自定义音源'),
-    apiUrl: String(item.apiUrl || '').trim(),
+    apiUrl: resolveSourceApiUrl(item),
     apiKey: item.apiKey ? String(item.apiKey).trim() : undefined,
     enabled: item.enabled !== false,
     createdAt: Number(item.createdAt || Date.now()),
@@ -365,7 +457,10 @@ export function createSourceFromScriptText(
   options: ParseScriptSourceOptions = {}
 ): ImportedMusicSource {
   const headerMeta = parseScriptHeader(scriptText)
-  const apiUrl = extractApiUrl(scriptText) || getUrlOrigin(options.sourceUrl)
+  const apiUrl = resolveSourceApiUrl({
+    rawScript: scriptText,
+    sourceUrl: options.sourceUrl,
+  })
   const apiKey = extractApiKey(scriptText)
   const platforms = parsePlatformsFromScriptText(scriptText)
   const now = Date.now()
