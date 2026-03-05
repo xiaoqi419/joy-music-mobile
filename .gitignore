@@ -49,6 +49,8 @@ CeruMusic/
 
 .claude/
 
+日志/
+
 # Root markdown files (keep README only)
 /*.md
 !/README.md
