@@ -485,16 +485,19 @@ async function resolveRuntimeHandlerUrl(
     {
       musicInfo,
       quality: SCRIPT_SAMPLE_QUALITY,
+      type: SCRIPT_SAMPLE_QUALITY,
       source: platform,
       ...musicInfo,
     },
     {
       quality: SCRIPT_SAMPLE_QUALITY,
+      type: SCRIPT_SAMPLE_QUALITY,
       ...musicInfo,
     },
     {
       songInfo: musicInfo,
       quality: SCRIPT_SAMPLE_QUALITY,
+      type: SCRIPT_SAMPLE_QUALITY,
     },
   ]
 
@@ -654,6 +657,10 @@ function buildQualityAttempts(requestedQuality: Quality, supportedQualities: Qua
 
 function normalizeTemplatePlaceholders(raw: string): string {
   return raw
+    .replace(/\$\{\s*encodeURIComponent\(\s*source\s*\)\s*\}/gi, '{source}')
+    .replace(/\$\{\s*encodeURIComponent\(\s*quality\s*\)\s*\}/gi, '{quality}')
+    .replace(/\$\{\s*encodeURIComponent\(\s*level\s*\)\s*\}/gi, '{level}')
+    .replace(/\$\{\s*encodeURIComponent\(\s*(?:songId|musicId|id|hash|songmid)\s*\)\s*\}/gi, '{songId}')
     .replace(/\$\{\s*source\s*\}/gi, '{source}')
     .replace(/\$\{\s*quality\s*\}/gi, '{quality}')
     .replace(/\$\{\s*level\s*\}/gi, '{level}')
@@ -703,12 +710,15 @@ function normalizePlanPathTemplate(pathTemplate: string): string {
   return normalized.startsWith('/') ? normalized : `/${normalized}`
 }
 
-function inferMethodByContext(scriptText: string, index: number): RequestMethod {
+function inferMethodByContext(scriptText: string, index: number, urlTemplate: string): RequestMethod {
   const start = Math.max(0, index - 240)
   const end = Math.min(scriptText.length, index + 420)
   const nearby = scriptText.slice(start, end)
   if (/method\s*:\s*['"]POST['"]/i.test(nearby)) return 'POST'
   if (/method\s*:\s*['"]GET['"]/i.test(nearby)) return 'GET'
+  // Query-based LX APIs use GET; their request options may be defined outside
+  // the small context window (for example, after a headers/logging block).
+  if (/\/music\/url\?/i.test(urlTemplate)) return 'GET'
   return /\/music\/url/i.test(nearby) ? 'POST' : 'GET'
 }
 
@@ -813,13 +823,19 @@ function parseScriptRequestPlans(sourceConfig: ImportedMusicSource): RequestPlan
     }
 
     let normalized = normalizeTemplatePlaceholders(withBase).trim()
+    // Source placeholders also occur in log/error messages. They are not
+    // endpoint templates even when a nearby block mentions /music/url.
+    if (!/^(?:https?:\/\/|\/)/i.test(normalized)) continue
+    // An unsupported expression is not a usable URL template. Let an explicit
+    // fallback plan handle it instead of sending literal ${...} to the server.
+    if (/\$\{/.test(normalized)) continue
     if (baseUrl && normalized.toLowerCase().startsWith(baseUrl.toLowerCase())) {
       normalized = normalized.slice(baseUrl.length)
       if (!normalized.startsWith('/')) {
         normalized = `/${normalized}`
       }
     }
-    const method = inferMethodByContext(scriptText, match.index)
+    const method = inferMethodByContext(scriptText, match.index, rawTemplate)
     const bodyMode = inferBodyModeByContext(scriptText, match.index)
     const bodyTemplate = method === 'POST'
       ? inferBodyTemplateByContext(scriptText, match.index)
@@ -840,8 +856,12 @@ function parseScriptRequestPlans(sourceConfig: ImportedMusicSource): RequestPlan
 /**
  * 兜底请求策略：覆盖 Joy API 与主流公益音源接口风格。
  */
-function buildDefaultRequestPlans(): RequestPlan[] {
-  return [
+function buildDefaultRequestPlans(sourceConfig: ImportedMusicSource): RequestPlan[] {
+  const plans: RequestPlan[] = [
+    {
+      method: 'GET',
+      pathTemplate: '/music/url?source={source}&songId={songId}&quality={quality}',
+    },
     {
       method: 'POST',
       pathTemplate: '/music/url',
@@ -886,6 +906,18 @@ function buildDefaultRequestPlans(): RequestPlan[] {
       method: 'GET',
       pathTemplate: '/api.php?types=url&source={source}&id={songId}&br={quality}',
     },
+  ]
+
+  // These redirect endpoints belong to the Nxinxz API family. Appending them
+  // to an unrelated API base creates nonexistent URLs that look like success
+  // because direct plans are returned without an HTTP request.
+  const baseUrl = normalizeApiBaseUrl(sourceConfig.apiUrl || inferKnownApiBase(sourceConfig))
+  if (
+    !/^https?:\/\/music\.nxinxz\.com(?:\/|$)/i.test(baseUrl)
+    && !isNxinxzPhpTemplate(String(sourceConfig.rawScript || ''))
+  ) return plans
+
+  return [...plans,
     {
       method: 'GET',
       pathTemplate: '/wy.php?id={songId}&level={level}&type=mp3',
@@ -935,7 +967,7 @@ async function getSourceRequestPlans(sourceConfig: ImportedMusicSource): Promise
     const plans = dedupeRequestPlans([
       ...runtimePlans,
       ...scriptPlans,
-      ...buildDefaultRequestPlans(),
+      ...buildDefaultRequestPlans(sourceConfig),
     ])
     sourcePlanCache.set(cacheKey, plans)
     return plans

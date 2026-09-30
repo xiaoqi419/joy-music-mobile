@@ -62,7 +62,7 @@ export default function CircleSlider({
   const handleLayout = (e: LayoutChangeEvent) => {
     setContainerWidth(e.nativeEvent.layout.width);
   };
-  const fillWidth = `${internalProgress * 100}%`;
+  const fillWidth: `${number}%` = `${internalProgress * 100}%`;
   const thumbOffset = containerWidth > 0
     ? Math.max(0, Math.min(containerWidth - THUMB_SIZE, internalProgress * containerWidth - THUMB_SIZE / 2))
     : 0;
